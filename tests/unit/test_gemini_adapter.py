@@ -20,7 +20,7 @@ class TestGeminiLLMAdapter:
         with patch("agentic_capital.adapters.llm.gemini.genai") as mock_genai:
             adapter = GeminiLLMAdapter(api_key="test-key")
             mock_genai.Client.assert_called_once_with(api_key="test-key")
-            assert adapter._generation_model == "gemini-2.5-flash-preview-05-20"
+            assert adapter._generation_model == "gemini-2.5-flash"
             assert adapter._embedding_model == "text-embedding-004"
 
     def test_init_custom_models(self):
