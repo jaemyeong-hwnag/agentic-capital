@@ -16,6 +16,7 @@ from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.core.decision.reflection import reflect_on_trades
 from agentic_capital.core.decision.pipeline import TradingDecision
 from agentic_capital.core.personality.emotion import update_emotion_from_pnl
+from agentic_capital.core.tools.data_query import DataQueryTools
 from agentic_capital.graph.state import AgentWorkflowState
 
 logger = structlog.get_logger()
