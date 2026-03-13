@@ -28,10 +28,10 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 |----------|------|--------|
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
-| M3 에이전트 시스템 | ⬚ 부분 구현 | 70% |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 80% |
-| M5 시뮬레이션 | ⬚ 부분 구현 | 40% |
-| M6 Paper Trading | ⬚ 부분 구현 | 15% |
+| M3 에이전트 시스템 | ⬚ 부분 구현 | 77% (10/13) |
+| M4 통신 + 어댑터 | ⬚ 부분 구현 | 77% (10/13, Phase1 91%) |
+| M5 시뮬레이션 | ⬚ 부분 구현 | 33% (4/12) |
+| M6 Paper Trading | ⬚ 부분 구현 | 11% (1/9) |
 | M7 실거래 | ⬚ 미착수 | 0% |
 
 ---
@@ -127,17 +127,20 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 3.12 | 의사결정 파이프라인 (데이터→판단→실행) | `core/decision/pipeline.py` | ✅ |
 | 3.13 | Reflection 시스템 (경험→성격변동) | `core/decision/reflection.py` | ✅ |
 
-### 구현 현황 (v0.4.0)
+### 구현 현황 (v0.5.0)
 
 **구현 완료:**
 - 10D 성격 벡터 + VAD 감정 모델 + Personality Drift
-- 프롬프트 템플릿: 성격/감정 YAML 주입, TOON 시세, Markdown-KV 잔고
+- BaseAgent ABC (think/reflect 인터페이스)
+- 프롬프트 템플릿: 성격/감정 YAML 주입, TOON 시세, Markdown-KV 잔고, CEO 프롬프트
 - 의사결정 파이프라인: 시세→프롬프트→LLM 판단→JSON 파싱→주문 실행
 - Reflection: P&L 기반 성격 변동 (손실→loss_aversion↑, 수익→openness↑)
 - HR 시스템 + 직급/권한 + 에이전트 팩토리
 
-**미구현:**
-- CEO/Analyst/Trader 에이전트 클래스 (현재는 SimulationEngine이 직접 관리)
+**미구현 (M3 잔여):**
+- **M3.5 CEO Agent**: BaseAgent 상속, LLM으로 인사/조직/전략 자율 판단, HR 시스템 호출
+- **M3.6 Analyst Agent**: BaseAgent 상속, 시장 분석 + SIGNAL 생성
+- **M3.7 Trader Agent**: BaseAgent 상속, 시그널 수신 + 주문 실행
 
 ### 완료 기준
 
@@ -169,10 +172,10 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 4.9 | KIS 시세 Adapter | `adapters/market_data/kis.py` | ✅ |
 | 4.10 | KIS Adapter (한국투자증권) | `adapters/trading/kis.py` | ✅ |
 | 4.11 | KISSession (공유 토큰 + rate limiting) | `adapters/kis_session.py` | ✅ |
-| 4.12 | Binance Adapter (ccxt) | `adapters/trading/binance.py` | ⬚ |
-| 4.13 | Alpaca Adapter | `adapters/trading/alpaca.py` | ⬚ |
+| 4.12 | Binance Adapter (ccxt) | `adapters/trading/binance.py` | ⬚ Phase 2 |
+| 4.13 | Alpaca Adapter | `adapters/trading/alpaca.py` | ⬚ Phase 2 |
 
-### 구현 현황 (v0.4.0)
+### 구현 현황 (v0.5.0)
 
 **구현 완료:**
 - KISSession: 토큰 공유, 350ms 요청 스로틀링, rate limit 자동 재시도
@@ -181,6 +184,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 - Gemini LLM: gemini-2.5-flash 텍스트 생성 + text-embedding-004 임베딩
 - Paper Trading: 로컬 시뮬레이션용 가상 트레이딩
 - LACP 통신 프로토콜 + MessagePack 직렬화
+
+**미구현 (M4 잔여):**
+- **M4.3 Redis Stream 메시지 버스**: XADD/XREAD, Consumer Group, TTL 만료
 
 ### 완료 기준
 
@@ -195,7 +201,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 ## M5: 멀티에이전트 시뮬레이션
 
-> 시뮬레이션 엔진, 논문급 기록
+> LangGraph 기반 에이전트 워크플로우, 논문급 기록
 
 ### 태스크
 
@@ -210,20 +216,32 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 5.7 | 논문급 기록기 (Recorder) | `simulation/recorder.py` | ✅ |
 | 5.8 | 멀티에이전트 동시 실행 (asyncio) | `simulation/engine.py` | ✅ |
 | 5.9 | CEO 자율 조직 운영 통합 | CEO + HR + 권한 연동 | ⬚ |
-| 5.10 | 자연 선택 (수익 기반 생존) | `simulation/engine.py` | ⬚ |
+| 5.10 | 데이터 조회 도구 (에이전트가 자율적으로 DB/API 조회) | `core/tools/*.py` | ⬚ |
 | 5.11 | 회사 스냅샷 기록 | TimescaleDB hypertable | ⬚ |
 | 5.12 | E2E 시뮬레이션 테스트 | `tests/e2e/` | ⬚ |
 
-### 구현 현황
+### 구현 현황 (v0.5.0)
 
 **구현 완료:**
-- SimulationEngine: 3 에이전트(Alpha/Beta/Gamma) 순차 실행
-- 메인 루프: 사이클 → 슬립 → 반복
+- SimulationEngine: 멀티에이전트 순차 실행, 시장 시간 정보 제공 (차단 없음)
+- Clock: KRX 시간 정보 제공 (AI 참고용, 시스템 제한 없음)
+- Recorder: 모든 결정/거래/감정/성격변동 DB 기록
 - 에이전트별 DecisionPipeline + Reflection + 메모리 저장
+
+**미구현 (M5 잔여 — 핵심 갭):**
+- **M5.1-5.4 LangGraph 워크플로우**: 명세의 핵심 에이전트 프레임워크, 전혀 미구현
+  - 상태 그래프: `AgentState` → 분석 → 판단 → 실행 → 반성 노드
+  - 조건부 라우팅: 역할별 다른 경로 (CEO→조직판단, Analyst→분석, Trader→실행)
+  - CEO 워크플로우: 조직 상태 평가 → 인사 결정 → 전략 수립
+- **M5.9 CEO 자율 조직 운영**: CEO Agent + HR 시스템 + 권한 시스템 연동
+- **M5.10 자연 선택**: 수익 기반 에이전트 생존/도태 로직
+- **M5.11 회사 스냅샷**: Recorder 연동은 있으나 전체 지표 계산 미완성
+- **M5.12 E2E 테스트**: 전체 시뮬레이션 사이클 검증 테스트
 
 ### 완료 기준
 
 - [x] 에이전트 3명으로 시뮬레이션 사이클 완주
+- [ ] LangGraph 워크플로우로 에이전트 실행
 - [ ] CEO가 자율적으로 조직 운영 (채용/해고 발생)
 - [ ] 에이전트 간 LACP 통신으로 시그널 교환
 - [ ] 모든 의사결정/거래/조직변경 DB 기록
@@ -240,7 +258,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
-| 6.1 | Alpaca Paper Trading 연동 | 미국 주식 모의투자 | ⬚ |
+| 6.1 | Alpaca Paper Trading 연동 | 미국 주식 모의투자 | ⬚ Phase 2 |
 | 6.2 | KIS 모의투자 연동 | 국내 주식 모의투자 | ✅ |
 | 6.3 | 실시간 시장 데이터 통합 | WebSocket 시세 수신 | ⬚ |
 | 6.4 | 에이전트 10명 스케일 테스트 | 성능/안정성 검증 | ⬚ |
@@ -250,11 +268,10 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 6.8 | 데이터 내보내기 (Parquet) | 논문용 데이터셋 | ⬚ |
 | 6.9 | 1주일 연속 운영 테스트 | 안정성 검증 | ⬚ |
 
-### 구현 현황
+### 구현 현황 (v0.5.0)
 
 **구현 완료:**
 - KIS 모의투자 E2E 동작 확인 (토큰 → 시세 → LLM 판단 → 주문 전송)
-- 장 종료 시 주문 거부 정상 처리, 장 시간에는 체결됨
 
 ### 완료 기준
 
@@ -307,12 +324,21 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ---
 
-## 현재 진행: M3/M4 마무리 → M5 확장
+## 현재 진행: M3 마무리 + M4.3 + M5 LangGraph
 
-**v0.5.0 — E2E 로컬 Paper Trading + DB Recording + Market Clock 완료. 다음 작업:**
+**v0.5.0 상태 — 실제 갭 분석 기반 우선순위:**
 
-1. **M3.5** — CEO Agent 구현 (자율 인사/조직 결정)
-2. **M4.3** — Redis Stream 메시지 버스 (에이전트 간 통신)
-3. **M5.7** — 논문급 기록기 (거래/결정/감정 DB 저장)
-4. **M5.9** — CEO 자율 조직 운영 통합
-5. **M5.10** — 자연 선택 (수익 기반 에이전트 생존)
+### Phase A: M3 마무리 (에이전트 구현체)
+1. **M3.5 CEO Agent** — BaseAgent 상속, LLM으로 인사/조직/전략 자율 판단, HR 시스템 호출
+2. **M3.6 Analyst Agent** — BaseAgent 상속, 시장 분석 + SIGNAL 생성
+3. **M3.7 Trader Agent** — BaseAgent 상속, 시그널 수신 + DecisionPipeline 실행
+
+### Phase B: M4.3 통신 + M5.1-5.4 LangGraph
+4. **M4.3 Redis Stream 메시지 버스** — XADD/XREAD, Consumer Group, LACP 메시지 교환
+5. **M5.1-5.4 LangGraph 워크플로우** — 에이전트 상태 그래프, 역할별 노드/엣지, 워크플로우 조립
+
+### Phase C: M5 시뮬레이션 통합
+6. **M5.9 CEO 자율 조직 운영** — CEO Agent + HR + 권한 통합, 채용/해고 실행
+7. **M5.10 데이터 조회 도구** — 에이전트가 자율적으로 DB/API에서 필요한 데이터를 조회하는 도구 제공 (조회 시점/대상은 AI 자율)
+8. **M5.11 회사 스냅샷** — 전체 지표 계산 + TimescaleDB 기록
+9. **M5.12 E2E 테스트** — 전체 사이클 검증
