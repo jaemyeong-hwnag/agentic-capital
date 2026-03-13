@@ -1,27 +1,28 @@
 """Unit tests for simulation engine."""
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
-from agentic_capital.simulation.engine import AgentState, SimulationEngine
+from agentic_capital.core.agents.base import AgentProfile
+from agentic_capital.core.agents.ceo import CEOAgent
+from agentic_capital.core.agents.analyst import AnalystAgent
+from agentic_capital.core.agents.factory import create_random_personality
+from agentic_capital.core.personality.models import PersonalityVector
+from agentic_capital.ports.llm import LLMPort
+from agentic_capital.simulation.engine import SimulationEngine
 
 
-class TestAgentState:
-    def test_create(self):
-        agent = AgentState(name="Alpha", role="trader", philosophy="test", seed=42)
-        assert agent.name == "Alpha"
-        assert agent.role == "trader"
-        assert agent.personality is not None
-        assert agent.emotion is not None
-        assert agent.total_cycles == 0
-        assert agent.memories == []
+def _make_llm(response='{"actions": [], "confidence": 0.5}'):
+    llm = MagicMock(spec=LLMPort)
+    llm.generate = AsyncMock(return_value=response)
+    llm.embed = AsyncMock(return_value=[0.0] * 1024)
+    return llm
 
-    def test_different_seeds_different_personalities(self):
-        a1 = AgentState(name="A", seed=1)
-        a2 = AgentState(name="B", seed=2)
-        assert a1.personality.openness != a2.personality.openness
+
+def _make_profile(name="Test"):
+    return AgentProfile(id=uuid4(), name=name, philosophy="test")
 
 
 class TestSimulationEngine:
@@ -47,107 +48,202 @@ class TestSimulationEngine:
 
     def test_init_agents(self):
         engine = SimulationEngine()
-        engine._init_agents()
-        assert len(engine._agents) == 3
-        names = [a.name for a in engine._agents]
-        assert "Alpha" in names
-        assert "Beta" in names
-        assert "Gamma" in names
+        llm = _make_llm()
+        engine._llm = llm
+        trading = MagicMock()
+        market_data = MagicMock()
+        engine._trading = trading
+        engine._market_data = market_data
 
-    def test_agent_philosophies(self):
+        # Patch create_agent to avoid type checks on mock
+        with patch("agentic_capital.simulation.engine.create_agent") as mock_create:
+            agents = [
+                CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm),
+                AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(43), llm=llm),
+                MagicMock(name="Trader", agent_id=uuid4(), personality=create_random_personality(44)),
+            ]
+            agents[2].name = "Trader"
+            agents[2].profile = _make_profile("Trader")
+            mock_create.side_effect = agents
+            engine._init_agents()
+
+        assert len(engine._agents) == 3
+
+    @pytest.mark.asyncio
+    async def test_run_cycle(self):
         engine = SimulationEngine()
-        engine._init_agents()
-        alpha = [a for a in engine._agents if a.name == "Alpha"][0]
-        assert "risk" in alpha.philosophy.lower() or "reward" in alpha.philosophy.lower()
+        engine._symbols = ["005930"]
+
+        # Create mock agents
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(43), llm=llm)
+        engine._agents = [ceo, analyst]
+
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=10_000_000, available=10_000_000)
+        )
+
+        with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = {"decisions": [], "emotion": {}}
+            await engine._run_cycle()
+
+        assert engine._cycle_count == 1
+        assert mock_run.call_count == 2  # CEO + Analyst
 
     @pytest.mark.asyncio
     async def test_run_cycle_market_closed_still_runs(self):
         """Market closed does NOT block cycle — AI decides autonomously."""
         engine = SimulationEngine()
-        engine._init_agents()
         engine._symbols = ["005930"]
+        llm = _make_llm()
+        engine._agents = [
+            CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm),
+        ]
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=10_000_000, available=10_000_000)
+        )
+
+        with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = {"decisions": [], "emotion": {}}
+            with patch("agentic_capital.simulation.engine.is_market_open", return_value=False):
+                await engine._run_cycle()
+
+        assert engine._cycle_count == 1
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_hire(self):
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        engine._trading = MagicMock()
+        engine._market_data = MagicMock()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        result = {
+            "decisions": [{"type": "hire", "target": "NewTrader", "detail": "analyst", "reason": "need analysis"}],
+        }
+
+        with patch("agentic_capital.simulation.engine.create_agent") as mock_create:
+            new_agent = AnalystAgent(profile=_make_profile("NewTrader"), personality=create_random_personality(99), llm=llm)
+            mock_create.return_value = new_agent
+            await engine._process_org_actions(ceo, result)
+
+        assert len(engine._agents) == 2
+        assert engine._agents[1].name == "NewTrader"
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_fire(self):
+        engine = SimulationEngine()
+        llm = _make_llm()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        target = AnalystAgent(profile=_make_profile("BadAgent"), personality=create_random_personality(99), llm=llm)
+        engine._agents = [ceo, target]
+
+        result = {
+            "decisions": [{"type": "fire", "target": "BadAgent", "reason": "poor performance"}],
+        }
+
+        await engine._process_org_actions(ceo, result)
+        assert len(engine._agents) == 1
+        assert engine._agents[0].name == "CEO"
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_fire_self_prevented(self):
+        """CEO cannot fire itself."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        result = {"decisions": [{"type": "fire", "target": "CEO"}]}
+        await engine._process_org_actions(ceo, result)
+        assert len(engine._agents) == 1  # CEO still there
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_non_ceo_ignored(self):
+        """Non-CEO agents' org actions are not processed."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+
+        analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [analyst]
+
+        result = {"decisions": [{"type": "fire", "target": "someone"}]}
+        await engine._process_org_actions(analyst, result)
+        assert len(engine._agents) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_create_role(self):
+        engine = SimulationEngine()
+        llm = _make_llm()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._recorder = MagicMock()
+        engine._recorder.record_role = AsyncMock(return_value=uuid4())
+
+        result = {"decisions": [{"type": "create_role", "detail": "risk_manager"}]}
+        await engine._process_org_actions(ceo, result)
+        engine._recorder.record_role.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_with_recorder(self):
+        engine = SimulationEngine()
+        engine._symbols = ["005930"]
+        llm = _make_llm()
+        engine._agents = [
+            CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm),
+        ]
 
         engine._trading = MagicMock()
         engine._trading.get_balance = AsyncMock(
             return_value=MagicMock(total=10_000_000, available=10_000_000)
         )
-        engine._trading.get_positions = AsyncMock(return_value=[])
-        engine._pipeline = MagicMock()
-        engine._pipeline.run_cycle = AsyncMock(
-            return_value=([], MagicMock(valence=0.0, stress=0.0))
-        )
 
-        with patch("agentic_capital.simulation.engine.is_market_open", return_value=False):
+        engine._recorder = MagicMock()
+        engine._recorder.record_company_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+
+        with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = {"decisions": [], "emotion": {}}
             await engine._run_cycle()
-        # Cycle runs even when market is closed — no system-enforced restriction
-        assert engine._cycle_count == 1
+
+        engine._recorder.record_company_snapshot.assert_called_once()
+        engine._recorder.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_cycle_market_open(self):
+    async def test_fire_with_recorder(self):
         engine = SimulationEngine()
-        engine._init_agents()
-        engine._symbols = ["005930"]
+        llm = _make_llm()
 
-        # Mock adapters
-        engine._trading = MagicMock()
-        engine._trading.get_balance = AsyncMock(
-            return_value=MagicMock(total=10_000_000, available=10_000_000)
-        )
-        engine._trading.get_positions = AsyncMock(return_value=[])
-        engine._pipeline = MagicMock()
-        engine._pipeline.run_cycle = AsyncMock(
-            return_value=([], MagicMock(valence=0.0, stress=0.0))
-        )
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        target = AnalystAgent(profile=_make_profile("BadAgent"), personality=create_random_personality(99), llm=llm)
+        engine._agents = [ceo, target]
 
-        with patch("agentic_capital.simulation.engine.is_market_open", return_value=True):
-            await engine._run_cycle()
-        assert engine._cycle_count == 1
+        engine._recorder = MagicMock()
+        engine._recorder.record_hr_event = AsyncMock()
+        engine._recorder.record_agent_status_change = AsyncMock()
 
-    @pytest.mark.asyncio
-    async def test_run_agent_cycle_no_decisions(self):
-        engine = SimulationEngine()
-        engine._symbols = ["005930"]
-        agent = AgentState(name="Test", seed=1)
+        result = {"decisions": [{"type": "fire", "target": "BadAgent", "reason": "underperforming"}]}
+        await engine._process_org_actions(ceo, result)
 
-        engine._pipeline = MagicMock()
-        engine._pipeline.run_cycle = AsyncMock(
-            return_value=([], MagicMock(valence=0.0, stress=0.0))
-        )
-        engine._trading = MagicMock()
-        engine._trading.get_positions = AsyncMock(return_value=[])
-
-        await engine._run_agent_cycle(agent)
-        assert agent.total_cycles == 1
-        assert agent.memories == []
-
-    @pytest.mark.asyncio
-    async def test_run_agent_cycle_with_decisions(self):
-        engine = SimulationEngine()
-        engine._symbols = ["005930"]
-        engine._cycle_count = 1
-        agent = AgentState(name="Test", seed=1)
-
-        from agentic_capital.core.decision.pipeline import TradingDecision
-        decision = TradingDecision("BUY", "005930", 10, "test", 0.8)
-        engine._pipeline = MagicMock()
-        engine._pipeline.run_cycle = AsyncMock(
-            return_value=([decision], MagicMock(valence=0.1, stress=0.0))
-        )
-        engine._trading = MagicMock()
-        engine._trading.get_positions = AsyncMock(return_value=[])
-
-        await engine._run_agent_cycle(agent)
-        assert agent.total_cycles == 1
-        assert len(agent.memories) == 1
-        assert "BUY 005930" in agent.memories[0]
+        assert len(engine._agents) == 1
+        engine._recorder.record_hr_event.assert_called_once()
+        engine._recorder.record_agent_status_change.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_init_recorder_failure_graceful(self):
         engine = SimulationEngine()
-        engine._init_agents()
+        engine._agents = []
         engine._symbols = ["005930"]
 
-        # Should not raise even if DB is unavailable
         with patch("agentic_capital.simulation.engine.SimulationEngine._init_recorder") as mock_rec:
             mock_rec.return_value = None
             engine._recorder = None
