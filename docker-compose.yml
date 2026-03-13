@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: agentic_capital
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-agent_dev_password}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    command: >
+      postgres
+      -c shared_preload_libraries='timescaledb'
+      -c max_connections=100
+      -c shared_buffers=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agentic_capital"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: >
+      redis-server
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

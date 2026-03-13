@@ -1,0 +1,142 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-capital"
+version = "0.1.0"
+description = "AI-Driven Autonomous Fund Simulation with Persona-Based Investment Agents"
+readme = "readme.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    # Core - Agent Framework
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-google-genai",
+    "pydantic>=2.0",
+
+    # Core - Memory
+    "mem0ai",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "alembic",
+    "redis>=5.0",
+    "qdrant-client",
+    "pgvector",
+
+    # Data & Serialization
+    "pandas>=2.0",
+    "polars",
+    "numpy>=1.26",
+    "pyarrow",
+    "msgpack",
+    "pyyaml",
+    "orjson",
+
+    # Finance
+    "ccxt",
+    "yfinance",
+    "alpaca-py",
+    "python-kis",
+    "ta",
+
+    # AI / Embedding
+    "google-generativeai",
+    "tiktoken",
+    "networkx",
+
+    # Analytics
+    "duckdb",
+
+    # Monitoring & Logging
+    "structlog",
+    "langsmith",
+
+    # Util
+    "pydantic-settings>=2.0",
+    "python-dotenv",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[project.scripts]
+agentic-capital = "agentic_capital.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_capital"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (requires DB/Redis)",
+    "e2e: End-to-end tests (full simulation)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentic_capital"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "ccxt.*",
+    "yfinance.*",
+    "alpaca.*",
+    "kis.*",
+    "ta.*",
+    "mem0ai.*",
+    "msgpack.*",
+    "duckdb.*",
+    "google.generativeai.*",
+    "tiktoken.*",
+    "langsmith.*",
+    "langgraph.*",
+    "langchain_core.*",
+    "langchain_google_genai.*",
+    "pgvector.*",
+    "qdrant_client.*",
+]
+ignore_missing_imports = true
