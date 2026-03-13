@@ -1,182 +1,196 @@
-# 기술 스택
+# 기술 스택 (확정)
 
-## 핵심 설계 원칙
+## 최상위 원칙
 
-> 이 프로젝트는 **롤플레잉 시뮬레이션**이다. 모든 에이전트는 최대 자율성을 가지며, 유일한 목적은 **돈을 버는 것**, 유일한 제약은 **자산/자본**이다.
-> 에이전트 소통 언어/포맷은 **AI 친화적이면 자유** (영어, 바이너리, 벡터, 커스텀 프로토콜 등).
-> 모든 기록은 **논문 참고 가능 수준**으로 수집한다.
-
----
-
-## 요약
-
-| 구분 | 확정 기술 | 이유 |
-|------|----------|------|
-| 프로그래밍 언어 | **Python 3.12+** | AI 생태계 표준, 금융 라이브러리, I/O 바운드 프로젝트 |
-| AI 프레임워크 | **LangGraph v1.0** | 상태 기반 그래프 워크플로우, 금융 AI 검증됨 (JP Morgan, TradingAgents) |
-| 에이전트 메모리 | **A-MEM 방식** + **Mem0** | Zettelkasten 동적 메모리 네트워크, multi-hop 추론 2x 향상 |
-| 메인 DB | **PostgreSQL 16 + TimescaleDB** | 정형 + 시계열 단일 서버, 논문급 히스토리 보관 |
-| 벡터 DB | **pgvector** (초기) → **Qdrant** (확장) | SQ int8 양자화, float16 저장 |
-| 상태 관리 | **Redis 7+** | 감정 상태, 단기 기억, 이벤트 스트림 |
-| 분석 | **DuckDB + Parquet** | 오프라인 분석, 백테스팅, 논문 데이터 추출 |
-| AI 모델 | **Gemini 3.1 Pro & Flash** | Pro: 핵심 의사결정 / Flash: 반복 판단 |
-| LLM 프롬프트 포맷 | **TOON + YAML + Markdown** | 토큰 40-60% 절감, 정확도 최적 |
-| 에이전트 간 통신 | **MessagePack** | JSON 대비 30% 작은 페이로드, 스키마 불요 |
-| 임베딩 | **Google text-embedding-004** (768D) | float16 저장, Matryoshka 256D 축소 가능 |
+> 1. **목표: 돈을 번다** — 유일한 목적, 변경 불가
+> 2. **모든 것은 AI 친화적** — 최상위 규칙을 제외한 모든 설계/데이터/소통은 AI 최적화
+> 3. **데이터셋 최대 최적화** — 최신 논문 기반, 토큰 효율, 정확도 극대화
 
 ---
 
-## 자료구조
+## 확정 기술 스택
 
-### 성격 벡터 (Personality Vector)
-
-15차원 Dense Vector, float32 저장 (크기가 작아 양자화 불필요):
-
-| 모델 | 차원 | 파라미터 |
-|------|------|---------|
-| Big 5 (OCEAN) | 5D | 개방성, 성실성, 외향성, 우호성, 신경증 |
-| HEXACO | 6D | Big5 + 정직-겸손성 |
-| 전망 이론 | 4D | 손실회피, 위험선호, 확률가중, 참조점의존 |
-
-- 경험에 따라 **실시간 변동** → 변동 이력 전부 DB 기록
-- 각 파라미터 0~100 정규화
-
-### 에이전트 계층 구조 (Agent Hierarchy)
-
-- **런타임**: NetworkX 인메모리 그래프
-- **영속화**: PostgreSQL 인접 리스트
-- 구조는 고정이 아님 — CEO(또는 권한 보유자)가 자율적으로 변경
-
-### 시계열 데이터 (Time-Series)
-
-- **런타임**: pandas/polars DataFrame + Arrow RecordBatch
-- **영속화**: TimescaleDB hypertable (Gorilla 압축 chunk)
-- **아카이브**: Parquet (S3/로컬)
-
-### 이벤트 큐 (Event Queue)
-
-- **시뮬레이션**: Python `heapq` 우선순위 큐 + 타입화된 이벤트 dataclass
-- **분산 메시징**: Redis Streams
-
-### 메모리 임베딩 (Memory Embedding)
-
-- **차원**: 768D (Google text-embedding-004), 확장 시 Matryoshka 256D 축소
-- **저장 정밀도**: float16 (50% 메모리 절감, <1% 정확도 손실)
-- **인덱스 양자화**: SQ int8 (검색 3.66x 가속)
-- **계층적 메모리** (A-MEM + AgentOS 참고):
-  - Working Memory → Redis (최근 5-10개)
-  - Episodic Memory → Qdrant 벡터 (구체적 경험)
-  - Semantic Memory → PostgreSQL 요약 (축적된 지식)
-  - Procedural Memory → 코드/프롬프트 템플릿 (투자 전략)
+| 구분 | 기술 | 선정 근거 (논문/벤치마크) |
+|------|------|------------------------|
+| **언어** | Python 3.12+ | AI 프레임워크 생태계 표준, I/O 바운드 프로젝트 |
+| **AI 프레임워크** | LangGraph v1.0 | 상태 기반 그래프, 금융 AI 검증 — FinCon (NeurIPS 2024), TradingAgents |
+| **에이전트 메모리** | A-MEM 방식 (Zettelkasten) | multi-hop 추론 2x 향상 — A-MEM (NeurIPS 2025) |
+| **메모리 통합** | Mem0 | 벡터+KV+그래프 통합, 26% 높은 정확도 |
+| **메인 DB** | PostgreSQL 16 + TimescaleDB | 정형+시계열 단일 서버, Gorilla 압축 |
+| **벡터 DB** | pgvector → Qdrant | float16 + SQ int8, HNSW M=16~32 |
+| **상태/캐시** | Redis 7+ | Working Memory, 감정 상태, 이벤트 스트림 |
+| **분석** | DuckDB + Parquet + Arrow IPC | OLAP, 백테스팅, 논문 데이터 추출 |
+| **LLM** | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
+| **임베딩** | text-embedding-3-large (1024D) | float8 양자화, Matryoshka 축소 가능 |
+| **LLM 프롬프트** | TOON + Markdown-KV + YAML | 토큰 40-60% 절감 — TOON (2025) |
+| **에이전트 통신** | MessagePack (기본) / C2C (확장) | 30% 작은 페이로드 / KV-cache 직접 통신 — C2C (2025) |
+| **수치 표현** | NumeroLogic `{digits:value}` | 토크나이저 파편화 방지 — NumeroLogic (EMNLP 2024) |
+| **금융 데이터** | StockTime 방식 (정규화+패치) | 역정규화, 비율 변환 — StockTime (2024) |
+| **통신 프로토콜** | LACP 기반 (PLAN/ACT/OBSERVE/SIGNAL) | 구조화된 메시지 타입 — LACP (NeurIPS 2025) |
+| **경험 학습** | REMEMBERER 방식 (Q-value + decay) | 유틸리티 기반 유지, 10% 성능 향상 — REMEMBERER (2025) |
 
 ---
 
-## 데이터 포맷
+## 데이터 포맷 파이프라인
 
-### LLM 프롬프트 (에이전트 ↔ LLM)
+```
+┌─────────────────────────────────────────────────────────┐
+│  LLM ↔ Agent (프롬프트/응답)                              │
+│  TOON (배열/테이블) + Markdown-KV (단일 레코드)            │
+│  + YAML (중첩 구조) + NumeroLogic (수치)                  │
+│  → 토큰 40-60% 절감, 정확도 60.7% (CSV 44.3% 대비)       │
+├─────────────────────────────────────────────────────────┤
+│  Agent ↔ Agent (내부 통신)                                │
+│  LACP 프로토콜: PLAN/ACT/OBSERVE/SIGNAL 메시지 타입        │
+│  MessagePack 직렬화 (기본) / C2C KV-cache 전송 (확장)     │
+├─────────────────────────────────────────────────────────┤
+│  Agent ↔ Memory                                          │
+│  A-MEM Zettelkasten 노트 (context + keywords + links)    │
+│  3계층: Episodic (Qdrant) / Semantic (PG) / Procedural   │
+├─────────────────────────────────────────────────────────┤
+│  Agent ↔ DB (영속화)                                      │
+│  PostgreSQL JSONB + typed columns                        │
+│  TimescaleDB 압축 chunk (Gorilla Delta-of-Delta + XOR)   │
+├─────────────────────────────────────────────────────────┤
+│  분석 파이프라인                                          │
+│  Arrow IPC (인메모리) → Parquet (영속) → DuckDB (분석)    │
+└─────────────────────────────────────────────────────────┘
+```
 
-| 용도 | 포맷 | 효과 |
-|------|------|------|
-| 거래 내역, 포트폴리오, 시장 데이터 | **TOON** | 토큰 40-60% 절감, 정확도 73.9% |
-| 에이전트 상태, 성격, 설정 | **YAML** | 최고 LLM 이해도 (62.1%) |
-| 시장 분석, 경험 요약 | **Markdown** | 토큰 34-38% 절감 |
+---
 
-### 에이전트 간 통신
+## 에이전트 아키텍처
 
-| 경로 | 포맷 |
+FinCon (NeurIPS 2024), TradingAgents (2024) 구조 참고:
+
+```
+CEO Agent (전략/인사/조직 — 완전 자율)
+├── Portfolio Manager (포트폴리오 구성/리밸런싱)
+├── Risk Manager (리스크 평가/경고)
+├── Analyst Team (CEO가 자율 구성)
+│   ├── Fundamental Analyst
+│   ├── Technical Analyst
+│   ├── Sentiment Analyst
+│   └── ... (동적 추가/제거)
+└── Trader (주문 실행)
+
+※ 위 구조는 예시. CEO가 자율적으로 전면 변경 가능.
+```
+
+---
+
+## 메모리 아키텍처
+
+A-MEM (NeurIPS 2025), FinMem (2024), REMEMBERER (2025) 종합:
+
+| 계층 | 저장소 | 내용 | 유지 정책 |
+|------|--------|------|----------|
+| **Working** | Redis | 현재 태스크, 최근 5-10개 관찰 | TTL 자동 만료 |
+| **Episodic** | Qdrant (벡터) | 구체적 경험: {context, action, outcome, q_value} | 유틸리티 기반 decay (REMEMBERER) |
+| **Semantic** | PostgreSQL | 축적된 지식, 시장 이해, 투자 원칙 | Reflection 트리거 업데이트 |
+| **Procedural** | 코드/프롬프트 | 투자 전략, 분석 절차, 의사결정 규칙 | 주기적 증류 (distillation) |
+
+### 메모리 노트 구조 (A-MEM Zettelkasten)
+
+```yaml
+memory_note:
+  id: "ep_4821"
+  context: "RSI divergence on AAPL, volatile_bullish regime, VIX={2:22}"
+  keywords: [rsi_divergence, aapl, earnings_catalyst]
+  tags: [technical_signal, high_conviction]
+  links: [ep_3912, ep_4103]  # 유사 과거 경험
+  q_value: 0.78
+  embedding: float8[1024]
+```
+
+---
+
+## 임베딩 최적화
+
+| 설정 | 값 | 근거 |
+|------|-----|------|
+| 모델 | text-embedding-3-large | 금융 도메인 포함, Matryoshka 지원 |
+| 차원 | 1024D (기본) → 256D (축소 시) | SMEC (2025): 축소 시 정보 손실 완화 |
+| 저장 정밀도 | float8 | 4x 압축, <0.3% 정확도 손실 |
+| 인덱스 | HNSW, M=16~32, efConstruction=200~400 | 표준 권장값 |
+| 양자화 | SQ int8 + oversampling | 검색 3.66x 가속, 99%+ 정확도 |
+
+---
+
+## 금융 데이터 표현
+
+StockTime (2024) + NumeroLogic (EMNLP 2024) 기반:
+
+### 원칙
+- **절대값 대신 비율 변화** (토큰 효율 + 스케일 불변)
+- **역정규화 (Reversible Instance Normalization)** 적용
+- **패치 단위** (5일 윈도우) 처리
+- **NumeroLogic** 수치 표현: `{자릿수:값}`
+
+### 예시 (TOON 포맷)
+```
+@prices[5](ticker,date,open_pct,high_pct,low_pct,close_pct,vol_ratio)
+AAPL,2025-03-10,+0.3,+1.2,-0.5,+0.8,1.1x
+AAPL,2025-03-11,-0.2,+0.4,-1.1,-0.7,0.9x
+AAPL,2025-03-12,+1.1,+2.3,-0.1,+2.1,1.8x
+```
+
+---
+
+## 에이전트 간 통신 프로토콜
+
+LACP (NeurIPS 2025) 기반:
+
+### 메시지 타입
+
+| 타입 | 용도 |
 |------|------|
-| 기본 내부 통신 | **MessagePack** (30% 작음, 스키마 불요) |
-| 초저지연 필요 시 | **FlatBuffers** (81ns/op, zero-copy) |
-| 외부 API | **JSON** (범용 호환) |
+| **PLAN** | 전략/의도 공유 |
+| **ACT** | 도구 호출, 주문 실행 |
+| **OBSERVE** | 결과/상태 보고 |
+| **SIGNAL** | 투자 시그널 (BUY/SELL/HOLD) |
 
-### DB 저장
-
-| 용도 | 포맷 |
-|------|------|
-| 정형 데이터 | PostgreSQL typed columns + **JSONB** |
-| 시계열 | TimescaleDB 압축 chunk (Gorilla) |
-| 벡터 | float16 + SQ int8 인덱스 |
-| 분석/아카이브 | **Parquet** (열 기반 압축) |
-| 인메모리 파이프라인 | **Arrow IPC** (zero-copy, 10K MB/s) |
-
----
-
-## 프로그래밍 언어: Python 3.12+
-
-- AI 생태계(LangGraph, Mem0 등)의 표준 언어
-- 금융 라이브러리: `pandas`, `polars`, `numpy`, `ccxt`, `yfinance`, `ta-lib`
-- 프로젝트는 **I/O 바운드** (LLM API 호출 대기)이므로 Python의 CPU 약점은 부차적
-- 성능 병목 발생 시 Rust 모듈(`pyo3/maturin`)로 부분 최적화 가능
-- `asyncio` 기반 비동기 처리로 다수 에이전트 동시 운용
-
----
-
-## AI 프레임워크: LangGraph v1.0
-
-| 선택 이유 | 설명 |
-|----------|------|
-| 상태 기반 그래프 | 에이전트의 복잡한 의사결정 흐름을 그래프로 표현 |
-| 금융 AI 검증 | JP Morgan, TradingAgents 논문에서 사용 |
-| 동적 워크플로우 | 에이전트가 자율적으로 실행 경로 변경 가능 |
-| 체크포인트 | 에이전트 상태 스냅샷/복원으로 논문급 재현성 |
+### 메시지 구조
+```yaml
+msg:
+  type: SIGNAL
+  from: analyst_tech
+  to: pm_alpha
+  priority: 0.85
+  content:
+    thesis: "AAPL bullish divergence on RSI, earnings in 5d"
+    signal: BUY
+    confidence: 0.72
+    data:
+      ticker: AAPL
+      indicator: RSI_14
+      current: {2:34}
+      catalyst: earnings
+    refs: [ep_4821, sem_112]
+  meta:
+    ts: 1710340800
+    ttl: 3
+```
 
 ---
 
-## 데이터베이스 상세
+## 논문 참조 목록
 
-### PostgreSQL 16 + TimescaleDB (메인 + 시계열)
-
-단일 서버에서 정형 + 시계열 + 벡터(pgvector):
-
-| 용도 | 저장 대상 |
-|------|----------|
-| 에이전트 | 프로필, 성격 벡터, 감정, 권한 |
-| 이력 | 성격 변동, 권한 변동, 직급 변동 (논문급 히스토리) |
-| 투자 | 거래 기록, 포지션, 성과 |
-| 인사 | 채용/해고/승진 이벤트 |
-| 경영 | 의사결정 기록, 조직 변경 |
-| 시장 | OHLCV (hypertable, Gorilla 압축) |
-| 스냅샷 | 회사 상태, 포트폴리오 (hypertable) |
-
-### Qdrant (벡터 DB — 확장 시)
-
-- float16 저장 + SQ int8 인덱스
-- HNSW: M=16~32, efConstruction=200~400
-- A-MEM 스타일 메모리 노트 저장
-
-### Redis 7+ (상태/캐시/메시징)
-
-| 용도 | 기능 |
-|------|------|
-| Working Memory | 최근 5-10개 기억 (TTL) |
-| 감정 상태 | 스트레스, 자신감, 피로도 실시간 |
-| 이벤트 스트림 | Redis Streams로 에이전트 간 메시지 |
-| 시장 캐시 | 실시간 가격 데이터 |
-
-### DuckDB + Parquet (분석)
-
-- 오프라인 분석, 백테스팅
-- **논문 데이터 추출**: 전체 히스토리를 Parquet로 내보내 분석
-- Arrow 생태계 통합
-
----
-
-## AI 모델 운영
-
-| 역할 | 모델 | 용도 |
-|------|------|------|
-| 핵심 의사결정 | Gemini 3.1 Pro | CEO/고위 경영 판단, 복잡한 전략 |
-| 일반 판단 | Gemini 3.1 Flash | 투자 판단, 시장 분석, 일상 업무 |
-| 임베딩 | Google text-embedding-004 | 메모리 벡터화 (768D, float16) |
-
-### 에이전트 소통 언어
-
-- **AI 친화적이면 어떤 형태든 자유**
-- 에이전트끼리 자율적으로 최적 소통 방식 선택 가능:
-  - 자연어(영어) — LLM 기본 출력, 인간 판독 가능
-  - **TOON/YAML** — 구조화된 데이터 교환 시 토큰 절감
-  - **MessagePack/바이너리** — 고속 대량 데이터 전송
-  - **벡터 임베딩** — 의미 기반 직접 통신 (C2C 방식)
-  - **커스텀 프로토콜** — 에이전트가 자율적으로 효율적 통신 규약 개발 가능
-- 기준: **정확성과 효율성**, 인간 가독성은 필수 아님
-- 단, 모든 통신은 **로그로 기록** (논문 재현성)
+| 논문 | 연도 | 적용 영역 |
+|------|------|----------|
+| FinCon | NeurIPS 2024 | 에이전트 조직 구조 (Manager-Analyst) |
+| TradingAgents | 2024 | 멀티 에이전트 투자 프레임워크 |
+| A-MEM | NeurIPS 2025 | Zettelkasten 에이전트 메모리 |
+| REMEMBERER | 2025 | Q-value 기반 경험 유지/삭제 |
+| FinMem | 2024 | 계층적 금융 메모리 |
+| StockTime | 2024 | LLM용 시계열 토큰화 |
+| NumeroLogic | EMNLP 2024 | LLM 수치 표현 최적화 |
+| TOON | 2025 | LLM용 토큰 최적화 직렬화 |
+| LACP | NeurIPS 2025 | 에이전트 통신 프로토콜 |
+| C2C | 2025 | KV-cache 기반 의미 통신 |
+| SMEC | 2025 | Matryoshka 임베딩 압축 |
+| CER | ICLR 2025 | 문맥적 경험 리플레이 |
+| Generative Agents | UIST 2023 | 에이전트 성격/관찰/반성/계획 |
+| MarketSenseAI 2.0 | 2025 | 멀티모달 금융 에이전트 |
+| FinRobot | 2024 | Financial Chain-of-Thought |
+| SchemaAgent | 2025 | AI 기반 스키마 생성 |
