@@ -1,15 +1,17 @@
 """Agent factory — dynamically creates agents with personality vectors."""
 
+from __future__ import annotations
+
 from uuid import uuid4
 
 import numpy as np
 
-from agentic_capital.core.agents.base import AgentProfile
+from agentic_capital.core.agents.base import AgentProfile, BaseAgent
 from agentic_capital.core.personality.models import PersonalityVector
 
 
 def create_random_personality(seed: int | None = None) -> PersonalityVector:
-    """Generate a random 15D personality vector.
+    """Generate a random 10D personality vector.
 
     Uses uniform distribution [0, 1] for each dimension.
     CEO can specify desired traits; otherwise fully random.
@@ -46,3 +48,66 @@ def create_agent_profile(
         philosophy=philosophy,
         allocated_capital=allocated_capital,
     )
+
+
+def create_agent(
+    role: str,
+    name: str,
+    philosophy: str = "",
+    allocated_capital: float = 0.0,
+    seed: int | None = None,
+    personality: PersonalityVector | None = None,
+    *,
+    llm: object | None = None,
+    trading: object | None = None,
+    market_data: object | None = None,
+) -> BaseAgent:
+    """Create a typed agent based on role.
+
+    Args:
+        role: Agent role — 'ceo', 'analyst', 'trader'.
+        name: Agent name.
+        philosophy: Investment/management philosophy.
+        allocated_capital: Initial capital allocation.
+        seed: Random seed for personality generation.
+        personality: Pre-defined personality (overrides seed).
+        llm: LLMPort instance (required for all roles).
+        trading: TradingPort instance (required for trader).
+        market_data: MarketDataPort instance (required for trader).
+
+    Returns:
+        A concrete BaseAgent subclass instance.
+    """
+    from agentic_capital.core.agents.analyst import AnalystAgent
+    from agentic_capital.core.agents.ceo import CEOAgent
+    from agentic_capital.core.agents.trader import TraderAgent
+    from agentic_capital.ports.llm import LLMPort
+    from agentic_capital.ports.market_data import MarketDataPort
+    from agentic_capital.ports.trading import TradingPort
+
+    profile = create_agent_profile(name, philosophy, allocated_capital)
+    p = personality or create_random_personality(seed)
+
+    if not isinstance(llm, LLMPort):
+        msg = f"llm must be a LLMPort instance, got {type(llm)}"
+        raise TypeError(msg)
+
+    role_lower = role.lower()
+    if role_lower == "ceo":
+        return CEOAgent(profile=profile, personality=p, llm=llm)
+    elif role_lower == "analyst":
+        return AnalystAgent(profile=profile, personality=p, llm=llm)
+    elif role_lower == "trader":
+        if not isinstance(trading, TradingPort):
+            msg = f"trading must be a TradingPort instance for trader, got {type(trading)}"
+            raise TypeError(msg)
+        if not isinstance(market_data, MarketDataPort):
+            msg = f"market_data must be a MarketDataPort instance for trader, got {type(market_data)}"
+            raise TypeError(msg)
+        return TraderAgent(
+            profile=profile, personality=p, llm=llm,
+            trading=trading, market_data=market_data,
+        )
+    else:
+        msg = f"Unknown agent role: {role}. Must be 'ceo', 'analyst', or 'trader'."
+        raise ValueError(msg)

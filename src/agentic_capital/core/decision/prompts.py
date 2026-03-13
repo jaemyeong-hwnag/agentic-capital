@@ -136,14 +136,14 @@ def build_ceo_prompt(
     parts.append("""
 ## CEO Decision Required
 
-As CEO, evaluate the organization and make strategic decisions.
-You can: hire new agents, fire underperformers, reallocate capital, change strategy.
+As CEO, evaluate the organization and make any strategic decisions you see fit.
+You can: hire agents, fire agents, promote, demote, reallocate capital, change strategy, create/abolish roles, or do nothing.
 
 Respond in JSON:
 {
   "actions": [
     {
-      "type": "hire" | "fire" | "reallocate" | "strategy",
+      "type": "hire" | "fire" | "promote" | "demote" | "reallocate" | "strategy" | "create_role" | "abolish_role" | "noop",
       "target": "agent name or new agent description",
       "detail": "specifics",
       "reason": "reasoning"
