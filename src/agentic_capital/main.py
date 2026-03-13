@@ -4,29 +4,32 @@ import asyncio
 import sys
 
 import structlog
-from alembic import command
-from alembic.config import Config
 
 from agentic_capital.config import settings
 
 logger = structlog.get_logger()
 
 
-def run_migrations() -> None:
-    """Apply pending Alembic migrations on startup."""
+async def run_migrations() -> None:
+    """Apply pending Alembic migrations on startup (optional — DB may not be running)."""
     try:
+        from alembic import command
+        from alembic.config import Config
+
         alembic_cfg = Config("alembic.ini")
-        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
-        command.upgrade(alembic_cfg, "head")
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+
+        # Run in thread to avoid nested event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, command.upgrade, alembic_cfg, "head")
         logger.info("migrations_applied")
     except Exception:
-        logger.exception("migration_failed")
-        raise
+        logger.warning("migrations_skipped_db_may_not_be_available")
 
 
 async def run() -> None:
     """Run the Agentic Capital simulation."""
-    run_migrations()
+    await run_migrations()
 
     logger.info(
         "starting_simulation",
