@@ -137,13 +137,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 - Reflection: P&L 기반 성격 변동 (손실→loss_aversion↑, 수익→openness↑)
 - HR 시스템 + 직급/권한 + 에이전트 팩토리
 
-**미구현 (M3 잔여):**
-- **M3.5 CEO Agent**: BaseAgent 상속, LLM으로 인사/조직/전략 자율 판단, HR 시스템 호출
-- **M3.6 Analyst Agent**: BaseAgent 상속, 시장 분석 + SIGNAL 생성
-- CEOAgent: 인사/조직/전략 자율 판단 (LLM 기반, 시스템 제약 없음)
-- AnalystAgent: 시장 분석 + SIGNAL 생성 (LACP AgentMessage)
-- TraderAgent: DecisionPipeline 기반 자율 트레이딩
-- `create_agent()` 팩토리: 역할별 에이전트 동적 생성
+**모든 M3 태스크 완료.**
 
 ### 완료 기준
 
@@ -187,8 +181,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 - Paper Trading: 로컬 시뮬레이션용 가상 트레이딩
 - LACP 통신 프로토콜 + MessagePack 직렬화
 
-**미구현 (M4 잔여):**
-- **M4.3 Redis Stream 메시지 버스**: XADD/XREAD, Consumer Group, TTL 만료
+**미구현 (M4 잔여 — Phase 2):**
+- **M4.12 Binance Adapter**: ccxt 기반 암호화폐 거래
+- **M4.13 Alpaca Adapter**: 미국 주식 거래
 
 ### 완료 기준
 
@@ -308,9 +303,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 ## 마일스톤 의존성
 
 ```
-M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
-                │              ↑
-                └──→ M4 ───────┘
+M1 ✅ ──→ M2 ✅ ──→ M3 ✅ ──→ M5 ✅ ──→ M6 ──→ M7
+                │                ↑
+                └──→ M4 ✅───────┘
 ```
 
 - M1 → M2: 프로젝트 구조 필요
@@ -322,21 +317,13 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ---
 
-## 현재 진행: M3 마무리 + M4.3 + M5 LangGraph
+## 현재 진행: M6 Paper Trading
 
-**v0.5.0 상태 — 실제 갭 분석 기반 우선순위:**
+**v0.9.0 — M1~M5 완료, M6 진행 중**
 
-### Phase A: M3 마무리 (에이전트 구현체)
-1. **M3.5 CEO Agent** — BaseAgent 상속, LLM으로 인사/조직/전략 자율 판단, HR 시스템 호출
-2. **M3.6 Analyst Agent** — BaseAgent 상속, 시장 분석 + SIGNAL 생성
-3. **M3.7 Trader Agent** — BaseAgent 상속, 시그널 수신 + DecisionPipeline 실행
-
-### Phase B: M4.3 통신 + M5.1-5.4 LangGraph
-4. **M4.3 Redis Stream 메시지 버스** — XADD/XREAD, Consumer Group, LACP 메시지 교환
-5. **M5.1-5.4 LangGraph 워크플로우** — 에이전트 상태 그래프, 역할별 노드/엣지, 워크플로우 조립
-
-### Phase C: M5 시뮬레이션 통합
-6. **M5.9 CEO 자율 조직 운영** — CEO Agent + HR + 권한 통합, 채용/해고 실행
-7. **M5.10 데이터 조회 도구** — 에이전트가 자율적으로 DB/API에서 필요한 데이터를 조회하는 도구 제공 (조회 시점/대상은 AI 자율)
-8. **M5.11 회사 스냅샷** — 전체 지표 계산 + TimescaleDB 기록
-9. **M5.12 E2E 테스트** — 전체 사이클 검증
+### 다음 작업
+1. **M6.3 실시간 시장 데이터** — WebSocket 시세 수신
+2. **M6.4 에이전트 10명 스케일 테스트** — 성능/안정성 검증
+3. **M6.6 LangSmith 트레이싱** — LLM 호출 디버깅/모니터링
+4. **M6.7 백테스팅 파이프라인** — DuckDB 기반 과거 데이터 시뮬레이션
+5. **M6.8 데이터 내보내기** — Parquet 포맷 논문용 데이터셋
