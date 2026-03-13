@@ -45,7 +45,7 @@
 | `ccxt` | latest | 통합 암호화폐 거래소 API (Binance, Upbit 등) |
 | `yfinance` | latest | Yahoo Finance 시장 데이터 |
 | `alpaca-py` | latest | Alpaca 미국 주식 API |
-| `mojito` | latest | 한국투자증권 Open API Python 래퍼 |
+| `python-kis` | latest | 한국투자증권 Open API (async 네이티브, 타입 힌트 완전) |
 | `ta` | latest | 기술적 분석 지표 (RSI, MACD 등) |
 
 ### AI / Embedding

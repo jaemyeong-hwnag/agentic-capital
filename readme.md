@@ -21,14 +21,26 @@ An AI multi-agent roleplay simulation where autonomous agents with distinct pers
 ## Architecture
 
 ```
-CEO Agent (full autonomy: strategy, HR, org design)
-├── Portfolio Manager (allocation, rebalancing)
-├── Risk Manager (risk assessment, warnings)
-├── Analyst Team (dynamically composed by CEO)
-│   ├── Fundamental / Technical / Sentiment / ...
-└── Trader (order execution)
-
-※ Structure is an example. CEO reshapes it autonomously.
+┌─────────────────────────────────────────────────┐
+│  CORE (Main — Immutable Purpose)                │
+│  AI Roleplay Simulation                         │
+│  Agent personality/emotion/decision/org autonomy │
+│  Purpose: Make money (no restrictions on         │
+│  assets, methods, research approaches)           │
+│                                                  │
+│  CEO Agent (full autonomy)                       │
+│  ├── Portfolio Manager                           │
+│  ├── Risk Manager                                │
+│  ├── Analyst Team (dynamic)                      │
+│  └── Trader                                      │
+│  ※ CEO reshapes structure autonomously           │
+├─────────────────────────────────────────────────┤
+│  ADAPTERS (Plugins — Swappable)                  │
+│  Trading APIs are replaceable external adapters  │
+│  ┌───────┐ ┌─────────┐ ┌────────┐             │
+│  │  KIS  │ │ Binance │ │ Alpaca │  ...        │
+│  └───────┘ └─────────┘ └────────┘             │
+└─────────────────────────────────────────────────┘
 ```
 
 ## Tech Stack
@@ -77,6 +89,7 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [15 - Env Variables](docs/15-env-variables.md) | Environment variables, .env template |
 | [16 - External APIs](docs/16-external-apis.md) | LLM, exchange, market data APIs |
 | [17 - Infrastructure](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 infra |
+| [18 - Korean Broker API](docs/18-korean-broker-api.md) | KIS API setup, accounts, permissions |
 
 ## Key Papers
 
@@ -160,3 +173,4 @@ TBD
 | [15 - 환경 변수](docs/15-env-variables.md) | 환경 변수, .env 템플릿 |
 | [16 - 외부 API](docs/16-external-apis.md) | LLM, 거래소, 시장 데이터 API |
 | [17 - 인프라](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 인프라 |
+| [18 - 한국 증권사 API](docs/18-korean-broker-api.md) | KIS API 설정, 계좌, 권한 |

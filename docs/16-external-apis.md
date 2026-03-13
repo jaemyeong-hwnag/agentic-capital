@@ -58,7 +58,7 @@
 
 | API | 시장 | 기능 | Python 패키지 | API 문서 |
 |-----|------|------|-------------|---------|
-| **한국투자증권 Open API** | KOSPI/KOSDAQ | 현물 매매, 잔고, 시세 | `mojito` | https://apiportal.koreainvestment.com |
+| **한국투자증권 Open API** | KOSPI/KOSDAQ | 현물 매매, 잔고, 시세 | `python-kis` | https://apiportal.koreainvestment.com |
 
 #### 주요 엔드포인트
 
@@ -112,4 +112,4 @@
 | Binance | 1,200 req/min (시세), 10 orders/sec | ccxt rate limiter 자동 적용 |
 | Upbit | 30 req/sec (시세), 8 req/sec (주문) | ccxt rate limiter |
 | Alpaca | 200 req/min | alpaca-py 내장 throttle |
-| 한국투자증권 | 초당 20건 | mojito 내장 throttle |
+| 한국투자증권 | 초당 20건 | python-kis 내장 throttle |
