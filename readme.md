@@ -73,6 +73,10 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [11 - Data Model](docs/11-data-model.md) | AI-optimized database schema |
 | [12 - Data Formats](docs/12-data-format-research.md) | Serialization, vector, time-series research |
 | [13 - Tech Research](docs/13-detailed-tech-research.md) | Extended technology comparison |
+| [14 - Dependencies](docs/14-dependencies.md) | Python packages by category |
+| [15 - Env Variables](docs/15-env-variables.md) | Environment variables, .env template |
+| [16 - External APIs](docs/16-external-apis.md) | LLM, exchange, market data APIs |
+| [17 - Infrastructure](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 infra |
 
 ## Key Papers
 
@@ -152,3 +156,7 @@ TBD
 | [11 - 데이터 모델](docs/11-data-model.md) | AI 최적화 DB 스키마 |
 | [12 - 데이터 포맷 연구](docs/12-data-format-research.md) | 직렬화, 벡터, 시계열 포맷 |
 | [13 - 기술 상세 연구](docs/13-detailed-tech-research.md) | 기술 비교 상세 |
+| [14 - 기술 스택 의존성](docs/14-dependencies.md) | Python 패키지 카테고리별 정리 |
+| [15 - 환경 변수](docs/15-env-variables.md) | 환경 변수, .env 템플릿 |
+| [16 - 외부 API](docs/16-external-apis.md) | LLM, 거래소, 시장 데이터 API |
+| [17 - 인프라](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 인프라 |
