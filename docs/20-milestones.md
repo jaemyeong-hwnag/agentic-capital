@@ -27,7 +27,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 | 마일스톤 | 상태 | 완료율 |
 |----------|------|--------|
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
-| M2 Core 엔진 | 🔧 진행중 | 90% |
+| M2 Core 엔진 | ✅ 완료 | 100% |
 | M3 에이전트 시스템 | ⬚ 부분 구현 | 30% |
 | M4 통신 + 어댑터 | ⬚ 부분 구현 | 25% |
 | M5 시뮬레이션 | ⬚ 미착수 | 0% |
@@ -63,7 +63,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 
 ---
 
-## M2: Core 엔진 (DB + 메모리) 🔧
+## M2: Core 엔진 (DB + 메모리) ✅
 
 > 데이터 레이어, 메모리 시스템, 기본 인프라
 
@@ -72,38 +72,36 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
 | 2.1 | SQLAlchemy ORM 모델 정의 (16 테이블) | `infra/models/*.py` | ✅ |
-| 2.2 | Alembic 마이그레이션 (초기 스키마) | `alembic/versions/` | ⬚ |
-| 2.3 | TimescaleDB hypertable 설정 | 마이그레이션 스크립트 | ⬚ |
-| 2.4 | pgvector 확장 + HNSW 인덱스 | 마이그레이션 스크립트 | ⬚ |
-| 2.5 | Redis Working Memory 구현 | `core/memory/working.py` | ⬚ |
-| 2.6 | Qdrant Episodic Memory 구현 | `core/memory/episodic.py` | ⬚ |
-| 2.7 | A-MEM Zettelkasten 노트 구현 | `core/memory/amem.py` | 🔧 Pydantic 모델만 |
-| 2.8 | Semantic Memory 구현 | `core/memory/semantic.py` | ⬚ |
+| 2.2 | Alembic 마이그레이션 (초기 스키마) | `alembic/versions/` | ✅ |
+| 2.3 | TimescaleDB hypertable 설정 | 마이그레이션 스크립트 | ✅ |
+| 2.4 | pgvector 확장 + HNSW 인덱스 | 마이그레이션 스크립트 | ✅ |
+| 2.5 | Redis Working Memory 구현 | `core/memory/working.py` | ✅ |
+| 2.6 | Episodic Memory 구현 (pgvector Phase 1) | `core/memory/episodic.py` | ✅ |
+| 2.7 | A-MEM Zettelkasten CRUD 구현 | `core/memory/amem.py` | ✅ |
+| 2.8 | Semantic Memory 구현 | `core/memory/semantic.py` | ✅ |
 | 2.9 | AI 포맷 변환기 (TOON, NumeroLogic, Markdown-KV) | `formats/*.py` | ✅ |
-| 2.10 | DB 통합 테스트 (실제 PG/Redis) | `tests/integration/` | ⬚ |
+| 2.10 | DB 통합 테스트 (실제 PG/Redis) | `tests/integration/` | ✅ |
 
 ### 구현 현황
 
-**완료:**
-- ORM 16개 테이블: agents, agent_personality, agent_personality_history, agent_emotion_history, agent_decisions, trades, positions, roles, permission_history, hr_events, agent_messages, memories, episodic_details, market_ohlcv, simulation_runs, company_snapshots
+**전체 완료:**
+- ORM 16개 테이블 + Alembic 마이그레이션 (001_initial_schema.py)
+- TimescaleDB hypertable 5개 (personality_history, emotion_history, permission_history, market_ohlcv, company_snapshots)
+- pgvector 확장 설치
+- Redis Working Memory (observation/task/context + TTL + snapshot)
+- A-MEM Zettelkasten CRUD (create/get/search/link/decay/q_value)
+- Episodic Memory (experience store + cosine similarity search + reflection)
+- Semantic Memory (knowledge store + search + reflection update)
 - AI 포맷 변환기: TOON, NumeroLogic, Markdown-KV
-- Alembic env.py (async 설정 완료)
-- SQLAlchemy async engine + session (database.py)
-
-**미완료:**
-- Alembic 마이그레이션 파일 (versions/ 비어있음)
-- TimescaleDB hypertable 생성
-- pgvector 확장 + HNSW 인덱스
-- 메모리 시스템 (Working/Episodic/Semantic) 구현체
-- 통합 테스트
+- 통합 테스트 21개 (실제 PG + Redis)
 
 ### 완료 기준
 
-- [ ] 전체 스키마 마이그레이션 적용
-- [ ] 메모리 CRUD (Working/Episodic/Semantic) 동작
-- [ ] A-MEM 노트 생성 + 링크 + 검색 동작
+- [x] 전체 스키마 마이그레이션 적용 (16 테이블 + 5 hypertable + pgvector)
+- [x] 메모리 CRUD (Working/Episodic/Semantic) 동작
+- [x] A-MEM 노트 생성 + 링크 + 검색 + Q-value decay 동작
 - [x] TOON/NumeroLogic 포맷 변환 동작
-- [ ] 테스트 커버리지 80%+
+- [x] 테스트 커버리지 93%+ (125 tests passed)
 
 ---
 
@@ -258,7 +256,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 ## 마일스톤 의존성
 
 ```
-M1 ✅ ──→ M2 🔧 ──→ M3 ──→ M5 ──→ M6 ──→ M7
+M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
                 │              ↑
                 └──→ M4 ───────┘
 ```
@@ -272,13 +270,13 @@ M1 ✅ ──→ M2 🔧 ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ---
 
-## 현재 진행: M2 남은 작업
+## 현재 진행: M3 + M4 병렬 착수
 
-**즉시 착수 순서:**
+**M2 완료 (v0.3.0). 다음 작업:**
 
-1. **M2.2-2.4** — Alembic 마이그레이션 + TimescaleDB + pgvector
-2. **M2.5** — Redis Working Memory 구현
-3. **M2.7** — A-MEM CRUD 구현 (Pydantic 모델 → DB 연동)
-4. **M2.8** — Semantic Memory 구현
-5. **M2.6** — Episodic Memory 구현 (pgvectorscale Phase 1)
-6. **M2.10** — 통합 테스트
+1. **M3.5** — CEO Agent 구현 (인사/조직/전략 자율)
+2. **M3.10** — HR 시스템 (채용/해고/승진/강등 로직)
+3. **M3.11** — LLM 프롬프트 템플릿 (성격 주입)
+4. **M3.12** — 의사결정 파이프라인
+5. **M4.5-4.6** — MarketDataPort, LLMPort ABC 구현
+6. **M4.8** — Gemini LLM Adapter
