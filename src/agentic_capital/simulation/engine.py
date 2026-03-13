@@ -181,22 +181,6 @@ class SimulationEngine:
         self._running = True
         try:
             while self._running:
-                # Wait for market open
-                wait_seconds = seconds_until_market_open()
-                if wait_seconds > 0:
-                    logger.info(
-                        "waiting_for_market_open",
-                        wait_seconds=wait_seconds,
-                        current_time=now_kst().strftime("%H:%M:%S KST"),
-                    )
-                    # Sleep in chunks to allow clean shutdown
-                    while wait_seconds > 0 and self._running:
-                        chunk = min(wait_seconds, 60)
-                        await asyncio.sleep(chunk)
-                        wait_seconds -= chunk
-                    if not self._running:
-                        break
-
                 await self._run_cycle()
 
                 if self._running:
@@ -204,6 +188,7 @@ class SimulationEngine:
                         "cycle_sleeping",
                         next_cycle_in=f"{self._cycle_interval}s",
                         total_cycles=self._cycle_count,
+                        market_open=is_market_open(),
                     )
                     await asyncio.sleep(self._cycle_interval)
         except asyncio.CancelledError:
@@ -221,12 +206,9 @@ class SimulationEngine:
 
     async def _run_cycle(self) -> None:
         """Run one complete trading cycle for all agents."""
-        if not is_market_open():
-            logger.info("market_closed_skipping_cycle")
-            return
-
         self._cycle_count += 1
-        logger.info("cycle_start", cycle=self._cycle_count)
+        market_open = is_market_open()
+        logger.info("cycle_start", cycle=self._cycle_count, market_open=market_open)
 
         balance = await self._trading.get_balance()
         logger.info(

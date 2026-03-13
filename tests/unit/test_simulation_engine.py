@@ -61,14 +61,26 @@ class TestSimulationEngine:
         assert "risk" in alpha.philosophy.lower() or "reward" in alpha.philosophy.lower()
 
     @pytest.mark.asyncio
-    async def test_run_cycle_market_closed(self):
+    async def test_run_cycle_market_closed_still_runs(self):
+        """Market closed does NOT block cycle — AI decides autonomously."""
         engine = SimulationEngine()
         engine._init_agents()
-        engine._cycle_count = 0
+        engine._symbols = ["005930"]
+
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=10_000_000, available=10_000_000)
+        )
+        engine._trading.get_positions = AsyncMock(return_value=[])
+        engine._pipeline = MagicMock()
+        engine._pipeline.run_cycle = AsyncMock(
+            return_value=([], MagicMock(valence=0.0, stress=0.0))
+        )
+
         with patch("agentic_capital.simulation.engine.is_market_open", return_value=False):
             await engine._run_cycle()
-        # No cycle count increase when market closed
-        assert engine._cycle_count == 0
+        # Cycle runs even when market is closed — no system-enforced restriction
+        assert engine._cycle_count == 1
 
     @pytest.mark.asyncio
     async def test_run_cycle_market_open(self):
