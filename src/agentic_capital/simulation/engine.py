@@ -305,7 +305,7 @@ class SimulationEngine:
                 await self._recorder.record_agent(
                     agent_id=new_agent.agent_id,
                     name=new_agent.name,
-                    role=agent_role,
+                    role=role,
                     philosophy=new_agent.profile.philosophy,
                     personality=new_agent.personality,
                 )
