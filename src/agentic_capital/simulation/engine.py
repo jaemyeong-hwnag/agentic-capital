@@ -17,6 +17,7 @@ from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.decision.pipeline import DecisionPipeline
 from agentic_capital.core.decision.reflection import reflect_on_trades
 from agentic_capital.core.personality.models import EmotionState
+from agentic_capital.simulation.clock import is_market_open, now_kst, seconds_until_market_open
 
 logger = structlog.get_logger()
 
@@ -62,6 +63,7 @@ class SimulationEngine:
         self._trading: KISTradingAdapter | None = None
         self._market_data: KISMarketDataAdapter | None = None
         self._pipeline: DecisionPipeline | None = None
+        self._recorder = None  # SimulationRecorder, optional (requires DB)
 
     def _init_adapters(self) -> None:
         """Initialize all adapters from settings."""
@@ -113,6 +115,40 @@ class SimulationEngine:
                 },
             )
 
+    async def _init_recorder(self) -> None:
+        """Initialize DB recorder if database is available."""
+        try:
+            from agentic_capital.infra.database import async_session
+            from agentic_capital.simulation.recorder import SimulationRecorder
+
+            session = async_session()
+            self._recorder = SimulationRecorder(session)
+            sim_id = await self._recorder.start_simulation(
+                seed=settings.simulation_seed,
+                initial_capital=settings.initial_capital,
+                config={
+                    "cycle_interval": self._cycle_interval,
+                    "symbols": self._symbols or [],
+                    "agents": [a.name for a in self._agents],
+                },
+            )
+
+            # Record agents
+            for agent in self._agents:
+                await self._recorder.record_agent(
+                    agent_id=agent.id,
+                    name=agent.name,
+                    role=agent.role,
+                    philosophy=agent.philosophy,
+                    personality=agent.personality,
+                )
+
+            await self._recorder.commit()
+            logger.info("recorder_initialized", simulation_id=str(sim_id))
+        except Exception:
+            logger.warning("recorder_init_failed_running_without_db")
+            self._recorder = None
+
     async def start(self) -> None:
         """Start the simulation loop."""
         logger.info(
@@ -129,6 +165,9 @@ class SimulationEngine:
         if not self._symbols:
             self._symbols = await self._market_data.get_symbols()
 
+        # Initialize DB recorder
+        await self._init_recorder()
+
         # Print initial state
         balance = await self._trading.get_balance()
         logger.info(
@@ -142,7 +181,24 @@ class SimulationEngine:
         self._running = True
         try:
             while self._running:
+                # Wait for market open
+                wait_seconds = seconds_until_market_open()
+                if wait_seconds > 0:
+                    logger.info(
+                        "waiting_for_market_open",
+                        wait_seconds=wait_seconds,
+                        current_time=now_kst().strftime("%H:%M:%S KST"),
+                    )
+                    # Sleep in chunks to allow clean shutdown
+                    while wait_seconds > 0 and self._running:
+                        chunk = min(wait_seconds, 60)
+                        await asyncio.sleep(chunk)
+                        wait_seconds -= chunk
+                    if not self._running:
+                        break
+
                 await self._run_cycle()
+
                 if self._running:
                     logger.info(
                         "cycle_sleeping",
@@ -154,6 +210,9 @@ class SimulationEngine:
             logger.info("simulation_cancelled")
         finally:
             self._running = False
+            if self._recorder:
+                await self._recorder.end_simulation("stopped")
+                await self._recorder.commit()
             logger.info("simulation_stopped", total_cycles=self._cycle_count)
 
     def stop(self) -> None:
@@ -162,6 +221,10 @@ class SimulationEngine:
 
     async def _run_cycle(self) -> None:
         """Run one complete trading cycle for all agents."""
+        if not is_market_open():
+            logger.info("market_closed_skipping_cycle")
+            return
+
         self._cycle_count += 1
         logger.info("cycle_start", cycle=self._cycle_count)
 
@@ -190,6 +253,18 @@ class SimulationEngine:
             positions_count=len(positions),
         )
 
+        # Record company snapshot
+        if self._recorder:
+            try:
+                await self._recorder.record_company_snapshot(
+                    total_capital=balance_after.total,
+                    available_cash=balance_after.available,
+                    agents_count=len(self._agents),
+                )
+                await self._recorder.commit()
+            except Exception:
+                logger.exception("snapshot_recording_failed")
+
     async def _run_agent_cycle(self, agent: AgentState) -> None:
         """Run one decision cycle for a single agent."""
         logger.info("agent_cycle_start", agent=agent.name, cycle=self._cycle_count)
@@ -217,6 +292,7 @@ class SimulationEngine:
         if positions:
             total_pnl_pct = sum(p.unrealized_pnl_pct for p in positions) / len(positions)
 
+        old_personality = agent.personality
         updated_personality, drift_events = reflect_on_trades(
             agent.personality, decisions, total_pnl_pct
         )
@@ -232,6 +308,38 @@ class SimulationEngine:
 
         if drift_events:
             logger.info("personality_drift", agent=agent.name, drifts=len(drift_events))
+
+        # Record to DB
+        if self._recorder:
+            try:
+                for d in decisions:
+                    await self._recorder.record_decision(
+                        agent_id=agent.id,
+                        decision=d,
+                        personality=agent.personality,
+                        emotion=agent.emotion,
+                        status="executed",
+                    )
+                await self._recorder.record_emotion(
+                    agent_id=agent.id,
+                    emotion=agent.emotion,
+                    trigger=f"cycle_{self._cycle_count}",
+                )
+                if drift_events:
+                    drift_tuples = []
+                    for event in drift_events:
+                        param = event.get("parameter", "")
+                        old_v = event.get("old_value", 0.0)
+                        new_v = event.get("new_value", 0.0)
+                        drift_tuples.append((param, old_v, new_v))
+                    await self._recorder.record_personality_drift(
+                        agent_id=agent.id,
+                        drift_events=drift_tuples,
+                        trigger=f"pnl_{total_pnl_pct:.2f}%",
+                    )
+                await self._recorder.commit()
+            except Exception:
+                logger.exception("recording_failed", agent=agent.name)
 
         logger.info(
             "agent_cycle_complete",
