@@ -30,7 +30,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | M2 Core 엔진 | ✅ 완료 | 100% |
 | M3 에이전트 시스템 | ⬚ 부분 구현 | 70% |
 | M4 통신 + 어댑터 | ⬚ 부분 구현 | 80% |
-| M5 시뮬레이션 | ⬚ 부분 구현 | 25% |
+| M5 시뮬레이션 | ⬚ 부분 구현 | 40% |
 | M6 Paper Trading | ⬚ 부분 구현 | 15% |
 | M7 실거래 | ⬚ 미착수 | 0% |
 
@@ -206,8 +206,8 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 5.3 | LangGraph 엣지 (조건부 라우팅) | `graph/edges.py` | ⬚ |
 | 5.4 | 워크플로우 그래프 조립 | `graph/workflow.py` | ⬚ |
 | 5.5 | 시뮬레이션 엔진 (메인 루프) | `simulation/engine.py` | ✅ |
-| 5.6 | 시뮬레이션 시간 관리 (Clock) | `simulation/clock.py` | ⬚ |
-| 5.7 | 논문급 기록기 (Recorder) | `simulation/recorder.py` | ⬚ |
+| 5.6 | 시뮬레이션 시간 관리 (Clock) | `simulation/clock.py` | ✅ |
+| 5.7 | 논문급 기록기 (Recorder) | `simulation/recorder.py` | ✅ |
 | 5.8 | 멀티에이전트 동시 실행 (asyncio) | `simulation/engine.py` | ✅ |
 | 5.9 | CEO 자율 조직 운영 통합 | CEO + HR + 권한 연동 | ⬚ |
 | 5.10 | 자연 선택 (수익 기반 생존) | `simulation/engine.py` | ⬚ |
@@ -309,7 +309,7 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ## 현재 진행: M3/M4 마무리 → M5 확장
 
-**v0.4.0 — E2E 로컬 Paper Trading 동작 확인 완료. 다음 작업:**
+**v0.5.0 — E2E 로컬 Paper Trading + DB Recording + Market Clock 완료. 다음 작업:**
 
 1. **M3.5** — CEO Agent 구현 (자율 인사/조직 결정)
 2. **M4.3** — Redis Stream 메시지 버스 (에이전트 간 통신)
