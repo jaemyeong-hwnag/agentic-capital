@@ -36,6 +36,18 @@ htmlcov/
 # ruff
 .ruff_cache/
 
+# Logs
+*.log
+logs/
+
+# Data / DB dumps
+*.sql
+*.dump
+*.parquet
+*.arrow
+*.duckdb
+data/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -43,3 +55,9 @@ Thumbs.db
 # Docker volumes
 pgdata/
 redisdata/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code
+.claude/settings.local.json
