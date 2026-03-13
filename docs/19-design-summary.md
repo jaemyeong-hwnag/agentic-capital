@@ -41,8 +41,8 @@
 │  └────────┬────────────────────────────────────────┘    │
 │           │                                              │
 │  ┌────────┴────────────────────────────────────────┐    │
-│  │  Memory Layer (A-MEM + Mem0)                     │    │
-│  │  Working(Redis) / Episodic(Qdrant) / Semantic(PG)│    │
+│  │  Memory Layer (A-MEM Zettelkasten)                │    │
+│  │  Working(Redis) / Episodic(PG) / Semantic(PG)    │    │
 │  └────────┬────────────────────────────────────────┘    │
 │           │                                              │
 │  ┌────────┴────────────────────────────────────────┐    │
@@ -74,7 +74,7 @@
 |------|------|----------|
 | 언어 | Python 3.12+ | AI 생태계 표준 |
 | 에이전트 프레임워크 | LangGraph v1.0 | FinCon (NeurIPS 2024), TradingAgents |
-| 에이전트 메모리 | A-MEM (Zettelkasten) + Mem0 | A-MEM (NeurIPS 2025) |
+| 에이전트 메모리 | A-MEM (Zettelkasten) | A-MEM (NeurIPS 2025) |
 | LLM | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
 
 ### Data
@@ -135,7 +135,7 @@
 | 계층 | 저장소 | 내용 | 정책 |
 |------|--------|------|------|
 | Working | Redis | 최근 5-10개 관찰, 현재 태스크 | TTL 자동 만료 |
-| Episodic | Qdrant | 구체적 경험 (context, action, outcome, q_value) | REMEMBERER decay |
+| Episodic | PostgreSQL (Phase 1) → Qdrant (Phase 2) | 구체적 경험 (context, action, outcome, q_value) | REMEMBERER decay |
 | Semantic | PostgreSQL | 축적된 지식, 투자 원칙 | Reflection 업데이트 |
 | Procedural | 코드/프롬프트 | 투자 전략, 분석 절차 | 주기적 증류 |
 
@@ -147,7 +147,7 @@
 AI 친화적 포맷 변환 (TOON/NumeroLogic)
     ↓
 에이전트 컨텍스트 구성
-  ├── 성격 벡터 (15D) 로드
+  ├── 성격 벡터 (10D) 로드
   ├── 감정 상태 (VAD) 로드
   ├── Working Memory (Redis) 로드
   ├── 관련 Episodic Memory (Qdrant 검색) 로드
@@ -229,11 +229,11 @@ Reflection (성격 변동, 전략 학습, q_value 업데이트)
 | 항목 | 현재 상태 | 구현 시 필요 |
 |------|----------|-------------|
 | Apache AGE 통합 | Phase 2 예정 | 메모리 링크, 조직 관계 그래프 쿼리 |
-| 성격→행동 매핑 | 15D 벡터 정의됨 | 프롬프트에 성격이 판단에 미치는 구체적 로직 |
+| 성격→행동 매핑 | 10D 벡터 정의됨 | 프롬프트에 성격이 판단에 미치는 구체적 로직 |
 | CEO 의사결정 알고리즘 | 자율 원칙만 정의 | 인사/조직 판단 트리거와 평가 기준 프롬프트 |
 | 메모리 검색 전략 | A-MEM 구조 정의됨 | Qdrant 쿼리 구성 (임베딩 + 메타데이터 필터) |
 | 이벤트 루프 | 미정의 | 일/시간 단위 시뮬레이션 트리거 방식 |
 | 감정→판단 영향 | VAD 모델 정의됨 | 감정 파라미터가 투자 판단에 미치는 구체적 가중치 |
 | LangGraph 상태 그래프 | 미정의 | 에이전트 워크플로우 노드/엣지 설계 |
-| Adapter 인터페이스 | 개념만 정의 | Port/Adapter 추상 클래스 (ABC) |
+| Adapter 인터페이스 | ✅ Port ABC 구현 완료 | 구체 Adapter 구현 (KIS, Gemini 등) |
 | 프롬프트 템플릿 | 포맷만 정의 | 실제 시스템/유저 프롬프트 작성 |

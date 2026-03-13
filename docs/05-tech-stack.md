@@ -15,7 +15,6 @@
 | **언어** | Python 3.12+ | AI 프레임워크 생태계 표준, I/O 바운드 프로젝트 |
 | **AI 프레임워크** | LangGraph v1.0 | 상태 기반 그래프, 금융 AI 검증 — FinCon (NeurIPS 2024), TradingAgents |
 | **에이전트 메모리** | A-MEM 방식 (Zettelkasten) | multi-hop 추론 2x 향상 — A-MEM (NeurIPS 2025) |
-| **메모리 통합** | Mem0 | 벡터+KV+그래프 통합, 26% 높은 정확도 |
 | **메인 DB** | PostgreSQL 16 + TimescaleDB | 정형+시계열 단일 서버, Gorilla 압축 |
 | **벡터 DB** | pgvectorscale (Phase 1) → Qdrant (Phase 2) | float8 + SQ int8, HNSW M=16~32 — pgvectorscale: pgvector 대비 10x 빠름 (VectorDBBench 2025) |
 | **그래프 (Phase 2)** | Apache AGE (PG 확장) | 에이전트 관계/메모리 링크 그래프 탐색 — Cypher 쿼리, PG 내장 |
@@ -47,7 +46,7 @@
 ├─────────────────────────────────────────────────────────┤
 │  Agent ↔ Memory                                          │
 │  A-MEM Zettelkasten 노트 (context + keywords + links)    │
-│  3계층: Episodic (Qdrant) / Semantic (PG) / Procedural   │
+│  3계층: Episodic (PG Phase 1→Qdrant Phase 2) / Semantic (PG) / Procedural │
 ├─────────────────────────────────────────────────────────┤
 │  Agent ↔ DB (영속화)                                      │
 │  PostgreSQL JSONB + typed columns                        │
@@ -87,7 +86,7 @@ A-MEM (NeurIPS 2025), FinMem (2024), REMEMBERER (2025) 종합:
 | 계층 | 저장소 | 내용 | 유지 정책 |
 |------|--------|------|----------|
 | **Working** | Redis | 현재 태스크, 최근 5-10개 관찰 | TTL 자동 만료 |
-| **Episodic** | Qdrant (벡터) | 구체적 경험: {context, action, outcome, q_value} | 유틸리티 기반 decay (REMEMBERER) |
+| **Episodic** | PostgreSQL (Phase 1) → Qdrant (Phase 2) | 구체적 경험: {context, action, outcome, q_value} | 유틸리티 기반 decay (REMEMBERER) |
 | **Semantic** | PostgreSQL | 축적된 지식, 시장 이해, 투자 원칙 | Reflection 트리거 업데이트 |
 | **Procedural** | 코드/프롬프트 | 투자 전략, 분석 절차, 의사결정 규칙 | 주기적 증류 (distillation) |
 

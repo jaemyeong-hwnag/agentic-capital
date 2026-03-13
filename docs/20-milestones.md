@@ -17,7 +17,7 @@
 ## 전체 로드맵
 
 ```
-M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스템  → M4 트레이딩 연동
+M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스템  → M4 트레이딩 연동
 (프로젝트 셋업)         (DB + 메모리)         (성격 + 의사결정)      (Adapter + 실행)
 
     → M5 시뮬레이션    → M6 Paper Trading → M7 실거래
@@ -28,8 +28,8 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 |----------|------|--------|
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
-| M3 에이전트 시스템 | ⬚ 부분 구현 | 30% |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 25% |
+| M3 에이전트 시스템 | ⬚ 부분 구현 | 55% |
+| M4 통신 + 어댑터 | ⬚ 부분 구현 | 50% |
 | M5 시뮬레이션 | ⬚ 미착수 | 0% |
 | M6 Paper Trading | ⬚ 미착수 | 0% |
 | M7 실거래 | ⬚ 미착수 | 0% |
@@ -113,7 +113,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
-| 3.1 | 15D 성격 벡터 모델 (Pydantic) | `core/personality/models.py` | ✅ |
+| 3.1 | 10D 성격 벡터 모델 (Pydantic) | `core/personality/models.py` | ✅ |
 | 3.2 | VAD 감정 모델 | `core/personality/emotion.py` | ✅ |
 | 3.3 | 성격 변동 (Personality Drift) 로직 | `core/personality/drift.py` | ✅ |
 | 3.4 | BaseAgent ABC 정의 | `core/agents/base.py` | ✅ |
@@ -122,7 +122,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 | 3.7 | Trader Agent 구현 (실행) | `core/agents/trader.py` | ⬚ |
 | 3.8 | 에이전트 팩토리 (동적 생성) | `core/agents/factory.py` | ✅ |
 | 3.9 | 동적 직급/권한 시스템 | `core/organization/*.py` | ✅ |
-| 3.10 | HR 시스템 (채용/해고/승진/강등) | `core/organization/hr.py` | ⬚ |
+| 3.10 | HR 시스템 (채용/해고/승진/강등) | `core/organization/hr.py` | ✅ |
 | 3.11 | LLM 프롬프트 템플릿 (성격 주입) | `core/decision/prompts.py` | ⬚ |
 | 3.12 | 의사결정 파이프라인 (데이터→판단→실행) | `core/decision/pipeline.py` | ⬚ |
 | 3.13 | Reflection 시스템 (경험→성격변동) | `core/decision/reflection.py` | ⬚ |
@@ -149,8 +149,8 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 🔧   → M3 에이전트 시스
 | 4.2 | MessagePack 직렬화 | `core/communication/serializer.py` | ✅ |
 | 4.3 | Redis Stream 메시지 버스 | `core/communication/bus.py` | ⬚ |
 | 4.4 | TradingPort ABC (매수/매도/잔고/포지션) | `ports/trading.py` | ✅ |
-| 4.5 | MarketDataPort ABC (시세/OHLCV/뉴스) | `ports/market_data.py` | ⬚ |
-| 4.6 | LLMPort ABC (추론/임베딩) | `ports/llm.py` | ⬚ |
+| 4.5 | MarketDataPort ABC (시세/OHLCV/뉴스) | `ports/market_data.py` | ✅ |
+| 4.6 | LLMPort ABC (추론/임베딩) | `ports/llm.py` | ✅ |
 | 4.7 | Paper Trading Adapter (시뮬레이션) | `adapters/trading/paper.py` | ✅ |
 | 4.8 | Gemini LLM Adapter | `adapters/llm/gemini.py` | ⬚ |
 | 4.9 | Yahoo Finance Adapter | `adapters/market_data/yahoo.py` | ⬚ |
@@ -272,11 +272,12 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ## 현재 진행: M3 + M4 병렬 착수
 
-**M2 완료 (v0.3.0). 다음 작업:**
+**M2 완료 (v0.3.1). M3 55%, M4 50%. 다음 작업:**
 
-1. **M3.5** — CEO Agent 구현 (인사/조직/전략 자율)
-2. **M3.10** — HR 시스템 (채용/해고/승진/강등 로직)
-3. **M3.11** — LLM 프롬프트 템플릿 (성격 주입)
-4. **M3.12** — 의사결정 파이프라인
-5. **M4.5-4.6** — MarketDataPort, LLMPort ABC 구현
-6. **M4.8** — Gemini LLM Adapter
+1. **M4.8** — Gemini LLM Adapter (LLM 연동 필수 선행)
+2. **M4.9** — Yahoo Finance / KIS 시세 Adapter
+3. **M4.10** — KIS Adapter (한국투자증권 모의투자 — API 키 확보 완료)
+4. **M3.11** — LLM 프롬프트 템플릿 (성격 주입)
+5. **M3.12** — 의사결정 파이프라인 (데이터→판단→실행)
+6. **M3.5** — CEO Agent 구현 (인사/조직/전략 자율)
+7. **M4.3** — Redis Stream 메시지 버스
