@@ -18,9 +18,12 @@ env/
 *.swp
 *.swo
 
-# Environment
+# Environment (모든 env 파일 — 시크릿 보호)
 .env
 .env.local
+.env.dev
+.env.prod
+.env.test
 
 # Testing
 .coverage
