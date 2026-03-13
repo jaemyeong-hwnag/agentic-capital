@@ -3,7 +3,7 @@
 import pytest
 
 from agentic_capital.core.personality.drift import apply_drift
-from agentic_capital.core.personality.emotion import update_emotion_from_pnl
+from agentic_capital.core.personality.emotion import create_emotion
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 
 
@@ -43,6 +43,8 @@ class TestPersonalityVector:
 
 
 class TestPersonalityDrift:
+    """apply_drift is a TOOL agents can optionally use — not system-enforced."""
+
     def test_positive_drift(self) -> None:
         p = PersonalityVector(openness=0.5)
         updated, event = apply_drift(p, "openness", 0.1, "big_win", "Successful trade")
@@ -79,23 +81,24 @@ class TestEmotionState:
         assert e.arousal == 0.5
         assert e.confidence == 0.5
 
-    def test_pnl_positive_increases_valence(self) -> None:
-        e = EmotionState()
-        updated = update_emotion_from_pnl(e, 0.05)  # +5%
-        assert updated.valence > e.valence
+    def test_create_emotion_utility(self) -> None:
+        """create_emotion is a utility agents can optionally use."""
+        e = create_emotion(valence=0.8, stress=0.2, confidence=0.9)
+        assert e.valence == 0.8
+        assert e.stress == 0.2
+        assert e.confidence == 0.9
 
-    def test_pnl_negative_decreases_valence(self) -> None:
-        e = EmotionState()
-        updated = update_emotion_from_pnl(e, -0.05)  # -5%
-        assert updated.valence < e.valence
+    def test_create_emotion_clamped(self) -> None:
+        """Values are clamped to valid ranges."""
+        e = create_emotion(valence=2.0, stress=-1.0, confidence=5.0)
+        assert e.valence == 1.0
+        assert e.stress == 0.0
+        assert e.confidence == 1.0
 
-    def test_pnl_negative_increases_stress(self) -> None:
-        e = EmotionState()
-        updated = update_emotion_from_pnl(e, -0.10)  # -10%
-        assert updated.stress > e.stress
-
-    def test_emotion_clamped(self) -> None:
-        e = EmotionState(valence=0.9)
-        updated = update_emotion_from_pnl(e, 0.5)  # +50%
-        assert updated.valence <= 1.0
-        assert updated.arousal <= 1.0
+    def test_create_emotion_defaults(self) -> None:
+        e = create_emotion()
+        assert e.valence == 0.0
+        assert e.arousal == 0.5
+        assert e.dominance == 0.5
+        assert e.stress == 0.3
+        assert e.confidence == 0.5

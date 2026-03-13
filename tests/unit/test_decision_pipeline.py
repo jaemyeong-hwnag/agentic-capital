@@ -116,10 +116,10 @@ class TestDecisionPipeline:
         assert success is False
 
     @pytest.mark.asyncio
-    async def test_run_cycle(self):
+    async def test_run_cycle_no_system_enforced_emotion(self):
+        """Pipeline returns emotion unchanged — no system-enforced emotion update."""
         pipeline = self._make_pipeline()
 
-        # Mock all dependencies
         pipeline._market_data.get_quote = AsyncMock(
             return_value=Quote(symbol="005930", price=70000, volume=5000000)
         )
@@ -131,15 +131,19 @@ class TestDecisionPipeline:
             return_value='{"decisions": [{"action": "HOLD", "symbol": "005930", "quantity": 0, "reason": "waiting"}], "confidence": 0.5}'
         )
 
+        original_emotion = EmotionState(valence=0.3, stress=0.4, confidence=0.6)
         decisions, emotion = await pipeline.run_cycle(
             agent_name="Alpha",
             agent_role="trader",
             philosophy="test",
             personality=PersonalityVector(),
-            emotion=EmotionState(),
+            emotion=original_emotion,
             symbols=["005930"],
         )
-        assert isinstance(emotion, EmotionState)
+        # Emotion returned unchanged — no system-enforced formula
+        assert emotion.valence == original_emotion.valence
+        assert emotion.stress == original_emotion.stress
+        assert emotion.confidence == original_emotion.confidence
 
 
 class TestReflection:
@@ -149,20 +153,25 @@ class TestReflection:
         assert updated == p
         assert events == []
 
-    def test_significant_loss(self):
+    def test_no_system_enforced_drift_on_loss(self):
+        """Significant loss should NOT trigger system-enforced personality drift."""
         p = PersonalityVector(loss_aversion=0.5, conscientiousness=0.5)
         decisions = [TradingDecision("BUY", "005930", 10, "test")]
         updated, events = reflect_on_trades(p, decisions, -3.0)
-        assert updated.loss_aversion > 0.5
-        assert updated.conscientiousness > 0.5
-        assert len(events) == 2
+        # No drift — agent decides autonomously
+        assert updated.loss_aversion == 0.5
+        assert updated.conscientiousness == 0.5
+        assert events == []
 
-    def test_significant_gain(self):
+    def test_no_system_enforced_drift_on_gain(self):
+        """Significant gain should NOT trigger system-enforced personality drift."""
         p = PersonalityVector(loss_aversion=0.5, openness=0.5)
         decisions = [TradingDecision("SELL", "005930", 10, "test")]
         updated, events = reflect_on_trades(p, decisions, 4.0)
-        assert updated.loss_aversion < 0.5
-        assert updated.openness > 0.5
+        # No drift — agent decides autonomously
+        assert updated.loss_aversion == 0.5
+        assert updated.openness == 0.5
+        assert events == []
 
     def test_minor_change_no_drift(self):
         p = PersonalityVector(loss_aversion=0.5)

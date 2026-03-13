@@ -75,18 +75,13 @@ class TestCEOAgent:
         assert result["actions"] == []
 
     @pytest.mark.asyncio
-    async def test_reflect_loss(self):
+    async def test_reflect_no_system_enforced_drift(self):
+        """Reflect should NOT system-enforce any personality changes."""
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=_make_personality(), llm=_make_llm())
-        original_conscientiousness = ceo.personality.conscientiousness
+        original = ceo.personality.conscientiousness
         await ceo.reflect({"pnl_pct": -5.0})
-        assert ceo.personality.conscientiousness > original_conscientiousness
-
-    @pytest.mark.asyncio
-    async def test_reflect_gain(self):
-        ceo = CEOAgent(profile=_make_profile("CEO"), personality=_make_personality(), llm=_make_llm())
-        original_openness = ceo.personality.openness
-        await ceo.reflect({"pnl_pct": 8.0})
-        assert ceo.personality.openness > original_openness
+        # No system-enforced drift — agent decides autonomously
+        assert ceo.personality.conscientiousness == original
 
     def test_action_to_hr_event(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=_make_personality(), llm=_make_llm())
@@ -148,18 +143,15 @@ class TestAnalystAgent:
         assert result["signals"] == []
 
     @pytest.mark.asyncio
-    async def test_reflect_poor_accuracy(self):
+    async def test_reflect_no_system_enforced_drift(self):
+        """Reflect should NOT system-enforce any personality changes."""
         analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=_make_personality(), llm=_make_llm())
-        original = analyst.personality.conscientiousness
+        original_c = analyst.personality.conscientiousness
+        original_o = analyst.personality.openness
         await analyst.reflect({"signal_accuracy": 0.2})
-        assert analyst.personality.conscientiousness > original
-
-    @pytest.mark.asyncio
-    async def test_reflect_good_accuracy(self):
-        analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=_make_personality(), llm=_make_llm())
-        original = analyst.personality.openness
-        await analyst.reflect({"signal_accuracy": 0.8})
-        assert analyst.personality.openness > original
+        # No system-enforced drift
+        assert analyst.personality.conscientiousness == original_c
+        assert analyst.personality.openness == original_o
 
     def test_signal_to_message(self):
         analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=_make_personality(), llm=_make_llm())
@@ -208,24 +200,15 @@ class TestTraderAgent:
         assert result["updated_emotion"] is not None
 
     @pytest.mark.asyncio
-    async def test_reflect_loss(self):
+    async def test_reflect_no_system_enforced_drift(self):
+        """Reflect should NOT system-enforce any personality or emotion changes."""
         trader = self._make_trader()
-        original = trader.personality.loss_aversion
+        original_la = trader.personality.loss_aversion
+        original_valence = trader.emotion.valence
         await trader.reflect({"pnl_pct": -3.0})
-        assert trader.personality.loss_aversion > original
-
-    @pytest.mark.asyncio
-    async def test_reflect_gain(self):
-        trader = self._make_trader()
-        original = trader.personality.loss_aversion
-        await trader.reflect({"pnl_pct": 5.0})
-        assert trader.personality.loss_aversion < original
-
-    @pytest.mark.asyncio
-    async def test_reflect_updates_emotion(self):
-        trader = self._make_trader()
-        await trader.reflect({"pnl_pct": 5.0})
-        assert trader.emotion.valence > 0.0  # positive P&L should improve valence
+        # No system-enforced drift or emotion formula
+        assert trader.personality.loss_aversion == original_la
+        assert trader.emotion.valence == original_valence
 
 
 # ─── Factory ───
