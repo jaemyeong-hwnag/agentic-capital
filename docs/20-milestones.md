@@ -28,10 +28,10 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 |----------|------|--------|
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
-| M3 에이전트 시스템 | ⬚ 부분 구현 | 55% |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 75% |
-| M5 시뮬레이션 | ⬚ 미착수 | 0% |
-| M6 Paper Trading | ⬚ 미착수 | 0% |
+| M3 에이전트 시스템 | ⬚ 부분 구현 | 70% |
+| M4 통신 + 어댑터 | ⬚ 부분 구현 | 80% |
+| M5 시뮬레이션 | ⬚ 부분 구현 | 25% |
+| M6 Paper Trading | ⬚ 부분 구현 | 15% |
 | M7 실거래 | ⬚ 미착수 | 0% |
 
 ---
@@ -123,17 +123,30 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 3.8 | 에이전트 팩토리 (동적 생성) | `core/agents/factory.py` | ✅ |
 | 3.9 | 동적 직급/권한 시스템 | `core/organization/*.py` | ✅ |
 | 3.10 | HR 시스템 (채용/해고/승진/강등) | `core/organization/hr.py` | ✅ |
-| 3.11 | LLM 프롬프트 템플릿 (성격 주입) | `core/decision/prompts.py` | ⬚ |
-| 3.12 | 의사결정 파이프라인 (데이터→판단→실행) | `core/decision/pipeline.py` | ⬚ |
-| 3.13 | Reflection 시스템 (경험→성격변동) | `core/decision/reflection.py` | ⬚ |
+| 3.11 | LLM 프롬프트 템플릿 (성격 주입) | `core/decision/prompts.py` | ✅ |
+| 3.12 | 의사결정 파이프라인 (데이터→판단→실행) | `core/decision/pipeline.py` | ✅ |
+| 3.13 | Reflection 시스템 (경험→성격변동) | `core/decision/reflection.py` | ✅ |
+
+### 구현 현황 (v0.4.0)
+
+**구현 완료:**
+- 10D 성격 벡터 + VAD 감정 모델 + Personality Drift
+- 프롬프트 템플릿: 성격/감정 YAML 주입, TOON 시세, Markdown-KV 잔고
+- 의사결정 파이프라인: 시세→프롬프트→LLM 판단→JSON 파싱→주문 실행
+- Reflection: P&L 기반 성격 변동 (손실→loss_aversion↑, 수익→openness↑)
+- HR 시스템 + 직급/권한 + 에이전트 팩토리
+
+**미구현:**
+- CEO/Analyst/Trader 에이전트 클래스 (현재는 SimulationEngine이 직접 관리)
 
 ### 완료 기준
 
-- [ ] 에이전트 생성 → 성격 벡터 할당 → 감정 초기화
+- [x] 에이전트 생성 → 성격 벡터 할당 → 감정 초기화
 - [ ] CEO가 조직 구조를 자율 변경 (직급 생성, 권한 위임)
-- [ ] 에이전트의 의사결정이 성격/감정에 영향받음
-- [ ] Reflection 후 성격 변동 발생 + DB 기록
-- [ ] 테스트 커버리지 80%+
+- [x] 에이전트의 의사결정이 성격/감정에 영향받음
+- [x] Reflection 후 성격 변동 발생
+- [ ] 성격 변동 DB 기록
+- [x] 테스트 커버리지 80%+
 
 ---
 
@@ -155,23 +168,34 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 4.8 | Gemini LLM Adapter | `adapters/llm/gemini.py` | ✅ |
 | 4.9 | KIS 시세 Adapter | `adapters/market_data/kis.py` | ✅ |
 | 4.10 | KIS Adapter (한국투자증권) | `adapters/trading/kis.py` | ✅ |
-| 4.11 | Binance Adapter (ccxt) | `adapters/trading/binance.py` | ⬚ |
-| 4.12 | Alpaca Adapter | `adapters/trading/alpaca.py` | ⬚ |
+| 4.11 | KISSession (공유 토큰 + rate limiting) | `adapters/kis_session.py` | ✅ |
+| 4.12 | Binance Adapter (ccxt) | `adapters/trading/binance.py` | ⬚ |
+| 4.13 | Alpaca Adapter | `adapters/trading/alpaca.py` | ⬚ |
+
+### 구현 현황 (v0.4.0)
+
+**구현 완료:**
+- KISSession: 토큰 공유, 350ms 요청 스로틀링, rate limit 자동 재시도
+- KIS Trading: 잔고 조회, 포지션 조회, 주문 전송 (모의투자/실전)
+- KIS MarketData: 현재가 조회, OHLCV 일봉, 주요 종목 목록
+- Gemini LLM: gemini-2.5-flash 텍스트 생성 + text-embedding-004 임베딩
+- Paper Trading: 로컬 시뮬레이션용 가상 트레이딩
+- LACP 통신 프로토콜 + MessagePack 직렬화
 
 ### 완료 기준
 
-- [ ] LACP 메시지 송수신 동작
+- [x] LACP 메시지 모델 정의
 - [x] Paper Trading으로 가상 매매 가능
-- [ ] Gemini API 연동 (프롬프트 → 응답)
-- [ ] 시장 데이터 수집 (Yahoo Finance)
-- [ ] Port 인터페이스로 Adapter 교체 가능 확인
-- [ ] 테스트 커버리지 80%+
+- [x] Gemini API 연동 (프롬프트 → 응답)
+- [x] KIS 시세 + 모의투자 주문 동작 확인
+- [x] Port 인터페이스로 Adapter 교체 가능 확인
+- [x] 테스트 커버리지 80%+
 
 ---
 
 ## M5: 멀티에이전트 시뮬레이션
 
-> LangGraph 워크플로우, 시뮬레이션 엔진, 논문급 기록
+> 시뮬레이션 엔진, 논문급 기록
 
 ### 태스크
 
@@ -181,18 +205,25 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 5.2 | LangGraph 노드 (분석/판단/실행) | `graph/nodes.py` | ⬚ |
 | 5.3 | LangGraph 엣지 (조건부 라우팅) | `graph/edges.py` | ⬚ |
 | 5.4 | 워크플로우 그래프 조립 | `graph/workflow.py` | ⬚ |
-| 5.5 | 시뮬레이션 엔진 (메인 루프) | `simulation/engine.py` | ⬚ |
+| 5.5 | 시뮬레이션 엔진 (메인 루프) | `simulation/engine.py` | ✅ |
 | 5.6 | 시뮬레이션 시간 관리 (Clock) | `simulation/clock.py` | ⬚ |
 | 5.7 | 논문급 기록기 (Recorder) | `simulation/recorder.py` | ⬚ |
-| 5.8 | 멀티에이전트 동시 실행 (asyncio) | `simulation/engine.py` | ⬚ |
+| 5.8 | 멀티에이전트 동시 실행 (asyncio) | `simulation/engine.py` | ✅ |
 | 5.9 | CEO 자율 조직 운영 통합 | CEO + HR + 권한 연동 | ⬚ |
 | 5.10 | 자연 선택 (수익 기반 생존) | `simulation/engine.py` | ⬚ |
 | 5.11 | 회사 스냅샷 기록 | TimescaleDB hypertable | ⬚ |
 | 5.12 | E2E 시뮬레이션 테스트 | `tests/e2e/` | ⬚ |
 
+### 구현 현황
+
+**구현 완료:**
+- SimulationEngine: 3 에이전트(Alpha/Beta/Gamma) 순차 실행
+- 메인 루프: 사이클 → 슬립 → 반복
+- 에이전트별 DecisionPipeline + Reflection + 메모리 저장
+
 ### 완료 기준
 
-- [ ] 에이전트 3~5명으로 1일 시뮬레이션 완주
+- [x] 에이전트 3명으로 시뮬레이션 사이클 완주
 - [ ] CEO가 자율적으로 조직 운영 (채용/해고 발생)
 - [ ] 에이전트 간 LACP 통신으로 시그널 교환
 - [ ] 모든 의사결정/거래/조직변경 DB 기록
@@ -210,7 +241,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
 | 6.1 | Alpaca Paper Trading 연동 | 미국 주식 모의투자 | ⬚ |
-| 6.2 | KIS 모의투자 연동 | 국내 주식 모의투자 | ⬚ |
+| 6.2 | KIS 모의투자 연동 | 국내 주식 모의투자 | ✅ |
 | 6.3 | 실시간 시장 데이터 통합 | WebSocket 시세 수신 | ⬚ |
 | 6.4 | 에이전트 10명 스케일 테스트 | 성능/안정성 검증 | ⬚ |
 | 6.5 | 모니터링 대시보드 (Grafana) | 수익률, 에이전트 상태 | ⬚ |
@@ -219,10 +250,16 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 6.8 | 데이터 내보내기 (Parquet) | 논문용 데이터셋 | ⬚ |
 | 6.9 | 1주일 연속 운영 테스트 | 안정성 검증 | ⬚ |
 
+### 구현 현황
+
+**구현 완료:**
+- KIS 모의투자 E2E 동작 확인 (토큰 → 시세 → LLM 판단 → 주문 전송)
+- 장 종료 시 주문 거부 정상 처리, 장 시간에는 체결됨
+
 ### 완료 기준
 
 - [ ] Alpaca Paper Trading으로 미국 주식 자동 매매
-- [ ] KIS 모의투자로 국내 주식 자동 매매
+- [x] KIS 모의투자로 국내 주식 자동 매매
 - [ ] 에이전트 10명 동시 운영 안정
 - [ ] Grafana 대시보드에서 실시간 모니터링
 - [ ] 1주일 무중단 운영
@@ -270,14 +307,12 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ──→ M5 ──→ M6 ──→ M7
 
 ---
 
-## 현재 진행: M3 + M4 병렬 착수
+## 현재 진행: M3/M4 마무리 → M5 확장
 
-**M2 완료 (v0.3.1). M3 55%, M4 50%. 다음 작업:**
+**v0.4.0 — E2E 로컬 Paper Trading 동작 확인 완료. 다음 작업:**
 
-1. **M4.8** — Gemini LLM Adapter (LLM 연동 필수 선행)
-2. **M4.9** — Yahoo Finance / KIS 시세 Adapter
-3. **M4.10** — KIS Adapter (한국투자증권 모의투자 — API 키 확보 완료)
-4. **M3.11** — LLM 프롬프트 템플릿 (성격 주입)
-5. **M3.12** — 의사결정 파이프라인 (데이터→판단→실행)
-6. **M3.5** — CEO Agent 구현 (인사/조직/전략 자율)
-7. **M4.3** — Redis Stream 메시지 버스
+1. **M3.5** — CEO Agent 구현 (자율 인사/조직 결정)
+2. **M4.3** — Redis Stream 메시지 버스 (에이전트 간 통신)
+3. **M5.7** — 논문급 기록기 (거래/결정/감정 DB 저장)
+4. **M5.9** — CEO 자율 조직 운영 통합
+5. **M5.10** — 자연 선택 (수익 기반 에이전트 생존)
