@@ -18,7 +18,7 @@ from agentic_capital.core.agents.factory import create_agent, create_random_pers
 from agentic_capital.core.personality.models import EmotionState
 from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.infra.tracing import setup_tracing
-from agentic_capital.simulation.clock import is_market_open
+from agentic_capital.simulation.clock import get_open_markets, is_market_open
 
 logger = structlog.get_logger()
 
@@ -196,7 +196,8 @@ class SimulationEngine:
         """Run one complete cycle for all agents using LangGraph."""
         self._cycle_count += 1
         market_open = is_market_open()
-        logger.info("cycle_start", cycle=self._cycle_count, market_open=market_open)
+        open_markets = get_open_markets()
+        logger.info("cycle_start", cycle=self._cycle_count, market_open=market_open, open_markets=open_markets)
 
         # Run each agent through LangGraph workflow
         cycle_results = []
