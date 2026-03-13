@@ -288,11 +288,9 @@ class SimulationEngine:
                     if k in PersonalityVector.model_fields
                 })
 
-            # Determine role type (default to analyst if unknown)
-            agent_role = role if role in ("ceo", "analyst", "trader") else "analyst"
-
-            kwargs = {"role": agent_role, "name": name, "llm": self._llm, "personality": personality}
-            if agent_role == "trader":
+            # CEO decides the role — system accepts any role name
+            kwargs = {"role": role, "name": name, "llm": self._llm, "personality": personality}
+            if role.lower() == "trader":
                 kwargs["trading"] = self._trading
                 kwargs["market_data"] = self._market_data
 

@@ -96,7 +96,12 @@ class KISMarketDataAdapter(MarketDataPort):
             raise
 
     async def get_symbols(self) -> list[str]:
-        """Return major Korean stock symbols (static list for Phase 1)."""
+        """Return default Korean stock symbols.
+
+        This is a starting set — agents can trade ANY symbol by querying
+        get_quote() or get_ohlcv() directly with any valid symbol code.
+        No restriction on tradable symbols.
+        """
         return [
             "005930",  # 삼성전자
             "000660",  # SK하이닉스

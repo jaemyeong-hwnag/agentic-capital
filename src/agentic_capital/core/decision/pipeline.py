@@ -138,8 +138,6 @@ class DecisionPipeline:
             decisions = []
             for d in parsed.get("decisions", []):
                 action = d.get("action", "HOLD").upper()
-                if action not in ("BUY", "SELL", "HOLD"):
-                    continue
                 decisions.append(TradingDecision(
                     action=action,
                     symbol=d.get("symbol", ""),

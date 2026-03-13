@@ -219,8 +219,6 @@ Respond in JSON:
             signals = []
             for s in parsed.get("signals", []):
                 signal_type = s.get("signal", "HOLD").upper()
-                if signal_type not in ("BUY", "SELL", "HOLD"):
-                    continue
                 signals.append(AnalystSignal(
                     symbol=s.get("symbol", ""),
                     signal=signal_type,

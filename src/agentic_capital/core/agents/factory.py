@@ -95,8 +95,6 @@ def create_agent(
     role_lower = role.lower()
     if role_lower == "ceo":
         return CEOAgent(profile=profile, personality=p, llm=llm)
-    elif role_lower == "analyst":
-        return AnalystAgent(profile=profile, personality=p, llm=llm)
     elif role_lower == "trader":
         if not isinstance(trading, TradingPort):
             msg = f"trading must be a TradingPort instance for trader, got {type(trading)}"
@@ -109,5 +107,6 @@ def create_agent(
             trading=trading, market_data=market_data,
         )
     else:
-        msg = f"Unknown agent role: {role}. Must be 'ceo', 'analyst', or 'trader'."
-        raise ValueError(msg)
+        # Any other role (analyst, CIO, quant strategist, risk manager, etc.)
+        # defaults to AnalystAgent — AI agents create any role they want
+        return AnalystAgent(profile=profile, personality=p, llm=llm)
