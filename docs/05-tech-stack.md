@@ -17,7 +17,8 @@
 | **에이전트 메모리** | A-MEM 방식 (Zettelkasten) | multi-hop 추론 2x 향상 — A-MEM (NeurIPS 2025) |
 | **메모리 통합** | Mem0 | 벡터+KV+그래프 통합, 26% 높은 정확도 |
 | **메인 DB** | PostgreSQL 16 + TimescaleDB | 정형+시계열 단일 서버, Gorilla 압축 |
-| **벡터 DB** | pgvector → Qdrant | float16 + SQ int8, HNSW M=16~32 |
+| **벡터 DB** | pgvectorscale (Phase 1) → Qdrant (Phase 2) | float8 + SQ int8, HNSW M=16~32 — pgvectorscale: pgvector 대비 10x 빠름 (VectorDBBench 2025) |
+| **그래프 (Phase 2)** | Apache AGE (PG 확장) | 에이전트 관계/메모리 링크 그래프 탐색 — Cypher 쿼리, PG 내장 |
 | **상태/캐시** | Redis 7+ | Working Memory, 감정 상태, 이벤트 스트림 |
 | **분석** | DuckDB + Parquet + Arrow IPC | OLAP, 백테스팅, 논문 데이터 추출 |
 | **LLM** | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
@@ -194,3 +195,8 @@ msg:
 | MarketSenseAI 2.0 | 2025 | 멀티모달 금융 에이전트 |
 | FinRobot | 2024 | Financial Chain-of-Thought |
 | SchemaAgent | 2025 | AI 기반 스키마 생성 |
+| Agentic Postgres | Tiger Data 2025 | PG 기반 AI 에이전트 워크로드 통합 (TimescaleDB + pgvectorscale + BM25) |
+| VectorDBBench | Zilliz 2025 | 벡터 DB 벤치마크 — pgvectorscale 10x faster than Qdrant at 50M vectors |
+| Embedding Storage Optimization | arXiv 2025 | float8 4x 압축, <0.3% 정확도 손실 검증 |
+| Memory in the Age of AI Agents | arXiv Dec 2025 | Working/Episodic/Semantic/Procedural 4계층 합의 |
+| SimpleMem | arXiv Jan 2026 | 3단계 메모리 파이프라인 (향후 참고) |

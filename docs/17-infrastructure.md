@@ -17,7 +17,7 @@
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐             │
 │  │PostgreSQL│ │  Redis   │ │ Qdrant   │             │
 │  │+Timescale│ │  7+      │ │ (Phase2) │             │
-│  │+pgvector │ │          │ │          │             │
+│  │+pgvectorscale │ │          │ │          │             │
 │  └──────────┘ └──────────┘ └──────────┘             │
 ├──────────────────────────────────────────────────────┤
 │                   External APIs                       │
@@ -36,9 +36,9 @@
 | 컴포넌트 | 구성 | 스펙 |
 |---------|------|------|
 | **App Server** | 로컬 Python | MacOS / Linux |
-| **PostgreSQL 16** | Docker | + TimescaleDB 확장 + pgvector 확장 |
+| **PostgreSQL 16** | Docker | + TimescaleDB 확장 + pgvectorscale 확장 |
 | **Redis 7** | Docker | 기본 설정 |
-| **Qdrant** | 불필요 (pgvector 사용) | — |
+| **Qdrant** | 불필요 (pgvectorscale 사용) | — |
 
 #### Docker Compose 구성
 
@@ -116,14 +116,14 @@ volumes:
 
 ## 인프라 컴포넌트 상세
 
-### PostgreSQL 16 + TimescaleDB + pgvector
+### PostgreSQL 16 + TimescaleDB + pgvectorscale
 
 **역할**: 메인 DB (정형 + 시계열 + 벡터)
 
 | 확장 | 용도 |
 |------|------|
 | `timescaledb` | 시계열 hypertable, 압축 chunk (Gorilla) |
-| `pgvector` | 벡터 저장/검색 (HNSW 인덱스) |
+| `pgvectorscale` | 벡터 저장/검색 (HNSW 인덱스) |
 
 **핵심 설정**:
 ```sql
@@ -136,7 +136,7 @@ SELECT create_hypertable('agent_emotion_history', 'time');
 -- 압축 정책 (7일 이상 된 데이터 자동 압축)
 SELECT add_compression_policy('market_ohlcv', INTERVAL '7 days');
 
--- pgvector 인덱스
+-- pgvectorscale 인덱스
 CREATE INDEX ON memories USING hnsw (embedding vector_cosine_ops)
   WITH (m = 16, ef_construction = 200);
 ```

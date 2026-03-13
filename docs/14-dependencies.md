@@ -24,7 +24,7 @@
 | `redis` | ^5.0 | Redis 비동기 클라이언트 (`redis.asyncio`) |
 | `qdrant-client` | latest | Qdrant 벡터 DB 클라이언트 |
 | `duckdb` | latest | 분석용 인프로세스 OLAP |
-| `pgvector` | latest | PostgreSQL 벡터 확장 Python 바인딩 |
+| `pgvector` | latest | PostgreSQL 벡터 확장 Python 바인딩 (pgvectorscale 호환) |
 
 ### Data & Serialization
 
