@@ -19,7 +19,7 @@ class GeminiLLMAdapter(LLMPort):
     def __init__(
         self,
         *,
-        generation_model: str = "gemini-2.5-flash-preview-05-20",
+        generation_model: str = "gemini-2.5-flash",
         embedding_model: str = "text-embedding-004",
         api_key: str = "",
     ) -> None:

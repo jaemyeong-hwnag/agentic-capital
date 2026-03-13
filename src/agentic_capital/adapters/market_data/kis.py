@@ -5,68 +5,32 @@ from __future__ import annotations
 from datetime import datetime
 
 import structlog
-import httpx
 
-from agentic_capital.config import settings
+from agentic_capital.adapters.kis_session import KISSession
 from agentic_capital.ports.market_data import OHLCV, MarketDataPort, Quote
 
 logger = structlog.get_logger()
-
-_PAPER_BASE = "https://openapivts.koreainvestment.com:29443"
-_REAL_BASE = "https://openapi.koreainvestment.com:9443"
 
 
 class KISMarketDataAdapter(MarketDataPort):
     """KIS Open API adapter for Korean stock market data."""
 
-    def __init__(
-        self,
-        *,
-        app_key: str = "",
-        app_secret: str = "",
-        is_paper: bool | None = None,
-    ) -> None:
-        self._app_key = app_key or settings.kis_app_key
-        self._app_secret = app_secret or settings.kis_app_secret
-        self._is_paper = is_paper if is_paper is not None else settings.kis_is_paper
-        self._base_url = _PAPER_BASE if self._is_paper else _REAL_BASE
-        self._access_token: str | None = None
-        self._client = httpx.AsyncClient(timeout=15.0)
-        logger.info("kis_market_data_initialized", mode="paper" if self._is_paper else "live")
-
-    async def _ensure_token(self) -> str:
-        if self._access_token:
-            return self._access_token
-        r = await self._client.post(
-            f"{self._base_url}/oauth2/tokenP",
-            json={
-                "grant_type": "client_credentials",
-                "appkey": self._app_key,
-                "appsecret": self._app_secret,
-            },
+    def __init__(self, *, session: KISSession | None = None) -> None:
+        if session is None:
+            session = KISSession()
+        self._session = session
+        logger.info(
+            "kis_market_data_initialized",
+            mode="paper" if session.is_paper else "live",
         )
-        data = r.json()
-        if "access_token" not in data:
-            raise RuntimeError(f"KIS token failed: {data}")
-        self._access_token = data["access_token"]
-        return self._access_token
-
-    def _headers(self, tr_id: str) -> dict[str, str]:
-        return {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {self._access_token}",
-            "appkey": self._app_key,
-            "appsecret": self._app_secret,
-            "tr_id": tr_id,
-        }
 
     async def get_quote(self, symbol: str) -> Quote:
         """Get current price quote for a Korean stock."""
-        await self._ensure_token()
+        await self._session.ensure_token()
         try:
-            r = await self._client.get(
-                f"{self._base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-                headers=self._headers("FHKST01010100"),
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
+                headers=self._session.headers("FHKST01010100"),
                 params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
             )
             data = r.json()
@@ -93,12 +57,12 @@ class KISMarketDataAdapter(MarketDataPort):
         limit: int = 100,
     ) -> list[OHLCV]:
         """Get historical daily OHLCV data for a Korean stock."""
-        await self._ensure_token()
+        await self._session.ensure_token()
         try:
             today = datetime.now().strftime("%Y%m%d")
-            r = await self._client.get(
-                f"{self._base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-price",
-                headers=self._headers("FHKST01010400"),
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-price",
+                headers=self._session.headers("FHKST01010400"),
                 params={
                     "FID_COND_MRKT_DIV_CODE": "J",
                     "FID_INPUT_ISCD": symbol,

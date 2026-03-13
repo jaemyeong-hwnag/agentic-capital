@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import structlog
-import httpx
 
-from agentic_capital.config import settings
+from agentic_capital.adapters.kis_session import KISSession
 from agentic_capital.ports.trading import (
     Balance,
     Order,
@@ -16,10 +15,6 @@ from agentic_capital.ports.trading import (
 )
 
 logger = structlog.get_logger()
-
-# KIS API base URLs
-_REAL_BASE = "https://openapi.koreainvestment.com:9443"
-_PAPER_BASE = "https://openapivts.koreainvestment.com:29443"
 
 # Transaction IDs
 _TR_IDS = {
@@ -36,78 +31,30 @@ class KISTradingAdapter(TradingPort):
     Supports both paper trading (모의투자) and live trading (실전투자).
     """
 
-    def __init__(
-        self,
-        *,
-        app_key: str = "",
-        app_secret: str = "",
-        account_no: str = "",
-        is_paper: bool | None = None,
-    ) -> None:
-        self._app_key = app_key or settings.kis_app_key
-        self._app_secret = app_secret or settings.kis_app_secret
-        self._account_no = account_no or settings.kis_account_no
-        self._is_paper = is_paper if is_paper is not None else settings.kis_is_paper
-
-        if not all([self._app_key, self._app_secret, self._account_no]):
-            raise ValueError("KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO are required")
-
-        self._base_url = _PAPER_BASE if self._is_paper else _REAL_BASE
-        self._cano = self._account_no[:8]
-        self._prdt_cd = self._account_no[8:]
-        self._access_token: str | None = None
-        self._client = httpx.AsyncClient(timeout=15.0)
-
-        mode = "paper" if self._is_paper else "LIVE"
-        logger.info("kis_adapter_initialized", mode=mode, account=self._account_no)
+    def __init__(self, *, session: KISSession | None = None) -> None:
+        if session is None:
+            session = KISSession()
+        self._session = session
+        logger.info(
+            "kis_adapter_initialized",
+            mode="paper" if session.is_paper else "LIVE",
+            account=session.account_no,
+        )
 
     def _tr_id(self, action: str) -> str:
-        mode = "paper" if self._is_paper else "real"
+        mode = "paper" if self._session.is_paper else "real"
         return _TR_IDS[action][mode]
-
-    async def _ensure_token(self) -> str:
-        """Get or refresh access token."""
-        if self._access_token:
-            return self._access_token
-
-        try:
-            r = await self._client.post(
-                f"{self._base_url}/oauth2/tokenP",
-                json={
-                    "grant_type": "client_credentials",
-                    "appkey": self._app_key,
-                    "appsecret": self._app_secret,
-                },
-            )
-            data = r.json()
-            if "access_token" not in data:
-                raise RuntimeError(f"KIS token failed: {data}")
-            self._access_token = data["access_token"]
-            logger.info("kis_token_acquired")
-            return self._access_token
-        except Exception:
-            logger.exception("kis_token_failed")
-            raise
-
-    def _headers(self, tr_id: str) -> dict[str, str]:
-        return {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {self._access_token}",
-            "appkey": self._app_key,
-            "appsecret": self._app_secret,
-            "tr_id": tr_id,
-        }
 
     async def get_balance(self) -> Balance:
         """Get account balance from KIS."""
-        token = await self._ensure_token()
+        await self._session.ensure_token()
         try:
-            r = await self._client.get(
-                f"{self._base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
-                headers=self._headers(self._tr_id("balance")),
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
+                headers=self._session.headers(self._tr_id("balance")),
                 params={
-                    "CANO": self._cano,
-                    "ACNT_PRDT_CD": self._prdt_cd,
+                    "CANO": self._session.cano,
+                    "ACNT_PRDT_CD": self._session.prdt_cd,
                     "AFHR_FLPR_YN": "N",
                     "OFL_YN": "",
                     "INQR_DVSN": "02",
@@ -136,14 +83,14 @@ class KISTradingAdapter(TradingPort):
 
     async def get_positions(self) -> list[Position]:
         """Get current stock positions from KIS."""
-        token = await self._ensure_token()
+        await self._session.ensure_token()
         try:
-            r = await self._client.get(
-                f"{self._base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
-                headers=self._headers(self._tr_id("balance")),
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
+                headers=self._session.headers(self._tr_id("balance")),
                 params={
-                    "CANO": self._cano,
-                    "ACNT_PRDT_CD": self._prdt_cd,
+                    "CANO": self._session.cano,
+                    "ACNT_PRDT_CD": self._session.prdt_cd,
                     "AFHR_FLPR_YN": "N",
                     "OFL_YN": "",
                     "INQR_DVSN": "02",
@@ -186,21 +133,21 @@ class KISTradingAdapter(TradingPort):
 
     async def submit_order(self, order: Order) -> OrderResult:
         """Submit a stock order to KIS."""
-        token = await self._ensure_token()
+        await self._session.ensure_token()
         action = "order_buy" if order.side == OrderSide.BUY else "order_sell"
 
         try:
             body = {
-                "CANO": self._cano,
-                "ACNT_PRDT_CD": self._prdt_cd,
+                "CANO": self._session.cano,
+                "ACNT_PRDT_CD": self._session.prdt_cd,
                 "PDNO": order.symbol,
                 "ORD_DVSN": "00" if order.price else "01",  # 00=지정가, 01=시장가
                 "ORD_QTY": str(int(order.quantity)),
                 "ORD_UNPR": str(int(order.price)) if order.price else "0",
             }
-            r = await self._client.post(
-                f"{self._base_url}/uapi/domestic-stock/v1/trading/order-cash",
-                headers=self._headers(self._tr_id(action)),
+            r = await self._session.post(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/trading/order-cash",
+                headers=self._session.headers(self._tr_id(action)),
                 json=body,
             )
             data = r.json()
@@ -260,11 +207,11 @@ class KISTradingAdapter(TradingPort):
 
     async def get_quote(self, symbol: str) -> dict:
         """Get current price quote for a Korean stock symbol."""
-        token = await self._ensure_token()
+        await self._session.ensure_token()
         try:
-            r = await self._client.get(
-                f"{self._base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-                headers=self._headers(self._tr_id("price")),
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
+                headers=self._session.headers(self._tr_id("price")),
                 params={
                     "FID_COND_MRKT_DIV_CODE": "J",
                     "FID_INPUT_ISCD": symbol,

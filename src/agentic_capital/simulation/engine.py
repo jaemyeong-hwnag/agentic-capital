@@ -8,6 +8,7 @@ from datetime import datetime
 
 import structlog
 
+from agentic_capital.adapters.kis_session import KISSession
 from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
 from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
 from agentic_capital.adapters.trading.kis import KISTradingAdapter
@@ -65,8 +66,9 @@ class SimulationEngine:
     def _init_adapters(self) -> None:
         """Initialize all adapters from settings."""
         self._llm = GeminiLLMAdapter()
-        self._trading = KISTradingAdapter()
-        self._market_data = KISMarketDataAdapter()
+        kis_session = KISSession()
+        self._trading = KISTradingAdapter(session=kis_session)
+        self._market_data = KISMarketDataAdapter(session=kis_session)
         self._pipeline = DecisionPipeline(
             llm=self._llm,
             trading=self._trading,
