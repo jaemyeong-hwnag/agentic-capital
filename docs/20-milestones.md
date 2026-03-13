@@ -29,7 +29,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
 | M3 에이전트 시스템 | ⬚ 부분 구현 | 55% |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 50% |
+| M4 통신 + 어댑터 | ⬚ 부분 구현 | 75% |
 | M5 시뮬레이션 | ⬚ 미착수 | 0% |
 | M6 Paper Trading | ⬚ 미착수 | 0% |
 | M7 실거래 | ⬚ 미착수 | 0% |
@@ -152,9 +152,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 4.5 | MarketDataPort ABC (시세/OHLCV/뉴스) | `ports/market_data.py` | ✅ |
 | 4.6 | LLMPort ABC (추론/임베딩) | `ports/llm.py` | ✅ |
 | 4.7 | Paper Trading Adapter (시뮬레이션) | `adapters/trading/paper.py` | ✅ |
-| 4.8 | Gemini LLM Adapter | `adapters/llm/gemini.py` | ⬚ |
-| 4.9 | Yahoo Finance Adapter | `adapters/market_data/yahoo.py` | ⬚ |
-| 4.10 | KIS Adapter (한국투자증권) | `adapters/trading/kis.py` | ⬚ |
+| 4.8 | Gemini LLM Adapter | `adapters/llm/gemini.py` | ✅ |
+| 4.9 | KIS 시세 Adapter | `adapters/market_data/kis.py` | ✅ |
+| 4.10 | KIS Adapter (한국투자증권) | `adapters/trading/kis.py` | ✅ |
 | 4.11 | Binance Adapter (ccxt) | `adapters/trading/binance.py` | ⬚ |
 | 4.12 | Alpaca Adapter | `adapters/trading/alpaca.py` | ⬚ |
 
