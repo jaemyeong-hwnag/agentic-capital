@@ -1,4 +1,8 @@
-"""Simulation engine — main loop for autonomous trading."""
+"""Simulation engine — LangGraph-based autonomous multi-agent loop.
+
+System provides the structure and records everything.
+Agents decide everything autonomously. Only constraint: capital.
+"""
 
 from __future__ import annotations
 
@@ -8,105 +12,91 @@ from datetime import datetime
 
 import structlog
 
-from agentic_capital.adapters.kis_session import KISSession
-from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
-from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
-from agentic_capital.adapters.trading.kis import KISTradingAdapter
 from agentic_capital.config import settings
-from agentic_capital.core.agents.factory import create_random_personality
-from agentic_capital.core.decision.pipeline import DecisionPipeline
-from agentic_capital.core.decision.reflection import reflect_on_trades
+from agentic_capital.core.agents.base import BaseAgent
+from agentic_capital.core.agents.factory import create_agent, create_random_personality
 from agentic_capital.core.personality.models import EmotionState
-from agentic_capital.simulation.clock import is_market_open, now_kst, seconds_until_market_open
+from agentic_capital.graph.workflow import run_agent_cycle
+from agentic_capital.simulation.clock import is_market_open
 
 logger = structlog.get_logger()
 
 
-class AgentState:
-    """Runtime state for a single trading agent."""
-
-    def __init__(
-        self,
-        name: str,
-        role: str = "trader",
-        philosophy: str = "",
-        seed: int | None = None,
-    ) -> None:
-        self.id = uuid.uuid4()
-        self.name = name
-        self.role = role
-        self.philosophy = philosophy
-        self.personality = create_random_personality(seed)
-        self.emotion = EmotionState()
-        self.memories: list[str] = []
-        self.total_cycles = 0
-        self.created_at = datetime.now()
-
-
 class SimulationEngine:
-    """Main simulation loop — creates agents, runs trading cycles."""
+    """Main simulation loop — creates agents, runs LangGraph cycles.
+
+    System only provides structure and tools. All decisions (strategy,
+    organization, trading, hiring, firing) are made by agents autonomously.
+    """
 
     def __init__(
         self,
         *,
-        cycle_interval_seconds: int = 300,  # 5 minutes default
+        cycle_interval_seconds: int = 300,
         symbols: list[str] | None = None,
     ) -> None:
         self._cycle_interval = cycle_interval_seconds
         self._symbols = symbols
-        self._agents: list[AgentState] = []
+        self._agents: list[BaseAgent] = []
         self._running = False
         self._cycle_count = 0
 
         # Adapters (initialized in start())
-        self._llm: GeminiLLMAdapter | None = None
-        self._trading: KISTradingAdapter | None = None
-        self._market_data: KISMarketDataAdapter | None = None
-        self._pipeline: DecisionPipeline | None = None
-        self._recorder = None  # SimulationRecorder, optional (requires DB)
+        self._llm = None
+        self._trading = None
+        self._market_data = None
+        self._recorder = None
 
     def _init_adapters(self) -> None:
         """Initialize all adapters from settings."""
+        from agentic_capital.adapters.kis_session import KISSession
+        from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
+        from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
+        from agentic_capital.adapters.trading.kis import KISTradingAdapter
+
         self._llm = GeminiLLMAdapter()
         kis_session = KISSession()
         self._trading = KISTradingAdapter(session=kis_session)
         self._market_data = KISMarketDataAdapter(session=kis_session)
-        self._pipeline = DecisionPipeline(
-            llm=self._llm,
-            trading=self._trading,
-            market_data=self._market_data,
-        )
         logger.info("adapters_initialized")
 
     def _init_agents(self) -> None:
-        """Create initial agent roster."""
+        """Create initial agent roster — temporary, AI changes everything."""
         seed = settings.simulation_seed
+
+        # Initial organization: CEO + Analyst + Trader (temporary — CEO changes as needed)
         self._agents = [
-            AgentState(
-                name="Alpha",
-                role="aggressive_trader",
-                philosophy="High risk, high reward. Momentum-based trading with conviction.",
+            create_agent(
+                role="ceo",
+                name="CEO-Alpha",
+                philosophy="Maximize fund returns through optimal organization and strategy",
                 seed=seed,
+                llm=self._llm,
             ),
-            AgentState(
-                name="Beta",
-                role="conservative_trader",
-                philosophy="Capital preservation first. Value investing with strong fundamentals.",
+            create_agent(
+                role="analyst",
+                name="Analyst-Beta",
+                philosophy="Data-driven market analysis for maximum signal accuracy",
                 seed=seed + 1,
+                llm=self._llm,
             ),
-            AgentState(
-                name="Gamma",
-                role="swing_trader",
-                philosophy="Follow market trends. Technical analysis with risk management.",
+            create_agent(
+                role="trader",
+                name="Trader-Gamma",
+                philosophy="Execute trades with precision — high conviction, strict risk management",
                 seed=seed + 2,
+                llm=self._llm,
+                trading=self._trading,
+                market_data=self._market_data,
             ),
         ]
+
         logger.info("agents_initialized", count=len(self._agents))
         for agent in self._agents:
             logger.info(
                 "agent_created",
                 name=agent.name,
-                role=agent.role,
+                role=type(agent).__name__,
                 personality_snapshot={
                     "openness": f"{agent.personality.openness:.2f}",
                     "loss_aversion": f"{agent.personality.loss_aversion:.2f}",
@@ -133,13 +123,12 @@ class SimulationEngine:
                 },
             )
 
-            # Record agents
             for agent in self._agents:
                 await self._recorder.record_agent(
-                    agent_id=agent.id,
+                    agent_id=agent.agent_id,
                     name=agent.name,
-                    role=agent.role,
-                    philosophy=agent.philosophy,
+                    role=type(agent).__name__,
+                    philosophy=agent.profile.philosophy,
                     personality=agent.personality,
                 )
 
@@ -161,14 +150,11 @@ class SimulationEngine:
         self._init_adapters()
         self._init_agents()
 
-        # Get symbols from market data adapter if not specified
         if not self._symbols:
             self._symbols = await self._market_data.get_symbols()
 
-        # Initialize DB recorder
         await self._init_recorder()
 
-        # Print initial state
         balance = await self._trading.get_balance()
         logger.info(
             "initial_state",
@@ -205,128 +191,195 @@ class SimulationEngine:
         self._running = False
 
     async def _run_cycle(self) -> None:
-        """Run one complete trading cycle for all agents."""
+        """Run one complete cycle for all agents using LangGraph."""
         self._cycle_count += 1
         market_open = is_market_open()
         logger.info("cycle_start", cycle=self._cycle_count, market_open=market_open)
 
-        balance = await self._trading.get_balance()
-        logger.info(
-            "cycle_balance",
-            cycle=self._cycle_count,
-            total=balance.total,
-            available=balance.available,
-        )
-
-        for agent in self._agents:
+        # Run each agent through LangGraph workflow
+        cycle_results = []
+        for agent in list(self._agents):  # Copy list — CEO might modify roster
             try:
-                await self._run_agent_cycle(agent)
+                result = await run_agent_cycle(
+                    agent,
+                    cycle_number=self._cycle_count,
+                    trading=self._trading,
+                    market_data=self._market_data,
+                    symbols=self._symbols,
+                    recorder=self._recorder,
+                )
+                cycle_results.append(result)
+
+                # Process CEO organizational actions
+                await self._process_org_actions(agent, result)
+
             except Exception:
                 logger.exception("agent_cycle_failed", agent=agent.name, cycle=self._cycle_count)
 
-        # Post-cycle summary
-        balance_after = await self._trading.get_balance()
-        positions = await self._trading.get_positions()
-        logger.info(
-            "cycle_complete",
-            cycle=self._cycle_count,
-            balance_before=balance.total,
-            balance_after=balance_after.total,
-            positions_count=len(positions),
-        )
-
         # Record company snapshot
-        if self._recorder:
+        if self._recorder and self._trading:
             try:
+                balance = await self._trading.get_balance()
                 await self._recorder.record_company_snapshot(
-                    total_capital=balance_after.total,
-                    available_cash=balance_after.available,
+                    total_capital=balance.total,
+                    available_cash=balance.available,
                     agents_count=len(self._agents),
+                    org_snapshot={
+                        "agents": [
+                            {"id": str(a.agent_id), "name": a.name, "role": type(a).__name__}
+                            for a in self._agents
+                        ],
+                    },
                 )
                 await self._recorder.commit()
             except Exception:
                 logger.exception("snapshot_recording_failed")
 
-    async def _run_agent_cycle(self, agent: AgentState) -> None:
-        """Run one decision cycle for a single agent."""
-        logger.info("agent_cycle_start", agent=agent.name, cycle=self._cycle_count)
-
-        assert self._pipeline is not None
-
-        # Run decision pipeline
-        decisions, updated_emotion = await self._pipeline.run_cycle(
-            agent_name=agent.name,
-            agent_role=agent.role,
-            philosophy=agent.philosophy,
-            personality=agent.personality,
-            emotion=agent.emotion,
-            symbols=self._symbols or [],
-            recent_memories=agent.memories[-5:],
-        )
-
-        # Update agent state
-        agent.emotion = updated_emotion
-        agent.total_cycles += 1
-
-        # Reflect on outcomes
-        positions = await self._trading.get_positions()
-        total_pnl_pct = 0.0
-        if positions:
-            total_pnl_pct = sum(p.unrealized_pnl_pct for p in positions) / len(positions)
-
-        old_personality = agent.personality
-        updated_personality, drift_events = reflect_on_trades(
-            agent.personality, decisions, total_pnl_pct
-        )
-        agent.personality = updated_personality
-
-        # Store memory of this cycle
-        if decisions:
-            actions_summary = ", ".join(
-                f"{d.action} {d.symbol} x{d.quantity}" for d in decisions
-            )
-            memory = f"Cycle {self._cycle_count}: {actions_summary}. P&L: {total_pnl_pct:.2f}%"
-            agent.memories.append(memory)
-
-        if drift_events:
-            logger.info("personality_drift", agent=agent.name, drifts=len(drift_events))
-
-        # Record to DB
-        if self._recorder:
-            try:
-                for d in decisions:
-                    await self._recorder.record_decision(
-                        agent_id=agent.id,
-                        decision=d,
-                        personality=agent.personality,
-                        emotion=agent.emotion,
-                        status="executed",
-                    )
-                await self._recorder.record_emotion(
-                    agent_id=agent.id,
-                    emotion=agent.emotion,
-                    trigger=f"cycle_{self._cycle_count}",
-                )
-                if drift_events:
-                    drift_tuples = []
-                    for event in drift_events:
-                        param = event.get("parameter", "")
-                        old_v = event.get("old_value", 0.0)
-                        new_v = event.get("new_value", 0.0)
-                        drift_tuples.append((param, old_v, new_v))
-                    await self._recorder.record_personality_drift(
-                        agent_id=agent.id,
-                        drift_events=drift_tuples,
-                        trigger=f"pnl_{total_pnl_pct:.2f}%",
-                    )
-                await self._recorder.commit()
-            except Exception:
-                logger.exception("recording_failed", agent=agent.name)
-
         logger.info(
-            "agent_cycle_complete",
-            agent=agent.name,
-            decisions=len(decisions),
-            emotion_valence=f"{agent.emotion.valence:.2f}",
-            emotion_stress=f"{agent.emotion.stress:.2f}",
+            "cycle_complete",
+            cycle=self._cycle_count,
+            agents_count=len(self._agents),
+            total_decisions=sum(len(r.get("decisions", [])) for r in cycle_results),
         )
+
+    async def _process_org_actions(self, agent: BaseAgent, result: dict) -> None:
+        """Process organizational actions from any agent's decisions.
+
+        CEO (or any agent with authority) can hire, fire, create roles, etc.
+        System executes these actions and records everything.
+        """
+        from agentic_capital.core.agents.ceo import CEOAgent
+
+        if not isinstance(agent, CEOAgent):
+            return
+
+        for decision in result.get("decisions", []):
+            if not isinstance(decision, dict):
+                continue
+
+            action_type = decision.get("type", decision.get("action_type", ""))
+
+            if action_type == "hire":
+                await self._handle_hire(agent, decision)
+            elif action_type == "fire":
+                await self._handle_fire(agent, decision)
+            elif action_type == "create_role":
+                await self._handle_create_role(agent, decision)
+            elif action_type == "abolish_role":
+                await self._handle_abolish_role(agent, decision)
+
+    async def _handle_hire(self, ceo: BaseAgent, decision: dict) -> None:
+        """Execute a hire decision — create new agent."""
+        role = decision.get("detail", decision.get("role", "trader")).lower()
+        name = decision.get("target", f"Agent-{len(self._agents) + 1}")
+        capital = float(decision.get("capital", 0))
+        personality_spec = decision.get("personality", {})
+
+        try:
+            # Use personality spec from CEO if provided, else random
+            personality = None
+            if personality_spec:
+                from agentic_capital.core.personality.models import PersonalityVector
+                personality = PersonalityVector(**{
+                    k: float(v) for k, v in personality_spec.items()
+                    if k in PersonalityVector.model_fields
+                })
+
+            # Determine role type (default to analyst if unknown)
+            agent_role = role if role in ("ceo", "analyst", "trader") else "analyst"
+
+            kwargs = {"role": agent_role, "name": name, "llm": self._llm, "personality": personality}
+            if agent_role == "trader":
+                kwargs["trading"] = self._trading
+                kwargs["market_data"] = self._market_data
+
+            new_agent = create_agent(
+                allocated_capital=capital,
+                **kwargs,
+            )
+            self._agents.append(new_agent)
+
+            # Record
+            if self._recorder:
+                await self._recorder.record_agent(
+                    agent_id=new_agent.agent_id,
+                    name=new_agent.name,
+                    role=agent_role,
+                    philosophy=new_agent.profile.philosophy,
+                    personality=new_agent.personality,
+                )
+                from agentic_capital.core.organization.hr import HREvent, HREventType
+                await self._recorder.record_hr_event(HREvent(
+                    event_type=HREventType.HIRE,
+                    target_agent_id=new_agent.agent_id,
+                    decided_by=ceo.agent_id,
+                    reasoning=decision.get("reason", ""),
+                    new_capital=capital,
+                ))
+
+            logger.info("agent_hired", name=name, role=agent_role, hired_by=ceo.name)
+
+        except Exception:
+            logger.exception("hire_failed", name=name)
+
+    async def _handle_fire(self, ceo: BaseAgent, decision: dict) -> None:
+        """Execute a fire decision — remove agent from roster."""
+        target = decision.get("target", "")
+
+        # Find agent by name or ID
+        agent_to_fire = None
+        for a in self._agents:
+            if a.name == target or str(a.agent_id) == target:
+                agent_to_fire = a
+                break
+
+        if not agent_to_fire or agent_to_fire is ceo:
+            return  # Can't fire self or nonexistent agent
+
+        self._agents.remove(agent_to_fire)
+
+        if self._recorder:
+            from agentic_capital.core.organization.hr import HREvent, HREventType
+            await self._recorder.record_hr_event(HREvent(
+                event_type=HREventType.FIRE,
+                target_agent_id=agent_to_fire.agent_id,
+                decided_by=ceo.agent_id,
+                reasoning=decision.get("reason", ""),
+            ))
+            await self._recorder.record_agent_status_change(
+                agent_id=agent_to_fire.agent_id,
+                new_status="fired",
+                reason=decision.get("reason", ""),
+            )
+
+        logger.info("agent_fired", name=agent_to_fire.name, fired_by=ceo.name)
+
+    async def _handle_create_role(self, ceo: BaseAgent, decision: dict) -> None:
+        """Execute a create_role decision."""
+        role_name = decision.get("detail", decision.get("target", ""))
+        if not role_name:
+            return
+
+        if self._recorder:
+            await self._recorder.record_role(
+                role_name=role_name,
+                permissions=decision.get("permissions", []),
+                created_by=ceo.agent_id,
+            )
+
+        logger.info("role_created", name=role_name, created_by=ceo.name)
+
+    async def _handle_abolish_role(self, ceo: BaseAgent, decision: dict) -> None:
+        """Execute an abolish_role decision."""
+        role_name = decision.get("detail", decision.get("target", ""))
+        if not role_name:
+            return
+
+        if self._recorder:
+            await self._recorder.record_role(
+                role_name=role_name,
+                created_by=ceo.agent_id,
+                status="abolished",
+            )
+
+        logger.info("role_abolished", name=role_name, abolished_by=ceo.name)
