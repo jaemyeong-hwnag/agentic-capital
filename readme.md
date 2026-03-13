@@ -13,7 +13,7 @@ An AI multi-agent roleplay simulation where autonomous agents with distinct pers
 ## Key Concepts
 
 - **Roleplay Simulation** — Agents are not scripted; they autonomously decide investment timing, asset selection, strategy, and organizational structure
-- **Personality-Driven** — Each agent has a 15D personality vector (Big5 + HEXACO + Prospect Theory) that influences all decisions and evolves over time
+- **Personality-Driven** — Each agent has a 10D personality vector (Big5 + HEXACO + Prospect Theory) that influences all decisions and evolves over time
 - **Dynamic Organization** — Roles, permissions, hierarchy are created/modified/abolished by agents themselves
 - **AI-Native Data** — All data formats optimized for AI consumption (TOON, NumeroLogic, LACP protocol), not human readability
 - **Research-Grade Logging** — Every decision, state change, and interaction is recorded for reproducibility and academic analysis
@@ -49,9 +49,9 @@ An AI multi-agent roleplay simulation where autonomous agents with distinct pers
 |-------|-----------|-----|
 | Language | Python 3.12+ | AI ecosystem standard |
 | Agent Framework | LangGraph v1.0 | Stateful graph workflows, proven in finance (FinCon, TradingAgents) |
-| Agent Memory | A-MEM (Zettelkasten) + Mem0 | 2x multi-hop reasoning (NeurIPS 2025) |
+| Agent Memory | A-MEM (Zettelkasten) | 2x multi-hop reasoning (NeurIPS 2025) |
 | Main DB | PostgreSQL 16 + TimescaleDB | Structured + time-series, Gorilla compression |
-| Vector DB | pgvector → Qdrant | float8, SQ int8, HNSW |
+| Vector DB | pgvector (Phase 1) → Qdrant (Phase 2) | HNSW index for similarity search |
 | Cache/State | Redis 7+ | Working memory, emotion state, event streams |
 | Analytics | DuckDB + Parquet + Arrow IPC | Offline analysis, backtesting, data export |
 | LLM | Gemini 2.5 Pro / Flash | Pro: key decisions, Flash: routine tasks |
@@ -116,16 +116,23 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 git clone https://github.com/your-org/agentic-capital.git
 cd agentic-capital
 
-# Setup (TBD)
+# Install
 pip install -e ".[dev]"
 
-# Run simulation (TBD)
-python -m agentic_capital.run
+# Infrastructure (PostgreSQL + Redis)
+docker compose up -d
+
+# Configure
+cp .env.example .env
+# Edit .env: set API keys, initial_capital
+
+# Run simulation
+agentic-capital
 ```
 
 ## License
 
-TBD
+MIT
 
 ---
 
@@ -144,7 +151,7 @@ TBD
 ## 핵심 특징
 
 - **롤플레잉 시뮬레이션** — 에이전트는 자율 판단으로 투자 시점, 종목, 전략, 조직 구조를 결정
-- **성격 기반** — 15차원 성격 벡터 (Big5 + HEXACO + 전망이론)가 모든 판단에 영향, 경험으로 변동
+- **성격 기반** — 10차원 성격 벡터 (Big5 + HEXACO + 전망이론)가 모든 판단에 영향, 경험으로 변동
 - **동적 조직** — 직급, 권한, 조직 구조를 에이전트가 직접 생성/변경/폐지
 - **AI 네이티브 데이터** — 모든 데이터 포맷이 AI 소비에 최적화 (TOON, NumeroLogic, LACP)
 - **논문급 기록** — 모든 결정, 상태 변화, 상호작용을 재현 가능하게 기록
