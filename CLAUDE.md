@@ -96,4 +96,5 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`)을 따른다.
 - `/coverage` - 커버리지 분석 및 80% 달성
 - `/version` - 시맨틱 버저닝 관리
 - `/docs` - 문서 자동 정리 및 동기화
+- `/security` - 보안 이슈 검토 및 감사
 - `/finalize` - 작업 완료 후 테스트 → 커버리지 → 문서 정리 → 커밋 일괄 실행
