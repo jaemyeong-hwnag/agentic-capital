@@ -165,8 +165,9 @@ async def reflect(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentW
 async def record(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentWorkflowState:
     """Record everything to DB — system's only job is to record.
 
-    All actions, decisions, emotions, personality changes are persisted.
-    This is the "논문급 기록" requirement.
+    All actions, decisions, emotions, personality changes, messages,
+    positions are persisted. No exceptions — every persona's every
+    action and state change is recorded.
     """
     recorder = deps.get("recorder")
     if not recorder:
@@ -176,19 +177,26 @@ async def record(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentWo
         from uuid import UUID
 
         agent_id = UUID(state["agent_id"]) if isinstance(state.get("agent_id"), str) else agent.agent_id
+        cycle = state.get("cycle_number", 0)
 
         # Record emotion state
         await recorder.record_emotion(
             agent_id=agent_id,
             emotion=agent.emotion,
-            trigger=f"cycle_{state.get('cycle_number', 0)}",
+            trigger=f"cycle_{cycle}",
         )
 
-        # Record decisions
+        # Record ALL decisions — trade, HR, strategy, reorg, anything
         for d in state.get("decisions", []):
-            if isinstance(d, dict) and "action" in d:
+            if not isinstance(d, dict):
+                continue
+
+            decision_type = d.get("type", d.get("decision_type", ""))
+
+            if decision_type in ("trade", "BUY", "SELL", "HOLD") or "symbol" in d:
+                # Trading decision
                 decision = TradingDecision(
-                    action=d.get("action", "HOLD"),
+                    action=d.get("action", d.get("type", "HOLD")),
                     symbol=d.get("symbol", ""),
                     quantity=int(d.get("quantity", 0)),
                     reason=d.get("reason", ""),
@@ -200,6 +208,75 @@ async def record(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentWo
                     personality=agent.personality,
                     emotion=agent.emotion,
                     status="executed",
+                )
+            elif decision_type in ("hire", "fire", "promote", "demote", "role_change", "reward", "warn"):
+                # HR decision — record as both decision and HR event
+                await recorder.record_decision(
+                    agent_id=agent_id,
+                    personality=agent.personality,
+                    emotion=agent.emotion,
+                    decision_type="hr",
+                    action=f"{decision_type} {d.get('target', '')}",
+                    reasoning=d.get("reason", d.get("detail", "")),
+                    confidence=float(d.get("confidence", 0.5)),
+                    context_snapshot=d,
+                    outcome={"type": decision_type},
+                )
+                # Also record HR event if target is a valid UUID
+                target = d.get("target", "")
+                try:
+                    from agentic_capital.core.organization.hr import HREvent, HREventType
+                    target_uuid = UUID(str(target)) if target else None
+                    if target_uuid:
+                        hr_event = HREvent(
+                            event_type=HREventType(decision_type),
+                            target_agent_id=target_uuid,
+                            decided_by=agent_id,
+                            reasoning=d.get("reason", d.get("detail", "")),
+                            new_capital=float(d.get("capital", 0)) if d.get("capital") else None,
+                        )
+                        await recorder.record_hr_event(hr_event)
+                except (ValueError, KeyError):
+                    pass  # Target is not a UUID or event type not in enum
+            else:
+                # Any other decision type (strategy, reorg, create_role, noop, etc.)
+                await recorder.record_decision(
+                    agent_id=agent_id,
+                    personality=agent.personality,
+                    emotion=agent.emotion,
+                    decision_type=decision_type or "general",
+                    action=d.get("action", d.get("detail", str(d))),
+                    reasoning=d.get("reason", ""),
+                    confidence=float(d.get("confidence", 0.5)),
+                    context_snapshot=d,
+                )
+
+        # Record messages sent
+        for msg in state.get("messages_to_send", []):
+            if isinstance(msg, dict):
+                from agentic_capital.core.communication.protocol import AgentMessage, MessageType
+                try:
+                    agent_msg = AgentMessage(
+                        type=MessageType(msg.get("type", "SIGNAL")),
+                        sender_id=agent_id,
+                        receiver_id=UUID(msg["receiver_id"]) if msg.get("receiver_id") else None,
+                        priority=float(msg.get("confidence", msg.get("priority", 0.5))),
+                        content=msg,
+                    )
+                    await recorder.record_agent_message(agent_msg)
+                except (ValueError, KeyError):
+                    logger.warning("message_record_skipped", msg=msg)
+
+        # Record position snapshots
+        for pos in state.get("positions", []):
+            if isinstance(pos, dict) and pos.get("symbol"):
+                await recorder.record_position_snapshot(
+                    agent_id=agent_id,
+                    symbol=pos["symbol"],
+                    quantity=float(pos.get("quantity", 0)),
+                    avg_price=float(pos.get("avg_price", 0)),
+                    unrealized_pnl=float(pos.get("unrealized_pnl", 0)),
+                    unrealized_pnl_pct=float(pos.get("unrealized_pnl_pct", 0)),
                 )
 
         await recorder.commit()
