@@ -11,7 +11,6 @@ import structlog
 
 from agentic_capital.core.agents.base import BaseAgent, AgentProfile
 from agentic_capital.core.communication.protocol import AgentMessage, MessageType
-from agentic_capital.core.personality.drift import apply_drift
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 from agentic_capital.formats.markdown_kv import to_markdown_kv
 from agentic_capital.formats.toon import to_toon
@@ -125,29 +124,19 @@ class AnalystAgent(BaseAgent):
         }
 
     async def reflect(self, outcome: dict[str, object]) -> None:
-        """Reflect on signal accuracy and adjust analysis style.
+        """Reflect on outcomes — AI decides how to process experience.
 
-        Args:
-            outcome: Contains 'signal_accuracy', 'pnl_impact'.
+        No system-enforced personality drift or emotion formula.
+        The agent autonomously decides what to feel and how to adapt
+        based on raw data. Data is available — agent decides what to do with it.
         """
-        accuracy = float(outcome.get("signal_accuracy", 0.5))
-
-        if accuracy < 0.3:
-            # Bad signals → become more cautious
-            self.personality, _ = apply_drift(
-                self.personality, "conscientiousness", 0.02,
-                trigger_event="poor_signals",
-                reasoning=f"Signal accuracy {accuracy:.0%} — need more thorough analysis",
-            )
-        elif accuracy > 0.7:
-            # Good signals → slight confidence boost
-            self.personality, _ = apply_drift(
-                self.personality, "openness", 0.01,
-                trigger_event="good_signals",
-                reasoning=f"Signal accuracy {accuracy:.0%} — exploring more opportunities",
-            )
-
-        logger.info("analyst_reflection", accuracy=f"{accuracy:.0%}", agent=self.name)
+        logger.info(
+            "analyst_reflection",
+            agent=self.name,
+            outcome=outcome,
+            conscientiousness=f"{self.personality.conscientiousness:.2f}",
+            openness=f"{self.personality.openness:.2f}",
+        )
 
     def signal_to_message(self, signal: AnalystSignal, receiver_id: object = None) -> AgentMessage:
         """Convert an analyst signal to a LACP SIGNAL message."""

@@ -6,7 +6,6 @@ import orjson
 import structlog
 
 from agentic_capital.core.decision.prompts import build_system_prompt, build_trading_prompt
-from agentic_capital.core.personality.emotion import update_emotion_from_pnl
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 from agentic_capital.ports.llm import LLMPort
 from agentic_capital.ports.market_data import MarketDataPort
@@ -96,19 +95,14 @@ class DecisionPipeline:
             if success:
                 executed.append(decision)
 
-        # 6. Update emotion based on P&L
-        if positions:
-            total_pnl_pct = sum(p.unrealized_pnl_pct for p in positions) / len(positions)
-        updated_emotion = update_emotion_from_pnl(emotion, total_pnl_pct / 100.0)
-
+        # No system-enforced emotion update — agent decides autonomously
         logger.info(
             "pipeline_cycle_complete",
             agent=agent_name,
             decisions=len(decisions),
             executed=len(executed),
-            pnl_pct=total_pnl_pct,
         )
-        return executed, updated_emotion
+        return executed, emotion
 
     async def _collect_market_data(self, symbols: list[str]) -> list[dict]:
         """Collect current quotes for all symbols."""

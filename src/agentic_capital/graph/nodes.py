@@ -13,9 +13,7 @@ from agentic_capital.core.agents.base import BaseAgent
 from agentic_capital.core.agents.ceo import CEOAgent
 from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.trader import TraderAgent
-from agentic_capital.core.decision.reflection import reflect_on_trades
 from agentic_capital.core.decision.pipeline import TradingDecision
-from agentic_capital.core.personality.emotion import update_emotion_from_pnl
 from agentic_capital.core.tools.data_query import DataQueryTools
 from agentic_capital.graph.state import AgentWorkflowState
 
@@ -127,24 +125,27 @@ async def think(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentWor
 
 
 async def reflect(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentWorkflowState:
-    """Agent reflects on outcomes — personality drift, emotion update.
+    """Agent reflects on outcomes — fully autonomous.
 
-    Reflection is autonomous — the agent processes its own
-    experience and adjusts internally. System only records the changes.
+    Raw outcome data is passed to the agent. The agent autonomously
+    decides how to process its experience. No system-enforced
+    personality drift or emotion formulas.
     """
     updates: AgentWorkflowState = {}  # type: ignore[typeddict-item]
 
     try:
-        # Calculate P&L from positions
-        positions = state.get("positions", [])
-        total_pnl_pct = 0.0
-        if positions:
-            total_pnl_pct = sum(p.get("unrealized_pnl_pct", 0) for p in positions) / len(positions)
+        # Pass raw outcome data — agent decides what to do with it
+        outcome = {
+            "positions": state.get("positions", []),
+            "decisions": state.get("decisions", []),
+            "balance": state.get("balance", {}),
+            "market_data": state.get("market_data", []),
+            "cycle_number": state.get("cycle_number", 0),
+        }
 
-        # Agent reflects
-        await agent.reflect({"pnl_pct": total_pnl_pct})
+        await agent.reflect(outcome)
 
-        # Record updated emotion
+        # Record current emotion state (whatever the agent decided)
         updates["emotion"] = {
             "valence": agent.emotion.valence,
             "arousal": agent.emotion.arousal,
@@ -153,8 +154,7 @@ async def reflect(state: AgentWorkflowState, agent: BaseAgent, **deps) -> AgentW
             "confidence": agent.emotion.confidence,
         }
 
-        # Record any personality changes
-        updates["reflection"] = f"P&L: {total_pnl_pct:.2f}%"
+        updates["reflection"] = "autonomous"
 
     except Exception as e:
         updates["errors"] = state.get("errors", []) + [f"reflect: {e}"]

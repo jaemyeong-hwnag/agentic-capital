@@ -11,8 +11,6 @@ import structlog
 
 from agentic_capital.core.agents.base import BaseAgent, AgentProfile
 from agentic_capital.core.decision.pipeline import DecisionPipeline, TradingDecision
-from agentic_capital.core.personality.drift import apply_drift
-from agentic_capital.core.personality.emotion import update_emotion_from_pnl
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 from agentic_capital.ports.llm import LLMPort
 from agentic_capital.ports.market_data import MarketDataPort
@@ -105,34 +103,16 @@ class TraderAgent(BaseAgent):
         }
 
     async def reflect(self, outcome: dict[str, object]) -> None:
-        """Reflect on trade outcomes and adjust trading style.
+        """Reflect on outcomes — AI decides how to process experience.
 
-        Args:
-            outcome: Contains 'pnl_pct', 'decisions_executed'.
+        No system-enforced personality drift or emotion formula.
+        The agent autonomously decides what to feel and how to adapt
+        based on raw data. Data is available — agent decides what to do with it.
         """
-        pnl_pct = float(outcome.get("pnl_pct", 0.0))
-
-        # Update emotion from P&L
-        self.emotion = update_emotion_from_pnl(self.emotion, pnl_pct / 100.0)
-
-        # Personality drift based on trading outcomes
-        if pnl_pct < -2.0:
-            self.personality, _ = apply_drift(
-                self.personality, "loss_aversion", 0.02,
-                trigger_event="trading_loss",
-                reasoning=f"Trading P&L {pnl_pct:.1f}% — increasing caution",
-            )
-        elif pnl_pct > 3.0:
-            self.personality, _ = apply_drift(
-                self.personality, "loss_aversion", -0.01,
-                trigger_event="trading_gain",
-                reasoning=f"Trading P&L {pnl_pct:.1f}% — slightly more risk tolerant",
-            )
-
         logger.info(
             "trader_reflection",
             agent=self.name,
-            pnl_pct=pnl_pct,
+            outcome=outcome,
             loss_aversion=f"{self.personality.loss_aversion:.2f}",
             emotion_valence=f"{self.emotion.valence:.2f}",
         )

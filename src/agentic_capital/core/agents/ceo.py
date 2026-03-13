@@ -19,7 +19,6 @@ from agentic_capital.core.agents.base import AgentContext, AgentProfile, BaseAge
 from agentic_capital.core.decision.prompts import build_ceo_prompt
 from agentic_capital.core.organization.hr import HREvent, HREventType
 from agentic_capital.core.organization.roles import Role
-from agentic_capital.core.personality.drift import apply_drift
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 from agentic_capital.ports.llm import LLMPort
 
@@ -137,42 +136,15 @@ class CEOAgent(BaseAgent):
         }
 
     async def reflect(self, outcome: dict[str, object]) -> None:
-        """Reflect on organizational decisions and their outcomes.
+        """Reflect on outcomes — AI decides how to process experience.
 
-        Args:
-            outcome: Contains 'pnl_pct', 'agents_performance', etc.
+        No system-enforced personality drift. The agent autonomously
+        decides what to feel and how to adapt based on raw data.
         """
-        pnl_pct = float(outcome.get("pnl_pct", 0.0))
-
-        # CEO personality drifts based on company performance
-        if pnl_pct < -3.0:
-            # Poor performance → more cautious, higher conscientiousness
-            self.personality, _ = apply_drift(
-                self.personality, "conscientiousness", 0.02,
-                trigger_event="company_loss",
-                reasoning=f"Company P&L {pnl_pct:.1f}% — being more careful",
-            )
-            self.personality, _ = apply_drift(
-                self.personality, "neuroticism", 0.01,
-                trigger_event="company_loss",
-                reasoning="Company losses increase stress sensitivity",
-            )
-        elif pnl_pct > 5.0:
-            # Good performance → more confident, open to expansion
-            self.personality, _ = apply_drift(
-                self.personality, "openness", 0.01,
-                trigger_event="company_gain",
-                reasoning=f"Company P&L {pnl_pct:.1f}% — open to expansion",
-            )
-            self.personality, _ = apply_drift(
-                self.personality, "extraversion", 0.01,
-                trigger_event="company_gain",
-                reasoning="Success encourages bolder moves",
-            )
-
+        # Data is available — agent decides what to do with it
         logger.info(
             "ceo_reflection",
-            pnl_pct=pnl_pct,
+            outcome=outcome,
             conscientiousness=f"{self.personality.conscientiousness:.2f}",
             openness=f"{self.personality.openness:.2f}",
         )
