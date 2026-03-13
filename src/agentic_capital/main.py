@@ -27,14 +27,21 @@ def run_migrations() -> None:
 async def run() -> None:
     """Run the Agentic Capital simulation."""
     run_migrations()
+
     logger.info(
         "starting_simulation",
         initial_capital=settings.initial_capital,
         seed=settings.simulation_seed,
         log_level=settings.log_level,
+        kis_paper=settings.kis_is_paper,
     )
-    # TODO: M5 — 시뮬레이션 엔진 구현
-    logger.info("simulation_not_yet_implemented")
+
+    from agentic_capital.simulation.engine import SimulationEngine
+
+    engine = SimulationEngine(
+        cycle_interval_seconds=300,  # 5분 간격
+    )
+    await engine.start()
 
 
 def main() -> None:
