@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     langchain_api_key: str = ""
     langchain_project: str = "agentic-capital"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

@@ -248,3 +248,139 @@ class TestSimulationEngine:
             mock_rec.return_value = None
             engine._recorder = None
         assert engine._recorder is None
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_abolish_role(self):
+        """CEO can abolish a role."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._recorder = MagicMock()
+        engine._recorder.record_role = AsyncMock(return_value=None)
+
+        result = {"decisions": [{"type": "abolish_role", "detail": "risk_manager"}]}
+        await engine._process_org_actions(ceo, result)
+        engine._recorder.record_role.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_hire_with_recorder(self):
+        """Hire action records agent and HR event when recorder is present."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        engine._trading = MagicMock()
+        engine._market_data = MagicMock()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        engine._recorder = MagicMock()
+        engine._recorder.record_agent = AsyncMock()
+        engine._recorder.record_hr_event = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+
+        result = {
+            "decisions": [{"type": "hire", "target": "NewAnalyst", "detail": "analyst", "reason": "need analysis"}],
+        }
+
+        with patch("agentic_capital.simulation.engine.create_agent") as mock_create:
+            new_agent = AnalystAgent(profile=_make_profile("NewAnalyst"), personality=create_random_personality(99), llm=llm)
+            mock_create.return_value = new_agent
+            await engine._process_org_actions(ceo, result)
+
+        assert len(engine._agents) == 2
+        engine._recorder.record_agent.assert_called_once()
+        engine._recorder.record_hr_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_role_no_detail_skips(self):
+        """create_role with empty detail is silently skipped."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._recorder = MagicMock()
+        engine._recorder.record_role = AsyncMock()
+
+        result = {"decisions": [{"type": "create_role", "detail": ""}]}
+        await engine._process_org_actions(ceo, result)
+        engine._recorder.record_role.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_abolish_role_no_detail_skips(self):
+        """abolish_role with empty detail is silently skipped."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._recorder = MagicMock()
+        engine._recorder.record_role = AsyncMock()
+
+        result = {"decisions": [{"type": "abolish_role", "detail": ""}]}
+        await engine._process_org_actions(ceo, result)
+        engine._recorder.record_role.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_agent_error_continues(self):
+        """If one agent's cycle fails, other agents still run."""
+        engine = SimulationEngine()
+        engine._symbols = ["005930"]
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(43), llm=llm)
+        engine._agents = [ceo, analyst]
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(return_value=MagicMock(total=10_000_000, available=10_000_000))
+
+        call_count = 0
+
+        async def mock_run(agent, cycle_number, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if agent.name == "CEO":
+                raise RuntimeError("CEO cycle failed")
+            return {"decisions": [], "emotion": {}}
+
+        with patch("agentic_capital.simulation.engine.run_agent_cycle", side_effect=mock_run):
+            await engine._run_cycle()
+
+        assert engine._cycle_count == 1
+        assert call_count == 2  # Both agents attempted
+
+    @pytest.mark.asyncio
+    async def test_init_recorder_success(self):
+        """_init_recorder sets up recorder when DB is available."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        engine._agents = [
+            CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm),
+        ]
+        engine._symbols = ["005930"]
+
+        mock_session = MagicMock()
+        mock_recorder = MagicMock()
+        mock_recorder.start_simulation = AsyncMock(return_value="sim-id-123")
+        mock_recorder.record_agent = AsyncMock()
+        mock_recorder.commit = AsyncMock()
+
+        with patch("agentic_capital.simulation.recorder.SimulationRecorder", return_value=mock_recorder), \
+             patch("agentic_capital.infra.database.async_session", return_value=mock_session):
+            await engine._init_recorder()
+
+        assert engine._recorder is mock_recorder
+        mock_recorder.start_simulation.assert_called_once()
+        mock_recorder.record_agent.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_init_recorder_db_failure_graceful(self):
+        """_init_recorder handles DB errors gracefully, recorder = None."""
+        engine = SimulationEngine()
+        engine._agents = []
+        engine._symbols = []
+
+        with patch("agentic_capital.infra.database.async_session", side_effect=Exception("DB not available")):
+            await engine._init_recorder()
+
+        assert engine._recorder is None

@@ -1,73 +1,48 @@
-"""LangGraph state definitions for agent workflows.
+"""State definitions — result schema from agent cycles.
 
-The state carries context that agents can read and write.
-System records everything — agents decide what to do with it.
+Agents use the ReAct pattern (free tool-use loop) — no fixed workflow state.
+This module defines the output schema returned after each cycle completes.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
-from uuid import UUID
-
-from langgraph.graph import add_messages
+from typing import TypedDict
 
 
-class AgentWorkflowState(TypedDict, total=False):
-    """State for a single agent's decision cycle.
+class AgentCycleResult(TypedDict, total=False):
+    """Result returned by run_agent_cycle() after an agent completes a cycle.
 
-    All fields are optional — agents decide what to populate.
-    System provides tools; agents use them autonomously.
+    This is output-only — not a workflow state. The agent drives the loop
+    internally via tool calls. This captures what happened for the engine.
     """
 
-    # Agent identity
     agent_id: str
     agent_name: str
-    agent_role: str  # ceo, analyst, trader, or any role CEO creates
-
-    # Current cycle
     cycle_number: int
 
-    # Data the agent has gathered (agent decides what to query)
-    market_data: list[dict]
-    balance: dict
-    positions: list[dict]
-    agent_roster: list[dict]  # For CEO: current agents and their status
-    company_state: dict
-    messages_received: list[dict]  # LACP messages from other agents
+    # Decisions made this cycle (trades submitted, org actions, etc.)
+    decisions: list[dict]
 
-    # Agent's decisions this cycle
-    decisions: list[dict]  # Trading decisions, HR decisions, signals, etc.
-    messages_to_send: list[dict]  # LACP messages to publish
+    # Messages sent to other agents
+    messages_to_send: list[dict]
 
-    # Reflection
-    reflection: str
-    personality_drifts: list[dict]
-
-    # Emotion after this cycle
-    emotion: dict
-
-    # Error tracking
+    # Any errors during the cycle
     errors: list[str]
 
 
+# Alias for backward compatibility with code that imports AgentWorkflowState
+AgentWorkflowState = AgentCycleResult
+
+
 class SimulationState(TypedDict, total=False):
-    """Top-level simulation state across all agents.
+    """Top-level simulation state across all agents (used by engine)."""
 
-    The simulation orchestrator uses this to coordinate cycles.
-    Individual agent workflows run independently.
-    """
-
-    # Simulation metadata
     simulation_id: str
     cycle_number: int
     seed: int
 
-    # Agents in the simulation
-    agents: list[dict]  # [{id, name, role, personality, emotion, capital}, ...]
+    agents: list[dict]
+    cycle_results: list[dict]
 
-    # Cycle results (accumulated)
-    cycle_results: list[dict]  # Results from each agent's cycle
-
-    # Company-wide metrics (recorded, not enforced)
     total_capital: float
     available_cash: float
