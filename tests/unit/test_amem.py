@@ -10,6 +10,7 @@ class TestMemoryNote:
         agent_id = uuid4()
         note = MemoryNote(
             agent_id=agent_id,
+            simulation_id=uuid4(),
             memory_type="episodic",
             context="RSI divergence on AAPL, volatile_bullish regime",
             keywords=["rsi_divergence", "aapl", "earnings_catalyst"],
@@ -21,9 +22,11 @@ class TestMemoryNote:
         assert "rsi_divergence" in note.keywords
 
     def test_note_links(self) -> None:
-        note1 = MemoryNote(agent_id=uuid4(), memory_type="episodic", context="First experience")
+        sim_id = uuid4()
+        note1 = MemoryNote(agent_id=uuid4(), simulation_id=sim_id, memory_type="episodic", context="First experience")
         note2 = MemoryNote(
             agent_id=note1.agent_id,
+            simulation_id=sim_id,
             memory_type="episodic",
             context="Related experience",
             links=[note1.id],
@@ -31,7 +34,7 @@ class TestMemoryNote:
         assert note1.id in note2.links
 
     def test_default_q_value(self) -> None:
-        note = MemoryNote(agent_id=uuid4(), memory_type="semantic", context="Market knowledge")
+        note = MemoryNote(agent_id=uuid4(), simulation_id=uuid4(), memory_type="semantic", context="Market knowledge")
         assert note.q_value == 0.5
         assert note.access_count == 0
 
