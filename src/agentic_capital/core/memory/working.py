@@ -11,6 +11,9 @@ from datetime import timedelta
 
 import orjson
 import redis.asyncio as aioredis
+import structlog
+
+logger = structlog.get_logger()
 
 
 class WorkingMemory:
@@ -43,15 +46,23 @@ class WorkingMemory:
         key = self._obs_key(agent_id)
         data = orjson.dumps(observation).decode()
         ttl_seconds = int((ttl or self.DEFAULT_TTL).total_seconds())
-        await self._redis.lpush(key, data)
-        await self._redis.ltrim(key, 0, self.MAX_OBSERVATIONS - 1)
-        await self._redis.expire(key, ttl_seconds)
+        try:
+            await self._redis.lpush(key, data)
+            await self._redis.ltrim(key, 0, self.MAX_OBSERVATIONS - 1)
+            await self._redis.expire(key, ttl_seconds)
+        except Exception:
+            logger.exception("wm_add_observation_failed", agent_id=str(agent_id))
+            raise
 
     async def get_observations(self, agent_id: uuid.UUID, limit: int = 10) -> list[dict]:
         """Get recent observations (newest first)."""
         key = self._obs_key(agent_id)
-        items = await self._redis.lrange(key, 0, limit - 1)
-        return [orjson.loads(item) for item in items]
+        try:
+            items = await self._redis.lrange(key, 0, limit - 1)
+            return [orjson.loads(item) for item in items]
+        except Exception:
+            logger.exception("wm_get_observations_failed", agent_id=str(agent_id))
+            return []
 
     async def set_current_task(
         self,
@@ -63,15 +74,23 @@ class WorkingMemory:
         """Set the agent's current task."""
         key = self._task_key(agent_id)
         data = orjson.dumps(task).decode()
-        await self._redis.set(key, data, ex=int((ttl or self.DEFAULT_TTL).total_seconds()))
+        try:
+            await self._redis.set(key, data, ex=int((ttl or self.DEFAULT_TTL).total_seconds()))
+        except Exception:
+            logger.exception("wm_set_task_failed", agent_id=str(agent_id))
+            raise
 
     async def get_current_task(self, agent_id: uuid.UUID) -> dict | None:
         """Get the agent's current task."""
         key = self._task_key(agent_id)
-        data = await self._redis.get(key)
-        if data is None:
+        try:
+            data = await self._redis.get(key)
+            if data is None:
+                return None
+            return orjson.loads(data)
+        except Exception:
+            logger.exception("wm_get_task_failed", agent_id=str(agent_id))
             return None
-        return orjson.loads(data)
 
     async def set_context(
         self,
@@ -83,15 +102,23 @@ class WorkingMemory:
         """Set arbitrary context data (emotion state, market snapshot, etc.)."""
         key = self._ctx_key(agent_id)
         data = orjson.dumps(context).decode()
-        await self._redis.set(key, data, ex=int((ttl or self.DEFAULT_TTL).total_seconds()))
+        try:
+            await self._redis.set(key, data, ex=int((ttl or self.DEFAULT_TTL).total_seconds()))
+        except Exception:
+            logger.exception("wm_set_context_failed", agent_id=str(agent_id))
+            raise
 
     async def get_context(self, agent_id: uuid.UUID) -> dict | None:
         """Get the agent's context data."""
         key = self._ctx_key(agent_id)
-        data = await self._redis.get(key)
-        if data is None:
+        try:
+            data = await self._redis.get(key)
+            if data is None:
+                return None
+            return orjson.loads(data)
+        except Exception:
+            logger.exception("wm_get_context_failed", agent_id=str(agent_id))
             return None
-        return orjson.loads(data)
 
     async def clear(self, agent_id: uuid.UUID) -> None:
         """Clear all working memory for an agent."""
@@ -100,7 +127,11 @@ class WorkingMemory:
             self._task_key(agent_id),
             self._ctx_key(agent_id),
         ]
-        await self._redis.delete(*keys)
+        try:
+            await self._redis.delete(*keys)
+        except Exception:
+            logger.exception("wm_clear_failed", agent_id=str(agent_id))
+            raise
 
     async def snapshot(self, agent_id: uuid.UUID) -> dict:
         """Get full working memory snapshot for prompt construction."""

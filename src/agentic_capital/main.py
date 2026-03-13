@@ -14,10 +14,14 @@ logger = structlog.get_logger()
 
 def run_migrations() -> None:
     """Apply pending Alembic migrations on startup."""
-    alembic_cfg = Config("alembic.ini")
-    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
-    command.upgrade(alembic_cfg, "head")
-    logger.info("migrations_applied")
+    try:
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        command.upgrade(alembic_cfg, "head")
+        logger.info("migrations_applied")
+    except Exception:
+        logger.exception("migration_failed")
+        raise
 
 
 async def run() -> None:
@@ -40,6 +44,9 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("simulation_interrupted")
         sys.exit(0)
+    except Exception:
+        logger.exception("simulation_crashed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

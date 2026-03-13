@@ -2,6 +2,8 @@
 
 from uuid import uuid4
 
+import structlog
+
 from agentic_capital.ports.trading import (
     Balance,
     Order,
@@ -10,6 +12,8 @@ from agentic_capital.ports.trading import (
     Position,
     TradingPort,
 )
+
+logger = structlog.get_logger()
 
 
 class PaperTradingAdapter(TradingPort):
@@ -23,6 +27,7 @@ class PaperTradingAdapter(TradingPort):
         self._balance = initial_balance
         self._positions: dict[str, Position] = {}
         self._orders: dict[str, OrderResult] = {}
+        logger.info("paper_trading_initialized", initial_balance=initial_balance)
 
     async def get_balance(self) -> Balance:
         position_value = sum(p.quantity * p.current_price for p in self._positions.values())
@@ -36,13 +41,27 @@ class PaperTradingAdapter(TradingPort):
         return list(self._positions.values())
 
     async def submit_order(self, order: Order) -> OrderResult:
-        # Paper trading: instant fill at requested price or current price
         fill_price = order.price if order.price else 0.0
         order_id = str(uuid4())
+        logger.info(
+            "paper_order_submitted",
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side.value,
+            quantity=order.quantity,
+            price=fill_price,
+        )
 
         if order.side == OrderSide.BUY:
             cost = fill_price * order.quantity
             if cost > self._balance:
+                logger.warning(
+                    "paper_order_rejected_insufficient_balance",
+                    order_id=order_id,
+                    symbol=order.symbol,
+                    cost=cost,
+                    available=self._balance,
+                )
                 return OrderResult(
                     order_id=order_id,
                     symbol=order.symbol,
@@ -75,6 +94,11 @@ class PaperTradingAdapter(TradingPort):
                 )
         else:  # SELL
             if order.symbol not in self._positions:
+                logger.warning(
+                    "paper_order_rejected_no_position",
+                    order_id=order_id,
+                    symbol=order.symbol,
+                )
                 return OrderResult(
                     order_id=order_id,
                     symbol=order.symbol,
@@ -108,6 +132,15 @@ class PaperTradingAdapter(TradingPort):
             status="filled",
         )
         self._orders[order_id] = result
+        logger.info(
+            "paper_order_filled",
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side.value,
+            quantity=order.quantity,
+            price=fill_price,
+            balance=self._balance,
+        )
         return result
 
     async def get_order_status(self, order_id: str) -> OrderResult:

@@ -1,19 +1,21 @@
 """Semantic memory — accumulated knowledge in PostgreSQL.
 
 Stores long-term knowledge (market patterns, investment principles)
-as A-MEM notes with memory_type='semantic'. Provides specialized
-queries for knowledge retrieval and Reflection-triggered updates.
+as A-MEM notes with memory_type='semantic'.
 """
 
 from __future__ import annotations
 
 import uuid
 
+import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_capital.core.memory.amem import AMEMStore, MemoryNote
 from agentic_capital.infra.models.memory import MemoryModel
+
+logger = structlog.get_logger()
 
 
 class SemanticMemory:
@@ -46,7 +48,13 @@ class SemanticMemory:
             importance=importance,
             q_value=max(0.5, importance),
         )
-        return await self._store.create(note)
+        try:
+            created = await self._store.create(note)
+            logger.debug("semantic_stored", agent_id=str(agent_id), note_id=str(created.id))
+            return created
+        except Exception:
+            logger.exception("semantic_store_failed", agent_id=str(agent_id))
+            raise
 
     async def search(
         self,
@@ -72,19 +80,23 @@ class SemanticMemory:
         *,
         q_delta: float = 0.1,
     ) -> MemoryNote | None:
-        """Update knowledge based on Reflection — reinforces or modifies."""
-        result = await self._session.execute(
-            select(MemoryModel).where(MemoryModel.id == memory_id)
-        )
-        model = result.scalar_one_or_none()
-        if model is None:
-            return None
+        """Update knowledge based on Reflection."""
+        try:
+            result = await self._session.execute(
+                select(MemoryModel).where(MemoryModel.id == memory_id)
+            )
+            model = result.scalar_one_or_none()
+            if model is None:
+                return None
 
-        model.context = new_context
-        await self._store.update_q_value(memory_id, q_delta)
-        await self._session.flush()
-
-        return await self._store.get(memory_id)
+            model.context = new_context
+            await self._store.update_q_value(memory_id, q_delta)
+            await self._session.flush()
+            logger.debug("semantic_reflection_updated", memory_id=str(memory_id))
+            return await self._store.get(memory_id)
+        except Exception:
+            logger.exception("semantic_reflection_failed", memory_id=str(memory_id))
+            raise
 
     async def get_top_knowledge(
         self,
@@ -99,13 +111,17 @@ class SemanticMemory:
 
     async def count(self, agent_id: uuid.UUID) -> int:
         """Count active semantic memories for an agent."""
-        result = await self._session.execute(
-            select(func.count())
-            .select_from(MemoryModel)
-            .where(
-                MemoryModel.agent_id == agent_id,
-                MemoryModel.memory_type == self.MEMORY_TYPE,
-                MemoryModel.decayed_at.is_(None),
+        try:
+            result = await self._session.execute(
+                select(func.count())
+                .select_from(MemoryModel)
+                .where(
+                    MemoryModel.agent_id == agent_id,
+                    MemoryModel.memory_type == self.MEMORY_TYPE,
+                    MemoryModel.decayed_at.is_(None),
+                )
             )
-        )
-        return result.scalar_one()
+            return result.scalar_one()
+        except Exception:
+            logger.exception("semantic_count_failed", agent_id=str(agent_id))
+            return 0

@@ -10,11 +10,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+import structlog
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
+
+logger = structlog.get_logger()
 
 
 class MemoryNote(BaseModel):
@@ -75,25 +78,32 @@ class AMEMStore:
             access_count=note.access_count,
             embedding=note.embedding,
         )
-        self._session.add(model)
-        await self._session.flush()
+        try:
+            self._session.add(model)
+            await self._session.flush()
+            logger.debug("amem_note_created", note_id=str(note.id), agent_id=str(note.agent_id), type=note.memory_type)
+        except Exception:
+            logger.exception("amem_create_failed", agent_id=str(note.agent_id), type=note.memory_type)
+            raise
         return note
 
     async def get(self, memory_id: uuid.UUID) -> MemoryNote | None:
         """Get a note by ID, incrementing access_count."""
-        result = await self._session.execute(
-            select(MemoryModel).where(MemoryModel.id == memory_id)
-        )
-        model = result.scalar_one_or_none()
-        if model is None:
-            return None
+        try:
+            result = await self._session.execute(
+                select(MemoryModel).where(MemoryModel.id == memory_id)
+            )
+            model = result.scalar_one_or_none()
+            if model is None:
+                return None
 
-        # Increment access
-        model.access_count += 1
-        model.last_accessed = datetime.now()
-        await self._session.flush()
-
-        return self._to_note(model)
+            model.access_count += 1
+            model.last_accessed = datetime.now()
+            await self._session.flush()
+            return self._to_note(model)
+        except Exception:
+            logger.exception("amem_get_failed", memory_id=str(memory_id))
+            raise
 
     async def search_by_keywords(
         self,
@@ -103,22 +113,26 @@ class AMEMStore:
         limit: int = 10,
     ) -> list[MemoryNote]:
         """Search notes by keyword overlap (JSONB contains)."""
-        stmt = (
-            select(MemoryModel)
-            .where(
-                MemoryModel.agent_id == agent_id,
-                MemoryModel.decayed_at.is_(None),
+        try:
+            stmt = (
+                select(MemoryModel)
+                .where(
+                    MemoryModel.agent_id == agent_id,
+                    MemoryModel.decayed_at.is_(None),
+                )
+                .order_by(MemoryModel.q_value.desc())
+                .limit(limit)
             )
-            .order_by(MemoryModel.q_value.desc())
-            .limit(limit)
-        )
-        result = await self._session.execute(stmt)
-        notes = []
-        for model in result.scalars():
-            stored_kw = set(model.keywords or [])
-            if stored_kw & set(keywords):
-                notes.append(self._to_note(model))
-        return notes
+            result = await self._session.execute(stmt)
+            notes = []
+            for model in result.scalars():
+                stored_kw = set(model.keywords or [])
+                if stored_kw & set(keywords):
+                    notes.append(self._to_note(model))
+            return notes
+        except Exception:
+            logger.exception("amem_search_keywords_failed", agent_id=str(agent_id), keywords=keywords)
+            return []
 
     async def search_by_tags(
         self,
@@ -128,84 +142,107 @@ class AMEMStore:
         limit: int = 10,
     ) -> list[MemoryNote]:
         """Search notes by tag overlap."""
-        stmt = (
-            select(MemoryModel)
-            .where(
-                MemoryModel.agent_id == agent_id,
-                MemoryModel.decayed_at.is_(None),
+        try:
+            stmt = (
+                select(MemoryModel)
+                .where(
+                    MemoryModel.agent_id == agent_id,
+                    MemoryModel.decayed_at.is_(None),
+                )
+                .order_by(MemoryModel.q_value.desc())
+                .limit(limit)
             )
-            .order_by(MemoryModel.q_value.desc())
-            .limit(limit)
-        )
-        result = await self._session.execute(stmt)
-        notes = []
-        for model in result.scalars():
-            stored_tags = set(model.tags or [])
-            if stored_tags & set(tags):
-                notes.append(self._to_note(model))
-        return notes
+            result = await self._session.execute(stmt)
+            notes = []
+            for model in result.scalars():
+                stored_tags = set(model.tags or [])
+                if stored_tags & set(tags):
+                    notes.append(self._to_note(model))
+            return notes
+        except Exception:
+            logger.exception("amem_search_tags_failed", agent_id=str(agent_id), tags=tags)
+            return []
 
     async def get_linked(self, memory_id: uuid.UUID) -> list[MemoryNote]:
         """Get all notes linked from a given note."""
-        note = await self.get(memory_id)
-        if note is None or not note.links:
-            return []
+        try:
+            note = await self.get(memory_id)
+            if note is None or not note.links:
+                return []
 
-        link_strs = [str(lid) for lid in note.links]
-        stmt = select(MemoryModel).where(MemoryModel.id.in_(link_strs))
-        result = await self._session.execute(stmt)
-        return [self._to_note(m) for m in result.scalars()]
+            link_strs = [str(lid) for lid in note.links]
+            stmt = select(MemoryModel).where(MemoryModel.id.in_(link_strs))
+            result = await self._session.execute(stmt)
+            return [self._to_note(m) for m in result.scalars()]
+        except Exception:
+            logger.exception("amem_get_linked_failed", memory_id=str(memory_id))
+            return []
 
     async def add_link(self, from_id: uuid.UUID, to_id: uuid.UUID) -> None:
         """Add a cross-reference link between two notes."""
-        result = await self._session.execute(
-            select(MemoryModel).where(MemoryModel.id == from_id)
-        )
-        model = result.scalar_one_or_none()
-        if model is None:
-            return
+        try:
+            result = await self._session.execute(
+                select(MemoryModel).where(MemoryModel.id == from_id)
+            )
+            model = result.scalar_one_or_none()
+            if model is None:
+                return
 
-        links = list(model.links or [])
-        to_str = str(to_id)
-        if to_str not in links:
-            links.append(to_str)
-            model.links = links
-            await self._session.flush()
+            links = list(model.links or [])
+            to_str = str(to_id)
+            if to_str not in links:
+                links.append(to_str)
+                model.links = links
+                await self._session.flush()
+                logger.debug("amem_link_added", from_id=str(from_id), to_id=str(to_id))
+        except Exception:
+            logger.exception("amem_add_link_failed", from_id=str(from_id), to_id=str(to_id))
+            raise
 
     async def update_q_value(self, memory_id: uuid.UUID, delta: float) -> float:
         """Update Q-value (reinforcement). Returns new value."""
-        result = await self._session.execute(
-            select(MemoryModel).where(MemoryModel.id == memory_id)
-        )
-        model = result.scalar_one_or_none()
-        if model is None:
-            return 0.0
+        try:
+            result = await self._session.execute(
+                select(MemoryModel).where(MemoryModel.id == memory_id)
+            )
+            model = result.scalar_one_or_none()
+            if model is None:
+                return 0.0
 
-        new_q = max(0.0, min(1.0, model.q_value + delta))
-        model.q_value = new_q
-        await self._session.flush()
-        return new_q
+            new_q = max(0.0, min(1.0, model.q_value + delta))
+            model.q_value = new_q
+            await self._session.flush()
+            logger.debug("amem_q_updated", memory_id=str(memory_id), old_q=model.q_value, new_q=new_q)
+            return new_q
+        except Exception:
+            logger.exception("amem_update_q_failed", memory_id=str(memory_id))
+            raise
 
     async def decay(self, agent_id: uuid.UUID, *, threshold: float = 0.05) -> int:
         """Apply REMEMBERER decay to all notes. Returns count of decayed notes."""
-        stmt = (
-            select(MemoryModel)
-            .where(
-                MemoryModel.agent_id == agent_id,
-                MemoryModel.decayed_at.is_(None),
+        try:
+            stmt = (
+                select(MemoryModel)
+                .where(
+                    MemoryModel.agent_id == agent_id,
+                    MemoryModel.decayed_at.is_(None),
+                )
             )
-        )
-        result = await self._session.execute(stmt)
-        decayed_count = 0
+            result = await self._session.execute(stmt)
+            decayed_count = 0
 
-        for model in result.scalars():
-            model.q_value = max(0.0, model.q_value - self.DECAY_RATE)
-            if model.q_value <= threshold:
-                model.decayed_at = datetime.now()
-                decayed_count += 1
+            for model in result.scalars():
+                model.q_value = max(0.0, model.q_value - self.DECAY_RATE)
+                if model.q_value <= threshold:
+                    model.decayed_at = datetime.now()
+                    decayed_count += 1
 
-        await self._session.flush()
-        return decayed_count
+            await self._session.flush()
+            logger.info("amem_decay_applied", agent_id=str(agent_id), decayed=decayed_count)
+            return decayed_count
+        except Exception:
+            logger.exception("amem_decay_failed", agent_id=str(agent_id))
+            raise
 
     async def create_episodic(self, detail: EpisodicDetail) -> EpisodicDetail:
         """Create an episodic detail linked to a memory note."""
@@ -219,8 +256,13 @@ class AMEMStore:
             market_regime=detail.market_regime,
             reflection=detail.reflection,
         )
-        self._session.add(model)
-        await self._session.flush()
+        try:
+            self._session.add(model)
+            await self._session.flush()
+            logger.debug("amem_episodic_created", memory_id=str(detail.memory_id))
+        except Exception:
+            logger.exception("amem_episodic_create_failed", memory_id=str(detail.memory_id))
+            raise
         return detail
 
     async def list_by_agent(
@@ -232,16 +274,20 @@ class AMEMStore:
         limit: int = 50,
     ) -> list[MemoryNote]:
         """List notes for an agent, optionally filtered by type."""
-        stmt = select(MemoryModel).where(MemoryModel.agent_id == agent_id)
+        try:
+            stmt = select(MemoryModel).where(MemoryModel.agent_id == agent_id)
 
-        if memory_type:
-            stmt = stmt.where(MemoryModel.memory_type == memory_type)
-        if active_only:
-            stmt = stmt.where(MemoryModel.decayed_at.is_(None))
+            if memory_type:
+                stmt = stmt.where(MemoryModel.memory_type == memory_type)
+            if active_only:
+                stmt = stmt.where(MemoryModel.decayed_at.is_(None))
 
-        stmt = stmt.order_by(MemoryModel.q_value.desc()).limit(limit)
-        result = await self._session.execute(stmt)
-        return [self._to_note(m) for m in result.scalars()]
+            stmt = stmt.order_by(MemoryModel.q_value.desc()).limit(limit)
+            result = await self._session.execute(stmt)
+            return [self._to_note(m) for m in result.scalars()]
+        except Exception:
+            logger.exception("amem_list_failed", agent_id=str(agent_id))
+            return []
 
     @staticmethod
     def _to_note(model: MemoryModel) -> MemoryNote:

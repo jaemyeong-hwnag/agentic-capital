@@ -4,6 +4,10 @@
 Format: @name[count](columns)\\nrow1\\nrow2\\n...
 """
 
+import structlog
+
+logger = structlog.get_logger()
+
 
 def to_toon(name: str, columns: list[str], rows: list[list[str]]) -> str:
     """Convert tabular data to TOON format.
@@ -30,18 +34,30 @@ def from_toon(toon_str: str) -> tuple[str, list[str], list[list[str]]]:
 
     Returns:
         Tuple of (name, columns, rows).
+
+    Raises:
+        ValueError: If the TOON string is malformed.
     """
-    lines = toon_str.strip().split("\n")
-    header = lines[0]
+    try:
+        lines = toon_str.strip().split("\n")
+        header = lines[0]
 
-    # Parse @name[count](col1,col2,...)
-    at_idx = header.index("@")
-    bracket_open = header.index("[")
-    paren_open = header.index("(")
-    paren_close = header.index(")")
+        # Parse @name[count](col1,col2,...)
+        at_idx = header.find("@")
+        bracket_open = header.find("[")
+        paren_open = header.find("(")
+        paren_close = header.find(")")
 
-    name = header[at_idx + 1 : bracket_open]
-    columns = header[paren_open + 1 : paren_close].split(",")
+        if any(idx == -1 for idx in (at_idx, bracket_open, paren_open, paren_close)):
+            raise ValueError(f"Malformed TOON header: {header}")
 
-    rows = [line.split(",") for line in lines[1:] if line.strip()]
-    return name, columns, rows
+        name = header[at_idx + 1 : bracket_open]
+        columns = header[paren_open + 1 : paren_close].split(",")
+
+        rows = [line.split(",") for line in lines[1:] if line.strip()]
+        return name, columns, rows
+    except ValueError:
+        raise
+    except Exception:
+        logger.exception("toon_parse_failed", input_len=len(toon_str))
+        raise ValueError(f"Failed to parse TOON string: {toon_str[:100]}")
