@@ -1,178 +1,154 @@
-# ai 별로 페르소나를 가지고 투자
+# Agentic Capital
 
-## 최초 구성
-1. 자료 조사
-1-1. 최근 ai 사용에 관한거에대해 조사 ai skill, 파이프라인 등등 최신 자료 찾아서 정리
-1-2. 사람의 성향 성격 정신 등등 을 최대한 다양하고 많이 나눠둔 논문들 찾아서 조사
+**AI-Driven Autonomous Fund Simulation with Persona-Based Investment Agents**
 
-2. 프로젝트 가능 여부 판단
-역할 놀이처럼 각각 성향이나 성격 정신에 대한 컨텍스트를 DB 에 보관 하고 그 컨텍스트로 각각 역할은 하는거
-일단은 펀드 회사 운영을 하는데 운영을 하는 ceo 한명이 있고 랜덤으로 설정된 사람의 성향 성격 정신 등등으로 각 ai 컨텍스트를 가진다. 그리고 실제 회사 자본의 일부로 투자를 하고 투자 방법은 설정된 사람의 성향 성격 정신 등등으로 구성됨 그리고 자산의 증가 감소에 따라 랜덤으로 사람 충원하고 감축하고 각각 직급도 성과에따라하고 성과를 받고 판단하는 방식
+An AI multi-agent roleplay simulation where autonomous agents with distinct personality traits operate a virtual fund company. Each agent makes independent investment decisions shaped by psychological parameters that evolve through experience.
 
-
-3. 최적의 자료구조 및 데이터베이스, 언어, ai 들 찾아줘
-
-4. 비용 계산
-일, 월별로 계산
-
-## 다른 ai 답변
-## 1. 자료 조사
-
-### 1-1. 최신 AI 사용 트렌드 및 파이프라인 (에이전트 중심)
-
-최근 AI 생태계는 단순한 챗봇(Chatbot)을 넘어, 자율적으로 목표를 달성하는 **에이전틱 워크플로우(Agentic Workflow)**로 진화했습니다.
-
-* **멀티 에이전트 시스템 (Multi-Agent System):** 여러 AI가 각각의 페르소나와 역할을 가지고 서로 소통하고 협력(또는 경쟁)하며 문제를 해결하는 방식입니다. (예: CEO AI, 투자 분석가 AI, 리스크 관리 AI가 회의를 통해 투자 결정)
-* **최신 AI 파이프라인 (RAG + Tool Use + Memory):**
-* **기억(Memory):** 단기 기억(현재 대화)과 장기 기억(과거 투자 실패/성공 경험)을 벡터 데이터베이스(Vector DB)에 저장하여 학습하는 구조.
-* **도구 사용(Tool Use / Function Calling):** AI가 직접 주식 시장 API를 호출해 실시간 가격을 조회하거나 매수/매도 주문을 실행.
-* **반성 및 계획(Reflection & Planning):** 투자 결과(수익/손실)를 바탕으로 AI 스스로 자신의 투자 방식을 평가하고 다음 전략을 수정.
-
-
-
-### 1-2. 인간의 성향/성격/심리를 분류한 심리학 및 행동경제학 지표
-
-AI에게 부여할 '컨텍스트(프롬프트)'를 만들기 위해 다음의 학술적/심리학적 모델들을 DB에 파라미터(수치화)로 보관할 수 있습니다.
-
-| 분류 모델 | 설명 | 프로젝트 적용 예시 (투자 성향) |
-| --- | --- | --- |
-| **Big 5 (OCEAN)** | 심리학에서 가장 신뢰받는 5요인 모델 (개방성, 성실성, 외향성, 우호성, 신경증) | 신경증(Neuroticism)이 높은 AI: 하락장에서 쉽게 패닉셀(투매) 진행 |
-| **HEXACO** | Big 5에 '정직-겸손성(Honesty-Humility)'을 추가한 모델 | 정직성이 낮은 AI: 내부자 정보 획득 시도 등 공격적/비윤리적 고위험 투자 |
-| **전망 이론 (Prospect Theory)** | 대니얼 카너먼(노벨경제학상)의 행동 재무학 모델. 인간은 이익보다 손실에 더 민감하다는 이론 | 손실 회피성(Loss Aversion) 파라미터를 조절하여 이익 실현과 손절매 타이밍 설정 |
-| **MBTI & 에니어그램** | 대중적 성격 유형 지표 (학술적 엄밀성은 낮으나 직관적임) | ENTJ(CEO형): 공격적인 성장주 투자 / ISFJ(수호자형): 안정적인 배당주 투자 |
-| **다크 트라이어드 (Dark Triad)** | 나르시시즘, 마키아벨리즘, 사이코패스 등 어두운 성격 특성 | 마키아벨리즘이 높은 AI: 타 부서 AI의 성과를 가로채거나 사내 정치 시도 |
+> **One Goal:** Make money.
+> **One Constraint:** Capital.
+> **Everything else:** Fully autonomous AI decisions.
 
 ---
 
-## 2. 프로젝트 가능 여부 판단 (Feasibility)
+## Key Concepts
 
-**결론: 구현 가능하며, 매우 유망한 시뮬레이션 프로젝트입니다.**
+- **Roleplay Simulation** — Agents are not scripted; they autonomously decide investment timing, asset selection, strategy, and organizational structure
+- **Personality-Driven** — Each agent has a 15D personality vector (Big5 + HEXACO + Prospect Theory) that influences all decisions and evolves over time
+- **Dynamic Organization** — Roles, permissions, hierarchy are created/modified/abolished by agents themselves
+- **AI-Native Data** — All data formats optimized for AI consumption (TOON, NumeroLogic, LACP protocol), not human readability
+- **Research-Grade Logging** — Every decision, state change, and interaction is recorded for reproducibility and academic analysis
 
-* **동작 원리 (Role-playing Context):**
-* 각 직원(AI)이 생성될 때 DB에서 랜덤한 성격 파라미터(예: 위험선호도 80, 성실성 30, 스트레스 내성 20)를 조합하여 '시스템 프롬프트'로 주입합니다.
-* **예시 프롬프트:** *"너는 펀드매니저다. 너의 위험 선호도는 매우 높으며(80), 손실이 나도 공격적으로 물타기를 하는 성향이다. 현재 자본금은 $10,000이다. 시장 상황을 보고 투자해라."*
+## Architecture
 
+```
+CEO Agent (full autonomy: strategy, HR, org design)
+├── Portfolio Manager (allocation, rebalancing)
+├── Risk Manager (risk assessment, warnings)
+├── Analyst Team (dynamically composed by CEO)
+│   ├── Fundamental / Technical / Sentiment / ...
+└── Trader (order execution)
 
-* **인사 시스템 (채용/해고/승진):**
-* **이벤트 루프(Event Loop):** 매일(또는 매 턴) 자산의 증감을 평가하는 백그라운드 스크립트가 돌아갑니다.
-* **CEO AI의 평가:** 자산이 하락하면 CEO AI에게 "현재 수익률이 -15%입니다. 직원을 해고하시겠습니까?"라고 묻고, CEO의 성향에 따라 구조조정 비율을 결정합니다.
+※ Structure is an example. CEO reshapes it autonomously.
+```
 
+## Tech Stack
 
-* **주의할 점 (도전 과제):**
-* LLM은 기본적으로 '안전하고 윤리적인(도덕적인)' 대답을 하도록 학습되어 있습니다. 따라서 극단적인 성향(예: 무모한 투자자, 사내정치꾼)을 연기하게 하려면 **프롬프트 엔지니어링(Jailbreaking/Persona Adoption)에 많은 공을 들여야 합니다.**
+| Layer | Technology | Why |
+|-------|-----------|-----|
+| Language | Python 3.12+ | AI ecosystem standard |
+| Agent Framework | LangGraph v1.0 | Stateful graph workflows, proven in finance (FinCon, TradingAgents) |
+| Agent Memory | A-MEM (Zettelkasten) + Mem0 | 2x multi-hop reasoning (NeurIPS 2025) |
+| Main DB | PostgreSQL 16 + TimescaleDB | Structured + time-series, Gorilla compression |
+| Vector DB | pgvector → Qdrant | float8, SQ int8, HNSW |
+| Cache/State | Redis 7+ | Working memory, emotion state, event streams |
+| Analytics | DuckDB + Parquet + Arrow IPC | Offline analysis, backtesting, data export |
+| LLM | Gemini 2.5 Pro / Flash | Pro: key decisions, Flash: routine tasks |
+| Prompt Format | TOON + Markdown-KV + YAML | 40-60% token reduction |
+| Agent Comms | LACP protocol + MessagePack | Structured messages (PLAN/ACT/OBSERVE/SIGNAL) |
 
+## Data Pipeline
 
+```
+LLM ↔ Agent     TOON (arrays) + Markdown-KV (records) + YAML (nested) + NumeroLogic (numbers)
+Agent ↔ Agent    LACP protocol (PLAN/ACT/OBSERVE/SIGNAL) + MessagePack serialization
+Agent ↔ Memory   A-MEM Zettelkasten notes (context + keywords + links + q_value)
+Agent ↔ DB       PostgreSQL JSONB + TimescaleDB compressed hypertables
+Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLAP)
+```
+
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [01 - Project Overview](docs/01-project-overview.md) | Core concept, principles, how it works |
+| [02 - AI Trends](docs/02-ai-trends-research.md) | Agentic workflows, multi-agent systems |
+| [03 - Psychology Models](docs/03-psychology-models.md) | Big5, HEXACO, Prospect Theory, personality drift |
+| [04 - Feasibility](docs/04-feasibility.md) | Feasibility analysis, challenges |
+| [05 - Tech Stack](docs/05-tech-stack.md) | Full tech stack with paper references |
+| [06 - Cost Estimation](docs/06-cost-estimation.md) | Daily/monthly cost projections |
+| [07 - References](docs/07-references-papers.md) | Key papers, search portals |
+| [08 - Investment API](docs/08-investment-api-guide.md) | API pipeline, target markets |
+| [09 - Persona Rules](docs/09-persona-investment-rules.md) | How personality drives investment behavior |
+| [10 - Org Autonomy](docs/10-organization-autonomy.md) | Dynamic roles, permissions, HR autonomy |
+| [11 - Data Model](docs/11-data-model.md) | AI-optimized database schema |
+| [12 - Data Formats](docs/12-data-format-research.md) | Serialization, vector, time-series research |
+| [13 - Tech Research](docs/13-detailed-tech-research.md) | Extended technology comparison |
+
+## Key Papers
+
+| Paper | Venue | Applied To |
+|-------|-------|-----------|
+| FinCon | NeurIPS 2024 | Agent org structure (Manager-Analyst hierarchy) |
+| TradingAgents | arXiv 2024 | Multi-agent trading framework |
+| A-MEM | NeurIPS 2025 | Zettelkasten agent memory |
+| REMEMBERER | 2025 | Q-value experience retention |
+| StockTime | arXiv 2024 | Time-series tokenization for LLMs |
+| NumeroLogic | EMNLP 2024 | Numerical representation for LLMs |
+| TOON | 2025 | Token-optimized data serialization |
+| LACP | NeurIPS 2025 | Agent communication protocol |
+| C2C | 2025 | KV-cache semantic communication |
+| Generative Agents | UIST 2023 | Observation-Reflection-Planning loop |
+
+## Getting Started
+
+```bash
+# Clone
+git clone https://github.com/your-org/agentic-capital.git
+cd agentic-capital
+
+# Setup (TBD)
+pip install -e ".[dev]"
+
+# Run simulation (TBD)
+python -m agentic_capital.run
+```
+
+## License
+
+TBD
 
 ---
 
-## 3. 최적의 기술 스택 (데이터구조, DB, 언어, AI)
+# Agentic Capital (한국어)
 
-이러한 에이전트 기반 시뮬레이션을 구축하기 위한 최적의 조합입니다.
+**AI 페르소나 기반 자율 투자 펀드 시뮬레이션**
 
-| 구분 | 추천 기술 | 이유 |
-| --- | --- | --- |
-| **프로그래밍 언어** | **Python** | AI 생태계(LangChain, CrewAI 등)의 표준 언어. 데이터 분석 및 금융 API 연동에 압도적으로 유리합니다. |
-| **AI 프레임워크** | **CrewAI** 또는 **LangGraph** | 여러 AI 에이전트에게 역할을 부여하고, 순차적 또는 계층적(CEO-임원-사원)으로 협업하게 만드는 데 최적화된 최신 프레임워크입니다. |
-| **메인 데이터베이스** | **PostgreSQL** (관계형 DB) | 회사의 자본금, 직원 명부, 직급, 성격 파라미터, 매일의 투자 기록 등 정형화된 트랜잭션 데이터를 안전하게 보관합니다. |
-| **메모리(기억) DB** | **Milvus** 또는 **pgvector** | 에이전트들이 과거의 투자 실패 경험이나 어제 읽은 뉴스 기사를 기억하게 하려면 텍스트를 벡터로 변환해 저장하는 Vector DB가 필수입니다. |
-| **상태 관리/캐시** | **Redis** | 실시간으로 변하는 모의 투자 시장 데이터나 각 AI의 현재 상태(기분, 스트레스 수치 등)를 빠르게 읽고 쓰는 데 사용합니다. |
-| **AI 모델 (LLM)** | **Gemini 3.1 Pro** & **Flash** | **CEO 및 핵심 의사결정 AI:** 뛰어난 추론 능력을 가진 `Gemini 3.1 Pro`.<br>
+각각 고유한 성격 특성을 가진 AI 에이전트들이 가상 펀드 회사를 자율 운영하는 멀티 에이전트 롤플레잉 시뮬레이션. 각 에이전트는 심리학적 파라미터에 기반하여 독립적으로 투자 판단을 내리며, 경험을 통해 성격이 진화한다.
 
-<br>**일반 사원 및 단순 작업 AI:** 빠르고 비용이 저렴한 `Gemini 3.1 Flash`. |
+> **유일한 목적:** 돈을 번다.
+> **유일한 제약:** 자본.
+> **나머지 전부:** AI가 자율적으로 결정.
 
 ---
 
-## 4. 비용 계산 (추정치)
+## 핵심 특징
 
-AI API 호출 비용이 프로젝트 유지비의 핵심입니다. 다음과 같은 가상 시나리오를 기준으로 계산했습니다.
+- **롤플레잉 시뮬레이션** — 에이전트는 자율 판단으로 투자 시점, 종목, 전략, 조직 구조를 결정
+- **성격 기반** — 15차원 성격 벡터 (Big5 + HEXACO + 전망이론)가 모든 판단에 영향, 경험으로 변동
+- **동적 조직** — 직급, 권한, 조직 구조를 에이전트가 직접 생성/변경/폐지
+- **AI 네이티브 데이터** — 모든 데이터 포맷이 AI 소비에 최적화 (TOON, NumeroLogic, LACP)
+- **논문급 기록** — 모든 결정, 상태 변화, 상호작용을 재현 가능하게 기록
 
-**[가정 상황]**
+## 설계 원칙
 
-* 회사 구성원: 에이전트 총 10명 (CEO 1명, 사원 9명)
-* 일일 활동: 각 에이전트가 하루에 10번의 판단(API 호출)을 수행
-* 토큰 사용량: 1회 호출당 입력 프롬프트(성격+과거기억+시장상황) 2,000 토큰 / 출력(결정 및 이유) 500 토큰 = 1일 총 250,000 토큰
-* 비율: 무거운 모델(Pro) 10%, 가벼운 모델(Flash) 90% 사용
+1. **목표: 돈을 번다** — 유일한 목적, 변경 불가
+2. **모든 것은 AI 친화적** — 최상위 규칙 외 전부 AI 최적화
+3. **데이터셋 최대 최적화** — 최신 논문 (2024-2026) 기반 스펙
 
-### 월별/일별 예상 운영 비용 (단위: USD)
+## 문서
 
-| 항목 | 일일 예상 비용 | 월간(30일) 예상 비용 | 비고 |
-| --- | --- | --- | --- |
-| **AI API 호출 (Pro급)** | ~$0.50 | ~$15.00 | CEO의 복잡한 평가 및 최종 결정용 (단가 높음) |
-| **AI API 호출 (Flash급)** | ~$0.10 | ~$3.00 | 일반 사원들의 반복적인 투자 판단용 (단가 매우 낮음) |
-| **클라우드 서버 (호스팅)** | ~$1.00 | ~$30.00 | AWS EC2 (t3.medium 급) 또는 유사 VPS 서비스 |
-| **데이터베이스 (DB)** | ~$0.80 | ~$25.00 | AWS RDS (PostgreSQL) 및 기본 스토리지 |
-| **합계 (Total)** | **~$2.40 / 일** | **~$73.00 / 월** | 초기 개발 및 소규모 테스트 기준 |
-
-## 기타
-1. 해단 내용에 필요한 최신 논문 링크와 논문을 조사 할 수 있는 링크들 줘
-2. 그리고 실제 투자는 api 로 할껀데 이걸 어떻게할지 못정함
-
-
-### 1. 최신 논문 및 자료 조사 링크
-
-AI 에이전트에 '성격(Persona)'을 부여하여 실제 금융/주식 시장에서 어떻게 행동하는지 실험한 가장 최신 논문들입니다. 이 논문들의 구조를 벤치마킹하시면 프로젝트 설계에 큰 도움이 될 것입니다.
-
-**핵심 추천 논문 (2024~2025 최신작)**
-
-* **[TradingAgents: Multi-Agents LLM Financial Trading Framework]** (2024년 12월, arXiv)
-* **내용:** 질문자님의 아이디어와 놀랍도록 유사합니다. 기본 분석가, 심리 분석가, 기술 분석가, 황소/곰(Bull/Bear) 토론자, 리스크 관리자 등 다양한 역할을 가진 LLM 에이전트들이 회사를 이루어 주식 투자를 하는 프레임워크를 제안한 논문입니다.
-* **링크:** [arXiv:2412.20138](https://arxiv.org/abs/2412.20138) / [공식 GitHub](https://github.com/TauricResearch/TradingAgents)
-
-
-* **[Behavioral Consistency Validation for LLM Agents: An Analysis of Trading-Style Switching through Stock-Market Simulation]** (2025년/2026년 발표)
-* **내용:** 행동 재무학 이론(손실 회피, 군집 행동 등)을 LLM의 '성격(Personality)' 파라미터로 주입한 뒤, 1년 동안의 모의 주식 시장에서 이들이 인간과 얼마나 비슷하게 행동하고 전략을 수정하는지 실험한 논문입니다.
-* **링크:** [arXiv:2602.07023](https://arxiv.org/abs/2602.07023)
-
-
-* **[Persona-Driven LLM Interaction in Stock Market Simulations]** (2025년, OpenReview)
-* **내용:** 각 LLM 모델에 '위험 선호', '경쟁적', '적응형' 등의 서로 다른 페르소나를 부여하고 주식 시장 시뮬레이션에서 상호작용하게 만든 연구입니다.
-
-
-
-**논문을 직접 검색하기 좋은 포털 & 키워드**
-
-* **검색 포털:** [arXiv.org (cs.AI, q-fin 카테고리)](https://arxiv.org/), [Google Scholar](https://scholar.google.com/), [PapersWithCode (Finance 카테고리)](https://paperswithcode.com/)
-* **추천 검색 키워드:** `LLM Multi-agent finance`, `LLM Behavioral finance`, `Generative Agents financial simulation`, `Persona-driven LLM trading`
-
----
-
-### 2. 실제 투자 API 연동 가이드 (파이프라인 설계)
-
-LLM이 직접 API에 접근하게 두는 것은 **매우 위험합니다.** AI는 환각(Hallucination) 현상으로 인해 전 재산을 상장폐지 직전의 종목에 "시장가 풀매수" 할 수도 있습니다. 따라서 **[데이터 수집] -> [AI의 판단] -> [시스템의 검증] -> [API 실행]** 이라는 엄격한 분리 구조를 가져야 합니다.
-
-#### 1단계: 어떤 시장(API)을 타겟으로 할 것인가?
-
-처음 프로젝트를 시작할 때 추천하는 순서는 다음과 같습니다.
-
-1. **암호화폐 (Upbit, Binance 등):** **(가장 추천)** 24시간 연중무휴로 시장이 열려 있어 AI 에이전트들을 밤낮으로 테스트하기 가장 좋습니다. API 문서도 매우 친절하며 파이썬 라이브러리가 잘 되어 있습니다.
-2. **미국 주식 (Alpaca API):** 알고리즘/AI 트레이더들을 위해 만들어진 미국 증권사입니다. API가 매우 훌륭하고 모의투자(Paper Trading) 환경을 완벽하게 지원합니다.
-3. **국내 주식 (한국투자증권 Open API):** 국내 증권사 중 개발자 친화적인 REST API를 제공합니다. (과거 키움증권은 Windows 환경에서만 돌아가는 방식이라 최신 Python/AI 스택과 연결하기 까다로웠으나, 한투 API는 웹 환경에서 쉽습니다.)
-
-#### 2단계: 파이프라인 아키텍처 (어떻게 연결할 것인가)
-
-프로젝트는 크게 3개의 모듈로 쪼개어 파이썬(Python)으로 구현하는 것이 표준입니다.
-
-1. **Data Fetcher (현실 데이터 수집기):**
-* 파이썬 스크립트가 증권사 API를 호출해 현재 계좌 잔고, 보유 종목 수익률, 타겟 종목의 현재 가격 및 최근 뉴스를 긁어옵니다.
-
-
-2. **Agent Brain (AI 판단 컨텍스트 생성기):**
-* 수집한 현실 데이터를 텍스트로 가공합니다.
-* DB에서 CEO 및 사원 AI의 '성향 컨텍스트'를 불러옵니다.
-* **프롬프트 조합 예시:** *"너는 손실을 극도로 싫어하는 성향의 투자자다. 현재 잔고는 100만 원이고, 삼성전자가 오늘 -2% 하락 중이다. 관련된 뉴스는 다음과 같다. [뉴스 데이터]. 매수/매도/관망 중 하나를 선택하고 이유를 JSON 형태로 출력해라."*
-
-
-3. **Execution & Guardrail (실행 및 안전장치 - ★가장 중요):**
-* AI가 대답한 JSON 데이터를 파이썬이 파싱(해석)합니다.
-* **안전 검사 로직(Guardrail) 통과 시에만 API로 실제 주문을 넣습니다.**
-
-
-
-#### 3단계: 절대 타협하면 안 되는 안전장치 (Guardrails)
-
-자본이 들어가는 만큼, AI의 명령을 그대로 API에 쏘기 전에 코드 단에서(If 문 등) 반드시 걸러내야 하는 조건들입니다.
-
-* **1회 최대 매수 금액 제한:** AI가 "전액 매수"를 외쳐도, 코드에서 `max_order_amount = 자본금의 10%` 등으로 강제로 막아야 합니다.
-* **일일 최대 거래 횟수 제한:** AI가 에러를 일으켜 1초에 100번씩 사고파는 핑퐁을 칠 수 있습니다. "하루 최대 5회 거래" 같은 제한이 필요합니다.
-* **모의투자(Paper Trading) 선행:** 처음 최소 1~2달은 증권사 API의 '모의투자 계좌'를 연결해서 가짜 돈으로만 시스템이 돌아가게 하십시오. AI 직원들의 성과 평가는 이 모의투자 수익률로 진행하면 됩니다.
-
+| 문서 | 내용 |
+|------|------|
+| [01 - 프로젝트 개요](docs/01-project-overview.md) | 핵심 컨셉, 원칙, 동작 방식 |
+| [02 - AI 트렌드 조사](docs/02-ai-trends-research.md) | 에이전틱 워크플로우, 멀티 에이전트 |
+| [03 - 심리학 모델](docs/03-psychology-models.md) | Big5, HEXACO, 전망이론, 성격 변동 |
+| [04 - 가능성 분석](docs/04-feasibility.md) | 구현 가능성, 도전 과제 |
+| [05 - 기술 스택](docs/05-tech-stack.md) | 확정 기술 스택 + 논문 근거 |
+| [06 - 비용 계산](docs/06-cost-estimation.md) | 일별/월별 비용 추정 |
+| [07 - 참고 논문](docs/07-references-papers.md) | 핵심 논문, 검색 포털 |
+| [08 - 투자 API 가이드](docs/08-investment-api-guide.md) | API 파이프라인, 대상 시장 |
+| [09 - 페르소나 투자 규칙](docs/09-persona-investment-rules.md) | 성격이 투자에 미치는 영향 |
+| [10 - 조직 자율성](docs/10-organization-autonomy.md) | 동적 직급, 권한, 인사 자율 |
+| [11 - 데이터 모델](docs/11-data-model.md) | AI 최적화 DB 스키마 |
+| [12 - 데이터 포맷 연구](docs/12-data-format-research.md) | 직렬화, 벡터, 시계열 포맷 |
+| [13 - 기술 상세 연구](docs/13-detailed-tech-research.md) | 기술 비교 상세 |
