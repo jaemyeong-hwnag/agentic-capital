@@ -17,6 +17,7 @@ from agentic_capital.core.agents.base import BaseAgent
 from agentic_capital.core.agents.factory import create_agent, create_random_personality
 from agentic_capital.core.personality.models import EmotionState
 from agentic_capital.graph.workflow import run_agent_cycle
+from agentic_capital.infra.tracing import setup_tracing
 from agentic_capital.simulation.clock import is_market_open
 
 logger = structlog.get_logger()
@@ -48,7 +49,8 @@ class SimulationEngine:
         self._recorder = None
 
     def _init_adapters(self) -> None:
-        """Initialize all adapters from settings."""
+        """Initialize all adapters and tracing from settings."""
+        setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
         from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
