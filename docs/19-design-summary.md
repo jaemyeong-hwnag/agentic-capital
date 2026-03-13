@@ -1,0 +1,219 @@
+# 설계 종합 정리
+
+## 최상위 원칙 (변경 불가)
+
+| # | 원칙 | 설명 |
+|---|------|------|
+| 1 | **돈을 번다** | 유일한 목적, 변경 불가 |
+| 2 | **모든 것은 AI 친화적** | 최상위 규칙 제외 모든 설계/데이터/소통은 AI 최적화 |
+| 3 | **데이터셋 최대 최적화** | 최신 논문 기반, 토큰 효율, 정확도 극대화 |
+
+---
+
+## 아키텍처 총괄
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CORE (메인 — 변경 불가)                                  │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  Agent Layer (LangGraph)                         │    │
+│  │  CEO → PM → Risk → Analysts → Trader             │    │
+│  │  (조직 구조 자체가 AI 자율 변경 가능)                │    │
+│  └────────┬────────────────────────────────────────┘    │
+│           │                                              │
+│  ┌────────┴────────────────────────────────────────┐    │
+│  │  Memory Layer (A-MEM + Mem0)                     │    │
+│  │  Working(Redis) / Episodic(Qdrant) / Semantic(PG)│    │
+│  └────────┬────────────────────────────────────────┘    │
+│           │                                              │
+│  ┌────────┴────────────────────────────────────────┐    │
+│  │  Data Layer (PostgreSQL + TimescaleDB + Redis)   │    │
+│  │  성격/감정/거래/조직/의사결정 전부 기록              │    │
+│  └────────┬────────────────────────────────────────┘    │
+│           │                                              │
+│  ┌────────┴────────────────────────────────────────┐    │
+│  │  Analysis Layer (DuckDB + Arrow + Parquet)       │    │
+│  │  백테스팅, 논문 데이터 추출, OLAP                   │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                          │
+├──────────────────────── Port ────────────────────────────┤
+│                                                          │
+│  ADAPTERS (플러그인 — 교체 가능)                          │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐          │
+│  │  KIS   │ │Binance │ │ Alpaca │ │ Upbit  │  ...     │
+│  └────────┘ └────────┘ └────────┘ └────────┘          │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 기술 스택 요약
+
+### Core
+
+| 구분 | 기술 | 논문/근거 |
+|------|------|----------|
+| 언어 | Python 3.12+ | AI 생태계 표준 |
+| 에이전트 프레임워크 | LangGraph v1.0 | FinCon (NeurIPS 2024), TradingAgents |
+| 에이전트 메모리 | A-MEM (Zettelkasten) + Mem0 | A-MEM (NeurIPS 2025) |
+| LLM | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
+
+### Data
+
+| 구분 | 기술 | 용도 |
+|------|------|------|
+| 메인 DB | PostgreSQL 16 + TimescaleDB | 정형 + 시계열 |
+| 벡터 DB | pgvector → Qdrant | 에이전트 메모리 임베딩 |
+| 캐시 | Redis 7+ | Working Memory, 감정, 이벤트 |
+| 분석 | DuckDB + Parquet + Arrow IPC | OLAP, 백테스팅 |
+
+### Format
+
+| 구분 | 기술 | 효과 |
+|------|------|------|
+| LLM 프롬프트 | TOON + Markdown-KV + YAML | 토큰 40-60% 절감 |
+| 에이전트 통신 | LACP + MessagePack | 구조화 메시지, 30% 작은 페이로드 |
+| 수치 표현 | NumeroLogic `{digits:value}` | 토크나이저 파편화 방지 |
+| 금융 데이터 | StockTime 방식 (비율 변환) | 스케일 불변, 역정규화 |
+
+### Adapter (교체 가능)
+
+| 시장 | API | 패키지 |
+|------|-----|--------|
+| 국내 주식 | 한국투자증권 Open API | `python-kis` |
+| 암호화폐 | Binance, Upbit | `ccxt` |
+| 미국 주식 | Alpaca | `alpaca-py` |
+| 시장 데이터 | Yahoo Finance | `yfinance` |
+
+---
+
+## 에이전트 시스템
+
+### 성격 모델 (15D 벡터)
+
+| 모델 | 차원 | 파라미터 |
+|------|------|---------|
+| Big5 (OCEAN) | 5D | openness, conscientiousness, extraversion, agreeableness, neuroticism |
+| HEXACO | 1D | honesty_humility |
+| 전망이론 (Prospect Theory) | 4D | loss_aversion, risk_aversion_gains, risk_aversion_losses, probability_weighting |
+| **합계** | **10D** | 0~1 float, 경험에 따라 변동 |
+
+> 성격은 고정이 아님. 경험(수익, 손실, 승진, 해고 위기)에 따라 지속적으로 변동하며 모든 변화가 DB에 기록됨.
+
+### 감정 모델 (실시간)
+
+| 파라미터 | 범위 | 저장소 |
+|---------|------|--------|
+| valence | -1 ~ +1 | Redis (실시간) + PG (이력) |
+| arousal | 0 ~ 1 | Redis + PG |
+| dominance | 0 ~ 1 | Redis + PG |
+| stress | 0 ~ 1 | Redis + PG |
+| confidence | 0 ~ 1 | Redis + PG |
+
+### 메모리 계층
+
+| 계층 | 저장소 | 내용 | 정책 |
+|------|--------|------|------|
+| Working | Redis | 최근 5-10개 관찰, 현재 태스크 | TTL 자동 만료 |
+| Episodic | Qdrant | 구체적 경험 (context, action, outcome, q_value) | REMEMBERER decay |
+| Semantic | PostgreSQL | 축적된 지식, 투자 원칙 | Reflection 업데이트 |
+| Procedural | 코드/프롬프트 | 투자 전략, 분석 절차 | 주기적 증류 |
+
+### 의사결정 파이프라인
+
+```
+시장 데이터 수집 (Adapter)
+    ↓
+AI 친화적 포맷 변환 (TOON/NumeroLogic)
+    ↓
+에이전트 컨텍스트 구성
+  ├── 성격 벡터 (15D) 로드
+  ├── 감정 상태 (VAD) 로드
+  ├── Working Memory (Redis) 로드
+  ├── 관련 Episodic Memory (Qdrant 검색) 로드
+  └── 프롬프트 조합 (YAML+TOON+Markdown)
+    ↓
+LLM 판단 (매수/매도/관망, 종목, 금액, 근거)
+    ↓
+자본 검증 (잔고 >= 주문금액, 유일한 검증)
+    ↓
+주문 실행 (Adapter → 거래소 API)
+    ↓
+결과 기록
+  ├── 거래 기록 + 성격/감정 스냅샷 → PostgreSQL
+  ├── 경험 메모리 → Qdrant (A-MEM 노트)
+  └── 감정 업데이트 → Redis
+    ↓
+Reflection (성격 변동, 전략 학습, q_value 업데이트)
+```
+
+---
+
+## 통신 프로토콜 (LACP)
+
+| 메시지 타입 | 용도 | 예시 |
+|------------|------|------|
+| PLAN | 전략/의도 공유 | "이번 주 기술주 집중 매수 계획" |
+| ACT | 도구 호출, 주문 실행 | "AAPL 100주 시장가 매수 실행" |
+| OBSERVE | 결과/상태 보고 | "AAPL +2.1%, RSI 34 → 48" |
+| SIGNAL | 투자 시그널 | "BUY AAPL, confidence 0.72" |
+
+직렬화: MessagePack (기본) / C2C KV-cache (확장)
+
+---
+
+## 조직 자율성
+
+| 항목 | 설명 |
+|------|------|
+| **권한** | 최초 CEO 전부 보유, 자율적으로 위임/회수/재배분 |
+| **직급** | 고정 아님, CEO가 동적 생성/변경/폐지 |
+| **인사** | 채용/해고/승진/강등/보상 전부 자율 |
+| **조직 구조** | 수직/수평/매트릭스 등 CEO가 자율 설계 |
+| **투자** | 종목, 방법, 시점, 비율, 조사방법 일체 제한 없음 |
+| **소통** | AI 친화적이면 언어/포맷 자유 (영어, 바이너리, 벡터, TOON) |
+
+---
+
+## 데이터 기록 원칙
+
+> 모든 기록은 논문 참고 가능 수준
+
+| 기록 대상 | 저장소 | 포맷 |
+|----------|--------|------|
+| 거래 + 근거 + 성격/감정 스냅샷 | PostgreSQL | typed columns + JSONB |
+| 에이전트 성격 변화 이력 | TimescaleDB hypertable | 시계열 (trigger_event, reasoning) |
+| 감정 상태 이력 | TimescaleDB hypertable | 시계열 (VAD + extensions) |
+| 조직 변경 이력 | PostgreSQL | hr_events (전체 컨텍스트 스냅샷) |
+| 권한 변경 이력 | TimescaleDB | permission_history |
+| 에이전트 메시지 | PostgreSQL | LACP 메시지 + 메모리 참조 |
+| 회사 상태 스냅샷 | TimescaleDB hypertable | 총자본, PnL, 샤프, 최대낙폭 |
+| 시장 데이터 | TimescaleDB hypertable | OHLCV (절대값 + 비율) |
+
+---
+
+## 인프라 Phase
+
+| Phase | 규모 | 인프라 | 월 비용 |
+|-------|------|--------|--------|
+| 1 | 로컬 / Paper Trading | Docker Compose (PG + Redis) | ~$0 |
+| 2 | 에이전트 10~50명, 실거래 | EC2 + RDS + ElastiCache + Qdrant | ~$125 |
+| 3 | 에이전트 50+, 확장 | 전용 서버 + Qdrant Cloud + 모니터링 | ~$300+ |
+
+---
+
+## 미해결 설계 사항
+
+구현 단계에서 구체화 필요:
+
+| 항목 | 현재 상태 | 구현 시 필요 |
+|------|----------|-------------|
+| 성격→행동 매핑 | 15D 벡터 정의됨 | 프롬프트에 성격이 판단에 미치는 구체적 로직 |
+| CEO 의사결정 알고리즘 | 자율 원칙만 정의 | 인사/조직 판단 트리거와 평가 기준 프롬프트 |
+| 메모리 검색 전략 | A-MEM 구조 정의됨 | Qdrant 쿼리 구성 (임베딩 + 메타데이터 필터) |
+| 이벤트 루프 | 미정의 | 일/시간 단위 시뮬레이션 트리거 방식 |
+| 감정→판단 영향 | VAD 모델 정의됨 | 감정 파라미터가 투자 판단에 미치는 구체적 가중치 |
+| LangGraph 상태 그래프 | 미정의 | 에이전트 워크플로우 노드/엣지 설계 |
+| Adapter 인터페이스 | 개념만 정의 | Port/Adapter 추상 클래스 (ABC) |
+| 프롬프트 템플릿 | 포맷만 정의 | 실제 시스템/유저 프롬프트 작성 |

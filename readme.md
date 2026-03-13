@@ -90,6 +90,8 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [16 - External APIs](docs/16-external-apis.md) | LLM, exchange, market data APIs |
 | [17 - Infrastructure](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 infra |
 | [18 - Korean Broker API](docs/18-korean-broker-api.md) | KIS API setup, accounts, permissions |
+| [19 - Design Summary](docs/19-design-summary.md) | Complete design overview |
+| [20 - Milestones](docs/20-milestones.md) | Implementation roadmap (M1-M7) |
 
 ## Key Papers
 
@@ -174,3 +176,5 @@ TBD
 | [16 - 외부 API](docs/16-external-apis.md) | LLM, 거래소, 시장 데이터 API |
 | [17 - 인프라](docs/17-infrastructure.md) | Docker Compose, Phase 1/2/3 인프라 |
 | [18 - 한국 증권사 API](docs/18-korean-broker-api.md) | KIS API 설정, 계좌, 권한 |
+| [19 - 설계 종합 정리](docs/19-design-summary.md) | 전체 설계 요약 |
+| [20 - 마일스톤](docs/20-milestones.md) | 구현 로드맵 (M1-M7) |
