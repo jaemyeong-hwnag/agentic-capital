@@ -15,7 +15,7 @@ from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.ceo import CEOAgent
 from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.agents.trader import TraderAgent
-from agentic_capital.graph.workflow import build_agent_workflow, run_agent_cycle
+from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.ports.llm import LLMPort
 from agentic_capital.ports.market_data import MarketDataPort
 from agentic_capital.ports.trading import TradingPort

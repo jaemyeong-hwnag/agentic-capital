@@ -120,7 +120,6 @@ class SimulationEngine:
                 initial_capital=settings.initial_capital,
                 config={
                     "cycle_interval": self._cycle_interval,
-                    "symbols": self._symbols or [],
                     "agents": [a.name for a in self._agents],
                 },
             )
@@ -152,9 +151,6 @@ class SimulationEngine:
         self._init_adapters()
         self._init_agents()
 
-        if not self._symbols:
-            self._symbols = await self._market_data.get_symbols()
-
         await self._init_recorder()
 
         balance = await self._trading.get_balance()
@@ -163,7 +159,6 @@ class SimulationEngine:
             balance_total=balance.total,
             balance_available=balance.available,
             currency=balance.currency,
-            symbols=self._symbols[:5],
         )
 
         self._running = True
@@ -208,7 +203,7 @@ class SimulationEngine:
                     cycle_number=self._cycle_count,
                     trading=self._trading,
                     market_data=self._market_data,
-                    symbols=self._symbols,
+                    open_markets=open_markets,
                     recorder=self._recorder,
                 )
                 cycle_results.append(result)

@@ -36,7 +36,7 @@ def _get_langchain_llm():
     return _langchain_llm
 
 
-def _build_system_prompt(agent: BaseAgent, symbols: list[str]) -> str:
+def _build_system_prompt(agent: BaseAgent) -> str:
     """Build a system prompt encoding the agent's identity and personality."""
     p = agent.personality
     e = agent.emotion
@@ -59,8 +59,6 @@ def _build_system_prompt(agent: BaseAgent, symbols: list[str]) -> str:
             "Analyze data, time entries/exits, and manage positions."
         )
 
-    symbols_hint = ", ".join(symbols[:10]) if symbols else "any valid exchange symbol"
-
     return f"""You are {agent.name}, an autonomous AI agent at an investment fund.
 
 {role_hint}
@@ -81,14 +79,12 @@ current_emotion:
   stress: {e.stress:.2f}
   confidence: {e.confidence:.2f}
 
-available_symbols (sample): {symbols_hint}
-
 MANDATE:
 - Your sole goal is to make money for the fund.
 - Your only constraint is available capital.
 - Use the provided tools however you see fit.
 - No required sequence. No forced steps. You decide everything.
-- You may trade any valid symbol on any supported market.
+- Use get_symbols(market) to discover tradeable symbols in any market.
 - Markets: kr_stock (KOSPI/KOSDAQ), us_stock (NASDAQ/NYSE/AMEX),
   hk_stock (SEHK), cn_stock (SHAA/SZAA), jp_stock (TKSE), vn_stock (HASE/VNSE)
 - When you are done with your analysis and actions, stop calling tools."""
@@ -101,6 +97,7 @@ async def run_agent_cycle(
     trading: Any = None,
     market_data: Any = None,
     symbols: list[str] | None = None,
+    open_markets: list[str] | None = None,
     recorder: Any = None,
 ) -> dict:
     """Run one autonomous cycle for an agent using ReAct tool-use loop.
@@ -113,7 +110,6 @@ async def run_agent_cycle(
     """
     from langchain_core.messages import HumanMessage
 
-    syms = symbols or []
     tools, decisions_sink, messages_sink = build_agent_tools(
         trading=trading,
         market_data=market_data,
@@ -123,14 +119,20 @@ async def run_agent_cycle(
         agent_memory=getattr(agent, "_memory", None),
     )
 
-    system_prompt = _build_system_prompt(agent, syms)
+    system_prompt = _build_system_prompt(agent)
     llm = _get_langchain_llm()
 
     react_agent = create_react_agent(llm, tools, prompt=system_prompt)
 
+    if open_markets:
+        market_status = f"Currently open markets: {', '.join(open_markets)}."
+    else:
+        market_status = "All major markets are currently closed."
+
     cycle_trigger = (
-        f"Cycle {cycle_number}. Assess the situation and take action. "
-        f"Available symbols include: {', '.join(syms[:5])}. "
+        f"Cycle {cycle_number}. {market_status} "
+        f"Assess the situation and take action. "
+        f"Use get_symbols(market) to find tradeable symbols. "
         f"Use your tools to analyze, decide, and execute. When done, stop."
     )
 
