@@ -233,9 +233,12 @@ class TestCreateAgent:
         agent = create_agent("trader", "Trader", llm=_make_llm(), trading=trading, market_data=market_data)
         assert isinstance(agent, TraderAgent)
 
-    def test_create_unknown_role(self):
-        with pytest.raises(ValueError, match="Unknown agent role"):
-            create_agent("janitor", "Bob", llm=_make_llm())
+    def test_create_custom_role_creates_analyst(self):
+        """Any custom role name creates an AnalystAgent — no restrictions."""
+        from agentic_capital.core.agents.analyst import AnalystAgent
+        agent = create_agent("janitor", "Bob", llm=_make_llm())
+        assert isinstance(agent, AnalystAgent)
+        assert agent.name == "Bob"
 
     def test_create_without_llm(self):
         with pytest.raises(TypeError, match="llm must be"):
