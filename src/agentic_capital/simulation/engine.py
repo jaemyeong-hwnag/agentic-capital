@@ -318,7 +318,7 @@ class SimulationEngine:
                     new_capital=capital,
                 ))
 
-            logger.info("agent_hired", name=name, role=agent_role, hired_by=ceo.name)
+            logger.info("agent_hired", name=name, role=role, hired_by=ceo.name)
 
         except Exception:
             logger.exception("hire_failed", name=name)
