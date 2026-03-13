@@ -146,6 +146,111 @@ class TestSimulationRecorder:
         assert recorder._session.execute.call_count == 1
 
     @pytest.mark.asyncio
+    async def test_record_generic_decision(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        await recorder.record_decision(
+            agent_id=uuid.uuid4(),
+            decision_type="strategy",
+            action="focus on tech sector",
+            reasoning="growth potential",
+            confidence=0.7,
+        )
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_hr_event(self):
+        from agentic_capital.core.organization.hr import HREvent, HREventType
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        hr_event = HREvent(
+            event_type=HREventType.FIRE,
+            target_agent_id=uuid.uuid4(),
+            decided_by=uuid.uuid4(),
+            reasoning="poor performance",
+            new_capital=0.0,
+        )
+        await recorder.record_hr_event(hr_event)
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_agent_message(self):
+        from agentic_capital.core.communication.protocol import AgentMessage, MessageType
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        msg = AgentMessage(
+            type=MessageType.SIGNAL,
+            sender_id=uuid.uuid4(),
+            content={"symbol": "005930", "signal": "BUY"},
+        )
+        await recorder.record_agent_message(msg)
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_position_snapshot(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        await recorder.record_position_snapshot(
+            agent_id=uuid.uuid4(),
+            symbol="005930",
+            quantity=100,
+            avg_price=70000,
+            unrealized_pnl=50000,
+            unrealized_pnl_pct=0.71,
+        )
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_role(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        role_id = await recorder.record_role(
+            role_name="risk_analyst",
+            permissions=["read_positions", "send_signals"],
+            created_by=uuid.uuid4(),
+        )
+        assert role_id is not None
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_permission_change(self):
+        recorder = self._make_recorder()
+        await recorder.record_permission_change(
+            agent_id=uuid.uuid4(),
+            action="grant",
+            changes={"added": ["execute_trades"]},
+            decided_by=uuid.uuid4(),
+            reasoning="promoted to trader",
+        )
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_agent_status_change(self):
+        recorder = self._make_recorder()
+        await recorder.record_agent_status_change(
+            agent_id=uuid.uuid4(),
+            new_status="fired",
+            reason="CEO decision",
+        )
+        assert recorder._session.execute.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_company_snapshot_with_metrics(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        await recorder.record_company_snapshot(
+            total_capital=12_000_000,
+            available_cash=5_000_000,
+            agents_count=5,
+            daily_pnl_pct=1.2,
+            cumulative_pnl_pct=20.0,
+            sharpe_30d=1.5,
+            max_drawdown_pct=8.3,
+            org_snapshot={"roles": ["ceo", "trader", "analyst"]},
+        )
+        assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
     async def test_commit(self):
         recorder = self._make_recorder()
         await recorder.commit()

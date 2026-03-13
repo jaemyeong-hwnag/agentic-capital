@@ -141,17 +141,83 @@ class TestRecordNode:
         result = await record(state, ceo)
         assert result == {}
 
-    @pytest.mark.asyncio
-    async def test_records_with_recorder(self):
-        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+    def _make_recorder(self):
         recorder = MagicMock()
         recorder.record_emotion = AsyncMock()
         recorder.record_decision = AsyncMock()
+        recorder.record_hr_event = AsyncMock()
+        recorder.record_agent_message = AsyncMock()
+        recorder.record_position_snapshot = AsyncMock()
         recorder.commit = AsyncMock()
+        return recorder
+
+    @pytest.mark.asyncio
+    async def test_records_with_recorder(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
         state = _make_state(agent_id=str(ceo.agent_id))
         result = await record(state, ceo, recorder=recorder)
         recorder.record_emotion.assert_called_once()
         recorder.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_records_trading_decisions(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
+        state = _make_state(
+            agent_id=str(ceo.agent_id),
+            decisions=[{"action": "BUY", "symbol": "005930", "quantity": 10, "reason": "strong", "confidence": 0.8}],
+        )
+        await record(state, ceo, recorder=recorder)
+        recorder.record_decision.assert_called_once()
+        call_kwargs = recorder.record_decision.call_args
+        assert call_kwargs.kwargs.get("status") == "executed" or call_kwargs[1].get("status") == "executed"
+
+    @pytest.mark.asyncio
+    async def test_records_hr_decisions(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
+        target_id = str(uuid4())
+        state = _make_state(
+            agent_id=str(ceo.agent_id),
+            decisions=[{"type": "fire", "target": target_id, "reason": "poor performance", "confidence": 0.9}],
+        )
+        await record(state, ceo, recorder=recorder)
+        recorder.record_decision.assert_called_once()
+        recorder.record_hr_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_records_strategy_decisions(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
+        state = _make_state(
+            agent_id=str(ceo.agent_id),
+            decisions=[{"type": "strategy", "detail": "focus on tech", "reason": "growth potential"}],
+        )
+        await record(state, ceo, recorder=recorder)
+        recorder.record_decision.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_records_messages(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
+        state = _make_state(
+            agent_id=str(ceo.agent_id),
+            messages_to_send=[{"type": "SIGNAL", "symbol": "005930", "signal": "BUY", "confidence": 0.8}],
+        )
+        await record(state, ceo, recorder=recorder)
+        recorder.record_agent_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_records_position_snapshots(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = self._make_recorder()
+        state = _make_state(
+            agent_id=str(ceo.agent_id),
+            positions=[{"symbol": "005930", "quantity": 100, "avg_price": 70000, "unrealized_pnl_pct": 2.5}],
+        )
+        await record(state, ceo, recorder=recorder)
+        recorder.record_position_snapshot.assert_called_once()
 
 
 # ─── Workflow Tests ───
