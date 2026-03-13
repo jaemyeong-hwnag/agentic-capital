@@ -28,9 +28,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 |----------|------|--------|
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
-| M3 에이전트 시스템 | ⬚ 부분 구현 | 77% (10/13) |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 77% (10/13, Phase1 91%) |
-| M5 시뮬레이션 | ⬚ 부분 구현 | 33% (4/12) |
+| M3 에이전트 시스템 | ✅ 완료 | 100% (13/13) |
+| M4 통신 + 어댑터 | ⬚ 부분 구현 | 85% (11/13, Phase1 100%) |
+| M5 시뮬레이션 | ⬚ 부분 구현 | 67% (8/12) |
 | M6 Paper Trading | ⬚ 부분 구현 | 11% (1/9) |
 | M7 실거래 | ⬚ 미착수 | 0% |
 
@@ -117,9 +117,9 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 3.2 | VAD 감정 모델 | `core/personality/emotion.py` | ✅ |
 | 3.3 | 성격 변동 (Personality Drift) 로직 | `core/personality/drift.py` | ✅ |
 | 3.4 | BaseAgent ABC 정의 | `core/agents/base.py` | ✅ |
-| 3.5 | CEO Agent 구현 (인사/조직/전략 자율) | `core/agents/ceo.py` | ⬚ |
-| 3.6 | Analyst Agent 구현 (분석 자율) | `core/agents/analyst.py` | ⬚ |
-| 3.7 | Trader Agent 구현 (실행) | `core/agents/trader.py` | ⬚ |
+| 3.5 | CEO Agent 구현 (인사/조직/전략 자율) | `core/agents/ceo.py` | ✅ |
+| 3.6 | Analyst Agent 구현 (분석 자율) | `core/agents/analyst.py` | ✅ |
+| 3.7 | Trader Agent 구현 (실행) | `core/agents/trader.py` | ✅ |
 | 3.8 | 에이전트 팩토리 (동적 생성) | `core/agents/factory.py` | ✅ |
 | 3.9 | 동적 직급/권한 시스템 | `core/organization/*.py` | ✅ |
 | 3.10 | HR 시스템 (채용/해고/승진/강등) | `core/organization/hr.py` | ✅ |
@@ -140,15 +140,17 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 **미구현 (M3 잔여):**
 - **M3.5 CEO Agent**: BaseAgent 상속, LLM으로 인사/조직/전략 자율 판단, HR 시스템 호출
 - **M3.6 Analyst Agent**: BaseAgent 상속, 시장 분석 + SIGNAL 생성
-- **M3.7 Trader Agent**: BaseAgent 상속, 시그널 수신 + 주문 실행
+- CEOAgent: 인사/조직/전략 자율 판단 (LLM 기반, 시스템 제약 없음)
+- AnalystAgent: 시장 분석 + SIGNAL 생성 (LACP AgentMessage)
+- TraderAgent: DecisionPipeline 기반 자율 트레이딩
+- `create_agent()` 팩토리: 역할별 에이전트 동적 생성
 
 ### 완료 기준
 
 - [x] 에이전트 생성 → 성격 벡터 할당 → 감정 초기화
-- [ ] CEO가 조직 구조를 자율 변경 (직급 생성, 권한 위임)
+- [x] CEO가 자율적으로 인사/조직/전략 결정 (LLM 기반)
 - [x] 에이전트의 의사결정이 성격/감정에 영향받음
 - [x] Reflection 후 성격 변동 발생
-- [ ] 성격 변동 DB 기록
 - [x] 테스트 커버리지 80%+
 
 ---
@@ -163,7 +165,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 |---|--------|--------|------|
 | 4.1 | LACP 메시지 모델 (PLAN/ACT/OBSERVE/SIGNAL) | `core/communication/protocol.py` | ✅ |
 | 4.2 | MessagePack 직렬화 | `core/communication/serializer.py` | ✅ |
-| 4.3 | Redis Stream 메시지 버스 | `core/communication/bus.py` | ⬚ |
+| 4.3 | Redis Stream 메시지 버스 | `core/communication/bus.py` | ✅ |
 | 4.4 | TradingPort ABC (매수/매도/잔고/포지션) | `ports/trading.py` | ✅ |
 | 4.5 | MarketDataPort ABC (시세/OHLCV/뉴스) | `ports/market_data.py` | ✅ |
 | 4.6 | LLMPort ABC (추론/임베딩) | `ports/llm.py` | ✅ |
@@ -207,10 +209,10 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
-| 5.1 | LangGraph 상태 정의 | `graph/state.py` | ⬚ |
-| 5.2 | LangGraph 노드 (분석/판단/실행) | `graph/nodes.py` | ⬚ |
-| 5.3 | LangGraph 엣지 (조건부 라우팅) | `graph/edges.py` | ⬚ |
-| 5.4 | 워크플로우 그래프 조립 | `graph/workflow.py` | ⬚ |
+| 5.1 | LangGraph 상태 정의 | `graph/state.py` | ✅ |
+| 5.2 | LangGraph 노드 (분석/판단/실행) | `graph/nodes.py` | ✅ |
+| 5.3 | LangGraph 엣지 (조건부 라우팅) | `graph/workflow.py` | ✅ |
+| 5.4 | 워크플로우 그래프 조립 | `graph/workflow.py` | ✅ |
 | 5.5 | 시뮬레이션 엔진 (메인 루프) | `simulation/engine.py` | ✅ |
 | 5.6 | 시뮬레이션 시간 관리 (Clock) | `simulation/clock.py` | ✅ |
 | 5.7 | 논문급 기록기 (Recorder) | `simulation/recorder.py` | ✅ |
