@@ -4,14 +4,25 @@ import asyncio
 import sys
 
 import structlog
+from alembic import command
+from alembic.config import Config
 
 from agentic_capital.config import settings
 
 logger = structlog.get_logger()
 
 
+def run_migrations() -> None:
+    """Apply pending Alembic migrations on startup."""
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(alembic_cfg, "head")
+    logger.info("migrations_applied")
+
+
 async def run() -> None:
     """Run the Agentic Capital simulation."""
+    run_migrations()
     logger.info(
         "starting_simulation",
         initial_capital=settings.initial_capital,
