@@ -55,8 +55,8 @@ class SearchMemoryInput(BaseModel):
 
 class SendMessageInput(BaseModel):
     to_agent: str = Field(description="Target agent name or ID")
-    type: str = Field(default="SIGNAL", description="Message type: SIGNAL | INSTRUCTION | REPORT | QUERY | RESPONSE")
-    content: dict = Field(description="Message content as dict")
+    type: str = Field(default="SIG", description="SIG|INSTR|RPT|QRY|ACK|ERR")
+    content: str = Field(default="", description="Compact k:v payload e.g. sym:005930,act:BUY,cf:0.87,why:RSI_OS")
 
 
 # ---------------------------------------------------------------------------
@@ -251,13 +251,20 @@ def build_agent_tools(
 
     # ---- Messaging tools -------------------------------------------------
 
-    async def send_message(to_agent: str, type: str = "SIGNAL", content: dict | None = None) -> str:
-        """Send a message to another agent."""
+    async def send_message(to_agent: str, type: str = "SIG", content: str = "") -> str:
+        """Send a compact message to another agent.
+
+        content: compact k:v pairs e.g. "sym:005930,act:BUY,cf:0.87,why:RSI_OS"
+        Full wire format: TYPE|FROM|TO|TS|content
+        """
+        from agentic_capital.formats.compact import msg_encode
+        wire = msg_encode(type, agent_name, to_agent, content)
         msg = {
             "from": agent_name,
             "to": to_agent,
             "type": type,
-            "content": content or {},
+            "content": content,
+            "wire": wire,
         }
         messages_sink.append(msg)
         logger.info("agent_message_sent", from_agent=agent_name, to=to_agent, type=type)

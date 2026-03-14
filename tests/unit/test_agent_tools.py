@@ -154,10 +154,12 @@ class TestBuildAgentTools:
         tool = next(t for t in tools if t.name == "send_message")
         result = await tool.coroutine(
             to_agent="Trader-Gamma",
-            type="INSTRUCTION",
-            content={"action": "buy", "symbol": "005930"},
+            type="INSTR",
+            content="action:buy,sym:005930",
         )
         assert result == "sent:1"
         assert len(messages) == 1
         assert messages[0]["to"] == "Trader-Gamma"
         assert messages[0]["from"] == "CEO-Alpha"
+        assert "wire" in messages[0]
+        assert "INSTR|CEO-Alpha|Trader-Gamma" in messages[0]["wire"]
