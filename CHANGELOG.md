@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0] - 2026-03-14
+
+### Changed
+- Agent tools: removed market data tools (`get_quote`, `get_ohlcv`, `get_order_book`, `get_symbols`) — AI now finds data autonomously from any source
+- `build_agent_tools()`: only provides account/portfolio queries + order execution (8 tools total)
+- `run_agent_cycle()`: removed `market_data` parameter; agents operate with full autonomy
+- `TraderAgent`: removed `DecisionPipeline` and `market_data` dependency; simplified to pure ReAct loop
+- `create_agent()`: removed `market_data` parameter from factory
+- All agent system prompts: removed methodology constraints — rational, irrational, unconventional, any approach valid
+
+### Removed
+- KIS market data adapter (`adapters/market_data/kis.py`) — AI decides data sources autonomously
+- KIS WebSocket adapter (`adapters/kis_websocket.py`) — real-time feed replaced by AI-driven search
+- `DecisionPipeline` from `TraderAgent` — superseded by ReAct tool-use loop
+
 ## [0.12.0] - 2026-03-13
 
 ### Added
