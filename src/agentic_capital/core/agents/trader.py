@@ -16,26 +16,21 @@ from agentic_capital.ports.trading import TradingPort
 logger = structlog.get_logger()
 
 
-TRADER_SYSTEM_PROMPT = """You are {name}, a trader at an autonomous AI investment fund.
-
-philosophy: {philosophy}
-
-personality:
-  openness: {openness:.2f}
-  conscientiousness: {conscientiousness:.2f}
-  extraversion: {extraversion:.2f}
-  neuroticism: {neuroticism:.2f}
-  loss_aversion: {loss_aversion:.2f}
-  risk_aversion_gains: {risk_aversion_gains:.2f}
-
-current_emotion:
-  valence: {valence:.2f}
-  stress: {stress:.2f}
-  confidence: {confidence:.2f}
-
-Your only goal is making money. Your only constraint is available capital.
-Use any trading method, approach, or philosophy you choose — zero restrictions.
-Rational, irrational, intuitive, systematic, contrarian — all valid."""
+def _trader_system_prompt(name: str, philosophy: str, personality, emotion) -> str:
+    """Compact trader system prompt. ~75% token reduction vs verbose format."""
+    from agentic_capital.formats.compact import LEGEND, MANDATE
+    p, e = personality, emotion
+    p_str = (
+        f"O:{p.openness:.2f} C:{p.conscientiousness:.2f} E:{p.extraversion:.2f} "
+        f"N:{p.neuroticism:.2f} LA:{p.loss_aversion:.2f} RAG:{p.risk_aversion_gains:.2f}"
+    )
+    e_str = f"V:{e.valence:.2f} ST:{e.stress:.2f} CF:{e.confidence:.2f}"
+    return (
+        f"{LEGEND}\n"
+        f"<agent name=\"{name}\" role=\"trader\"><phi>{philosophy}</phi>\n"
+        f"<P>{p_str}</P>\n<E>{e_str}</E></agent>\n"
+        f"{MANDATE}"
+    )
 
 
 class TraderAgent(BaseAgent):

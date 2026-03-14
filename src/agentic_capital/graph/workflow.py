@@ -37,56 +37,34 @@ def _get_langchain_llm():
 
 
 def _build_system_prompt(agent: BaseAgent) -> str:
-    """Build a system prompt encoding the agent's identity and personality."""
-    p = agent.personality
-    e = agent.emotion
-    role_hint = ""
+    """Build compact AI-optimized system prompt.
+
+    ~75% token reduction vs verbose format.
+    Uses XML tags (Claude-native), Big5 abbreviations (LLM-universal),
+    and LEGEND schema defined once for implicit reuse.
+    """
+    from agentic_capital.formats.compact import LEGEND, MANDATE, psych
+
     agent_class = type(agent).__name__
     if "CEO" in agent_class:
-        role_hint = (
-            "You are the CEO. You manage the fund's strategy and personnel. "
-            "You can hire/fire agents (use send_message to instruct the system), "
-            "set strategy, and trade directly."
-        )
+        role = "CEO"
+        role_ctx = "act:hire|fire|restructure|strategy|trade|send_message"
     elif "Analyst" in agent_class:
-        role_hint = (
-            "You are an analyst. Use any method you choose — fundamental, technical, "
-            "quantitative, unconventional, or entirely novel approaches. "
-            "Share findings with traders via send_message."
-        )
-    elif "Trader" in agent_class:
-        role_hint = (
-            "You are a trader. Execute trades using submit_order. "
-            "Use any trading methodology you see fit — no restrictions whatsoever."
-        )
+        role = "analyst"
+        role_ctx = "act:analyze→signal→send_message(traders)"
+    else:
+        role = "trader"
+        role_ctx = "act:assess→decide→submit_order"
 
-    return f"""You are {agent.name}, an autonomous AI agent at an investment fund.
-
-{role_hint}
-
-philosophy: {agent.profile.philosophy}
-
-personality:
-  openness: {p.openness:.2f}
-  conscientiousness: {p.conscientiousness:.2f}
-  extraversion: {p.extraversion:.2f}
-  neuroticism: {p.neuroticism:.2f}
-  loss_aversion: {p.loss_aversion:.2f}
-  risk_aversion_gains: {p.risk_aversion_gains:.2f}
-
-current_emotion:
-  valence: {e.valence:.2f}
-  arousal: {e.arousal:.2f}
-  stress: {e.stress:.2f}
-  confidence: {e.confidence:.2f}
-
-MANDATE:
-- Your sole goal is to make money for the fund.
-- Your only constraint is available capital.
-- Use any method, theory, philosophy, or approach you choose — zero restrictions.
-- Rational, irrational, conventional, unconventional — all valid if it makes money.
-- No required sequence. No forced steps. You decide everything autonomously.
-- When you are done with your actions, stop calling tools."""
+    return (
+        f"{LEGEND}\n"
+        f"<agent name=\"{agent.name}\" role=\"{role}\">\n"
+        f"<phi>{agent.profile.philosophy}</phi>\n"
+        f"{psych(agent.personality, agent.emotion)}\n"
+        f"</agent>\n"
+        f"{MANDATE}\n"
+        f"{role_ctx}"
+    )
 
 
 async def run_agent_cycle(
@@ -126,11 +104,7 @@ async def run_agent_cycle(
     else:
         market_status = "All major markets are currently closed."
 
-    cycle_trigger = (
-        f"Cycle {cycle_number}. {market_status} "
-        f"Assess the situation and take action. "
-        f"Use your tools to check your positions, decide, and execute. When done, stop."
-    )
+    cycle_trigger = f"C{cycle_number}|{market_status}|act_now"
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)
 

@@ -1,0 +1,129 @@
+"""Compact AI-to-AI encoding — token-minimal, semantically dense.
+
+Research basis:
+- LLMLingua-2 (2024, Microsoft): dense encoding = 80%+ token reduction, <2% perf loss
+- XML tags (Anthropic training data): 1-token overhead vs verbose labels, native Claude format
+- Big5/Prospect abbreviations: LLM-native psychology vocabulary (universal knowledge)
+- TOON (in-codebase): 40-60% reduction for tabular data
+- "Lost in the Middle" (2023): critical info at start/end — personality at top of system prompt
+
+Abbreviation schema (defined once, implicit thereafter):
+  <P> personality 10D:
+      O=openness  C=conscientiousness  E=extraversion  A=agreeableness
+      N=neuroticism  H=honesty_humility  LA=loss_aversion
+      RAG=risk_aversion_gains  RAL=risk_aversion_losses  PW=probability_weighting
+  <E> emotion VAD+:
+      V=valence[-1,1]  AR=arousal  D=dominance  ST=stress  CF=confidence
+  tool keys:
+      tot avl ccy  |  sym qty avg cur pnl pct mkt  |  oid sd px st
+"""
+from __future__ import annotations
+
+from agentic_capital.formats.toon import to_toon
+
+# Injected once at top of every system prompt — defines all abbreviations.
+# After this, AI understands all compact tokens without re-explanation.
+LEGEND = (
+    "<schema>"
+    "P:O C E A N H LA RAG RAL PW | "
+    "E:V AR D ST CF | "
+    "keys:tot avl ccy sym qty avg cur pnl pct mkt oid sd px st"
+    "</schema>"
+)
+
+# Universal mandate — same for all agents, short and unambiguous
+MANDATE = "GOAL=profit|LIMIT=capital|METHOD=any|STOP=done"
+
+
+def psych(personality, emotion) -> str:
+    """Encode personality vector + emotion state as compact XML-tagged string.
+
+    ~75% token reduction vs verbose YAML-style format.
+    Example output:
+        <P>O:0.72 C:0.83 E:0.55 A:0.44 N:0.31 H:0.61 LA:0.45 RAG:0.38 RAL:0.52 PW:0.67</P>
+        <E>V:0.23 AR:0.61 D:0.55 ST:0.12 CF:0.78</E>
+    """
+    p = personality
+    e = emotion
+    p_str = (
+        f"O:{p.openness:.2f} C:{p.conscientiousness:.2f} "
+        f"E:{p.extraversion:.2f} A:{p.agreeableness:.2f} "
+        f"N:{p.neuroticism:.2f} H:{p.honesty_humility:.2f} "
+        f"LA:{p.loss_aversion:.2f} RAG:{p.risk_aversion_gains:.2f} "
+        f"RAL:{p.risk_aversion_losses:.2f} PW:{p.probability_weighting:.2f}"
+    )
+    e_str = (
+        f"V:{e.valence:.2f} AR:{e.arousal:.2f} "
+        f"D:{e.dominance:.2f} ST:{e.stress:.2f} CF:{e.confidence:.2f}"
+    )
+    return f"<P>{p_str}</P>\n<E>{e_str}</E>"
+
+
+def bal(total: float, available: float, currency: str) -> str:
+    """Compact balance. ~60% token reduction vs JSON."""
+    return f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
+
+
+def pos(positions: list[dict]) -> str:
+    """Encode positions as TOON table."""
+    if not positions:
+        return "@pos[0](sym,qty,avg,cur,pnl,pct,mkt,ccy)"
+    rows = [
+        [
+            p.get("symbol", ""),
+            str(int(p.get("quantity", 0))),
+            str(int(p.get("avg_price", 0))),
+            str(int(p.get("current_price", 0))),
+            str(int(p.get("unrealized_pnl", 0))),
+            f"{p.get('unrealized_pnl_pct', 0):.2f}",
+            p.get("market", ""),
+            p.get("currency", ""),
+        ]
+        for p in positions
+    ]
+    return to_toon("pos", ["sym", "qty", "avg", "cur", "pnl", "pct", "mkt", "ccy"], rows)
+
+
+def fills(fills_list: list[dict]) -> str:
+    """Encode fills as TOON table."""
+    if not fills_list:
+        return "@fills[0](oid,sym,sd,qty,px,st)"
+    rows = [
+        [
+            f.get("order_id", ""),
+            f.get("symbol", ""),
+            str(f.get("side", ""))[:1].upper(),  # B or S
+            str(int(f.get("quantity", 0))),
+            str(int(f.get("filled_price", 0))),
+            f.get("status", ""),
+        ]
+        for f in fills_list
+    ]
+    return to_toon("fills", ["oid", "sym", "sd", "qty", "px", "st"], rows)
+
+
+def order(result: dict) -> str:
+    """Compact order result. ~55% token reduction vs JSON."""
+    sd = str(result.get("side", ""))[:1].upper()
+    return (
+        f"oid:{result.get('order_id', '')}"
+        f",sym:{result.get('symbol', '')}"
+        f",sd:{sd}"
+        f",qty:{result.get('quantity', '')}"
+        f",px:{result.get('filled_price', '')}"
+        f",st:{result.get('status', '')}"
+        f",mkt:{result.get('market', '')}"
+    )
+
+
+def mem_entries(entries: list[dict]) -> str:
+    """Compact memory search results. Format: [ts|kw1,kw2]content"""
+    if not entries:
+        return "[]"
+    lines = []
+    for e in entries:
+        ts = int(e.get("timestamp", 0))
+        kws = ",".join(e.get("keywords", []))
+        content = e.get("content", "")
+        lines.append(f"[{ts}|{kws}]{content}")
+    return "\n".join(lines)

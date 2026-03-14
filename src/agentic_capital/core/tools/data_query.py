@@ -83,25 +83,27 @@ def build_agent_tools(
     decisions_sink: list[dict] = []   # collects all decisions for recording
     messages_sink: list[dict] = []    # collects outbound messages
 
-    # ---- Market data tools -----------------------------------------------
+    # ---- Account query tools (compact AI-to-AI format) -------------------
 
-    async def get_balance() -> dict:
+    async def get_balance() -> str:
         """Get current account balance (total equity, available cash, currency)."""
         if not trading:
-            return {"error": "trading adapter not available"}
+            return "ERR:no_trading"
         try:
-            bal = await trading.get_balance()
-            return {"total": bal.total, "available": bal.available, "currency": bal.currency}
+            from agentic_capital.formats.compact import bal as _bal
+            b = await trading.get_balance()
+            return _bal(b.total, b.available, b.currency)
         except Exception as e:
-            return {"error": str(e)}
+            return f"ERR:{e}"
 
-    async def get_positions() -> list[dict]:
-        """Get all open positions with unrealized P&L."""
+    async def get_positions() -> str:
+        """Get all open positions with quantity, avg price, unrealized P&L."""
         if not trading:
-            return []
+            return "@pos[0](sym,qty,avg,cur,pnl,pct,mkt,ccy)"
         try:
+            from agentic_capital.formats.compact import pos as _pos
             positions = await trading.get_positions()
-            return [
+            return _pos([
                 {
                     "symbol": p.symbol,
                     "quantity": p.quantity,
@@ -113,21 +115,22 @@ def build_agent_tools(
                     "currency": p.currency,
                 }
                 for p in positions
-            ]
+            ])
         except Exception as e:
-            return [{"error": str(e)}]
+            return f"ERR:{e}"
 
     async def get_fills(
         start_date: str | None = None,
         end_date: str | None = None,
         symbol: str = "",
-    ) -> list[dict]:
+    ) -> str:
         """Get order fill history."""
         if not trading:
-            return []
+            return "@fills[0](oid,sym,sd,qty,px,st)"
         try:
-            fills = await trading.get_fills(start_date=start_date, end_date=end_date, symbol=symbol)
-            return [
+            from agentic_capital.formats.compact import fills as _fills
+            fill_list = await trading.get_fills(start_date=start_date, end_date=end_date, symbol=symbol)
+            return _fills([
                 {
                     "order_id": f.order_id,
                     "symbol": f.symbol,
@@ -136,10 +139,10 @@ def build_agent_tools(
                     "filled_price": f.filled_price,
                     "status": f.status,
                 }
-                for f in fills
-            ]
+                for f in fill_list
+            ])
         except Exception as e:
-            return [{"error": str(e)}]
+            return f"ERR:{e}"
 
     # ---- Trading tools ---------------------------------------------------
 
@@ -150,14 +153,15 @@ def build_agent_tools(
         price: float | None = None,
         market: str = "kr_stock",
         exchange: str | None = None,
-    ) -> dict:
-        """Submit a buy or sell order. Returns order result."""
+    ) -> str:
+        """Submit a buy or sell order. Returns compact order result."""
         if not trading:
-            return {"error": "trading adapter not available"}
+            return "ERR:no_trading"
         try:
+            from agentic_capital.formats.compact import order as _order
             from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
-            order = Order(
+            o = Order(
                 symbol=symbol,
                 side=OrderSide(side.lower()),
                 order_type=OrderType.LIMIT if price is not None else OrderType.MARKET,
@@ -166,7 +170,7 @@ def build_agent_tools(
                 market=Market(market),
                 exchange=exchange,
             )
-            result = await trading.submit_order(order)
+            result = await trading.submit_order(o)
             outcome = {
                 "order_id": result.order_id,
                 "symbol": result.symbol,
@@ -177,7 +181,6 @@ def build_agent_tools(
                 "market": result.market,
             }
 
-            # Record decision automatically
             decisions_sink.append({
                 "type": "trade",
                 "action": side.upper(),
@@ -198,29 +201,29 @@ def build_agent_tools(
                 quantity=quantity,
                 status=result.status,
             )
-            return outcome
+            return _order(outcome)
         except Exception as e:
             logger.exception("agent_submit_order_failed", agent=agent_name, symbol=symbol)
-            return {"error": str(e)}
+            return f"ERR:{e}"
 
     async def cancel_order(
         order_id: str,
         symbol: str = "",
         quantity: float = 0.0,
         market: str = "kr_stock",
-    ) -> dict:
+    ) -> str:
         """Cancel a pending order."""
         if not trading:
-            return {"error": "trading adapter not available"}
+            return "ERR:no_trading"
         try:
             success = await trading.cancel_order(order_id, symbol=symbol, quantity=quantity, market=market)
-            return {"cancelled": success, "order_id": order_id}
+            return f"cancelled:{success},oid:{order_id}"
         except Exception as e:
-            return {"error": str(e)}
+            return f"ERR:{e}"
 
     # ---- Memory tools ----------------------------------------------------
 
-    async def save_memory(content: str, keywords: list[str] | None = None) -> dict:
+    async def save_memory(content: str, keywords: list[str] | None = None) -> str:
         """Save a memory entry for future reference."""
         import time
         entry = {
@@ -230,10 +233,11 @@ def build_agent_tools(
         }
         key = f"mem_{len(memory)}"
         memory[key] = entry
-        return {"saved": True, "key": key}
+        return f"saved:1,key:{key}"
 
-    async def search_memory(query: str, limit: int = 5) -> list[dict]:
+    async def search_memory(query: str, limit: int = 5) -> str:
         """Search agent memory by keyword or content match."""
+        from agentic_capital.formats.compact import mem_entries
         query_lower = query.lower()
         results = []
         for entry in memory.values():
@@ -243,11 +247,11 @@ def build_agent_tools(
                 results.append(entry)
             if len(results) >= limit:
                 break
-        return results
+        return mem_entries(results)
 
     # ---- Messaging tools -------------------------------------------------
 
-    async def send_message(to_agent: str, type: str = "SIGNAL", content: dict | None = None) -> dict:
+    async def send_message(to_agent: str, type: str = "SIGNAL", content: dict | None = None) -> str:
         """Send a message to another agent."""
         msg = {
             "from": agent_name,
@@ -257,7 +261,7 @@ def build_agent_tools(
         }
         messages_sink.append(msg)
         logger.info("agent_message_sent", from_agent=agent_name, to=to_agent, type=type)
-        return {"sent": True}
+        return "sent:1"
 
     # ---- Build tool list -----------------------------------------------
 
