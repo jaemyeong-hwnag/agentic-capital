@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0] - 2026-03-14
+
+### Added
+- `formats/compact.py`: AI-to-AI pipe-delimited message format (AutoGen 2023, MetaGPT, CAMEL 2023)
+  - `msg_encode()`: `TYPE|FROM|TO|YYMMDDTHHMMZ|key:val,key:val` wire format
+  - `msg_decode()`: pipe-delimited → routing dict
+  - `LEGEND` updated with message schema: `SIG|INSTR|RPT|QRY|ACK|ERR fmt:TYPE|FROM|TO|TS|k:v,k:v`
+- `protocol.py`: `MessageType` compact aliases (SIG, INSTR, RPT, QRY, ACK, ERR) with legacy backward-compat
+
+### Changed
+- `data_query.py` `send_message`: content changed from dict to compact k:v string; stores full wire format in messages_sink
+- `AgentMessage.content`: `str | dict[str, object]` — supports compact wire format + legacy dict
+- `SendMessageInput`: `content: str` (compact k:v), `type` default `"SIG"`
+
 ## [0.14.0] - 2026-03-14
 
 ### Added
