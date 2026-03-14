@@ -71,16 +71,17 @@ class TestBuildAgentTools:
         names = {t.name for t in tools}
         assert "get_balance" in names
         assert "get_positions" in names
-        assert "get_quote" in names
-        assert "get_ohlcv" in names
-        assert "get_order_book" in names
-        assert "get_symbols" in names
         assert "get_fills" in names
         assert "submit_order" in names
         assert "cancel_order" in names
         assert "save_memory" in names
         assert "search_memory" in names
         assert "send_message" in names
+        # Market data tools are removed — AI finds data autonomously
+        assert "get_quote" not in names
+        assert "get_ohlcv" not in names
+        assert "get_order_book" not in names
+        assert "get_symbols" not in names
 
     @pytest.mark.asyncio
     async def test_get_balance_tool(self):
@@ -106,40 +107,6 @@ class TestBuildAgentTools:
         result = await tool.coroutine()
         assert len(result) == 1
         assert result[0]["symbol"] == "005930"
-
-    @pytest.mark.asyncio
-    async def test_get_quote_tool(self):
-        md = _make_market_data()
-        tools, _, _ = build_agent_tools(market_data=md)
-        tool = next(t for t in tools if t.name == "get_quote")
-        result = await tool.coroutine(symbol="005930")
-        assert result["price"] == 72000
-        assert result["symbol"] == "005930"
-
-    @pytest.mark.asyncio
-    async def test_get_ohlcv_tool(self):
-        md = _make_market_data()
-        tools, _, _ = build_agent_tools(market_data=md)
-        tool = next(t for t in tools if t.name == "get_ohlcv")
-        result = await tool.coroutine(symbol="005930", timeframe="1d", limit=10)
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_order_book_tool(self):
-        md = _make_market_data()
-        tools, _, _ = build_agent_tools(market_data=md)
-        tool = next(t for t in tools if t.name == "get_order_book")
-        result = await tool.coroutine(symbol="005930")
-        assert "bids" in result
-        assert "asks" in result
-
-    @pytest.mark.asyncio
-    async def test_get_symbols_tool(self):
-        md = _make_market_data()
-        tools, _, _ = build_agent_tools(market_data=md)
-        tool = next(t for t in tools if t.name == "get_symbols")
-        result = await tool.coroutine(market="kr_stock")
-        assert "005930" in result
 
     @pytest.mark.asyncio
     async def test_get_fills_tool(self):

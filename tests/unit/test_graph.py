@@ -164,7 +164,6 @@ class TestRunAgentCycle:
              patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
             result = await run_agent_cycle(
                 analyst, cycle_number=1,
-                market_data=_make_market_data(),
                 symbols=["005930"],
             )
 
@@ -173,15 +172,12 @@ class TestRunAgentCycle:
 
     @pytest.mark.asyncio
     async def test_full_cycle_trader(self):
-        from agentic_capital.ports.trading import TradingPort
-        from agentic_capital.ports.market_data import MarketDataPort
         trading = _make_trading()
-        md = _make_market_data()
 
         trader = TraderAgent(
             profile=_make_profile("Trader"),
             personality=create_random_personality(42),
-            llm=_make_llm(), trading=trading, market_data=md,
+            llm=_make_llm(), trading=trading,
         )
         mock_agent = MagicMock()
         mock_agent.ainvoke = AsyncMock(return_value=self._mock_react_result())
@@ -190,7 +186,7 @@ class TestRunAgentCycle:
              patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
             result = await run_agent_cycle(
                 trader, cycle_number=1,
-                trading=trading, market_data=md,
+                trading=trading,
                 symbols=["005930"],
             )
 

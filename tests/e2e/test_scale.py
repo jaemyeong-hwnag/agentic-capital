@@ -17,7 +17,6 @@ from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.ports.llm import LLMPort
-from agentic_capital.ports.market_data import MarketDataPort
 from agentic_capital.ports.trading import TradingPort
 
 
@@ -38,15 +37,6 @@ def _make_trading():
     return trading
 
 
-def _make_market_data():
-    md = MagicMock(spec=MarketDataPort)
-    md.get_quote = AsyncMock(
-        return_value=MagicMock(price=72000, volume=5_000_000)
-    )
-    md.get_symbols = AsyncMock(return_value=["005930"])
-    return md
-
-
 def _make_recorder():
     recorder = MagicMock()
     recorder.record_emotion = AsyncMock()
@@ -61,7 +51,6 @@ def _make_recorder():
 def _create_agents(count: int = 10) -> list:
     """Create a diverse roster of agents."""
     trading = _make_trading()
-    md = _make_market_data()
     agents = []
 
     for i in range(count):
@@ -92,7 +81,6 @@ def _create_agents(count: int = 10) -> list:
                 personality=create_random_personality(seed),
                 llm=llm,
                 trading=trading,
-                market_data=md,
             )
 
         agents.append(agent)
@@ -108,7 +96,6 @@ class TestScaleSimulation:
         agents = _create_agents(10)
         recorder = _make_recorder()
         trading = _make_trading()
-        md = _make_market_data()
 
         results = []
         for agent in agents:
@@ -116,7 +103,6 @@ class TestScaleSimulation:
                 agent,
                 cycle_number=1,
                 trading=trading,
-                market_data=md,
                 symbols=["005930"],
                 recorder=recorder,
             )
@@ -137,7 +123,6 @@ class TestScaleSimulation:
         """10 agents run for 3 complete cycles."""
         agents = _create_agents(10)
         trading = _make_trading()
-        md = _make_market_data()
 
         for cycle in range(1, 4):
             for agent in agents:
@@ -145,7 +130,6 @@ class TestScaleSimulation:
                     agent,
                     cycle_number=cycle,
                     trading=trading,
-                    market_data=md,
                     symbols=["005930"],
                 )
                 assert result["cycle_number"] == cycle

@@ -179,18 +179,15 @@ class TestTraderAgent:
         trading = MagicMock()
         trading.get_balance = AsyncMock(return_value=MagicMock(total=10_000_000, available=10_000_000))
         trading.get_positions = AsyncMock(return_value=[])
-        market_data = MagicMock()
-        market_data.get_quote = AsyncMock(return_value=MagicMock(price=70000, volume=1000000))
         return TraderAgent(
             profile=_make_profile("Trader"),
             personality=_make_personality(),
-            llm=llm, trading=trading, market_data=market_data,
+            llm=llm, trading=trading,
         )
 
     def test_create(self):
         trader = self._make_trader()
         assert trader.name == "Trader"
-        assert trader._pipeline is not None
 
     @pytest.mark.asyncio
     async def test_think_no_decisions(self):
@@ -225,12 +222,10 @@ class TestCreateAgent:
         assert isinstance(agent, AnalystAgent)
 
     def test_create_trader(self):
-        from agentic_capital.ports.market_data import MarketDataPort
         from agentic_capital.ports.trading import TradingPort
 
         trading = MagicMock(spec=TradingPort)
-        market_data = MagicMock(spec=MarketDataPort)
-        agent = create_agent("trader", "Trader", llm=_make_llm(), trading=trading, market_data=market_data)
+        agent = create_agent("trader", "Trader", llm=_make_llm(), trading=trading)
         assert isinstance(agent, TraderAgent)
 
     def test_create_custom_role_creates_analyst(self):

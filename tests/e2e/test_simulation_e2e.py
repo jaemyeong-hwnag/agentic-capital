@@ -5,7 +5,7 @@ decision making → recording. Uses mock adapters to avoid
 external dependencies while testing the full pipeline.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -17,7 +17,6 @@ from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.ports.llm import LLMPort
-from agentic_capital.ports.market_data import MarketDataPort
 from agentic_capital.ports.trading import TradingPort
 
 
@@ -45,15 +44,6 @@ def _make_trading():
     ])
     trading.submit_order = AsyncMock()
     return trading
-
-
-def _make_market_data():
-    md = MagicMock(spec=MarketDataPort)
-    md.get_quote = AsyncMock(
-        return_value=MagicMock(price=72000, volume=5_000_000)
-    )
-    md.get_symbols = AsyncMock(return_value=["005930", "000660"])
-    return md
 
 
 def _make_recorder():
@@ -89,7 +79,6 @@ class TestFullSimulationCycle:
             ceo,
             cycle_number=1,
             trading=_make_trading(),
-            market_data=_make_market_data(),
             symbols=["005930"],
             recorder=recorder,
         )
@@ -117,7 +106,6 @@ class TestFullSimulationCycle:
         result = await run_agent_cycle(
             analyst,
             cycle_number=1,
-            market_data=_make_market_data(),
             symbols=["005930"],
             recorder=recorder,
         )
@@ -134,14 +122,12 @@ class TestFullSimulationCycle:
             '{"decisions": [{"action": "BUY", "symbol": "005930", "quantity": 10, "reason": "bullish signal", "confidence": 0.75}], "confidence": 0.75}'
         )
         trading = _make_trading()
-        md = _make_market_data()
 
         trader = TraderAgent(
             profile=_make_profile("Trader-Gamma"),
             personality=create_random_personality(44),
             llm=llm,
             trading=trading,
-            market_data=md,
         )
         recorder = _make_recorder()
 
@@ -149,7 +135,6 @@ class TestFullSimulationCycle:
             trader,
             cycle_number=1,
             trading=trading,
-            market_data=md,
             symbols=["005930"],
             recorder=recorder,
         )
@@ -167,13 +152,12 @@ class TestFullSimulationCycle:
         llm_trader = _make_llm('{"decisions": [], "confidence": 0.5}')
 
         trading = _make_trading()
-        md = _make_market_data()
         recorder = _make_recorder()
 
         agents = [
             CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm_ceo),
             AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(43), llm=llm_analyst),
-            TraderAgent(profile=_make_profile("Trader"), personality=create_random_personality(44), llm=llm_trader, trading=trading, market_data=md),
+            TraderAgent(profile=_make_profile("Trader"), personality=create_random_personality(44), llm=llm_trader, trading=trading),
         ]
 
         results = []
@@ -182,7 +166,6 @@ class TestFullSimulationCycle:
                 agent,
                 cycle_number=1,
                 trading=trading,
-                market_data=md,
                 symbols=["005930"],
                 recorder=recorder,
             )
@@ -251,6 +234,7 @@ class TestFullSimulationCycle:
     @pytest.mark.asyncio
     async def test_ceo_hire_decision_recorded(self):
         """CEO hire decision is recorded as both decision and HR event."""
+        from langchain_core.messages import AIMessage
         llm = _make_llm(
             '{"actions": [{"type": "hire", "target": "NewAnalyst", "detail": "analyst", "reason": "need market coverage", "capital": 1000000}], "confidence": 0.9}'
         )
@@ -261,7 +245,14 @@ class TestFullSimulationCycle:
         )
         recorder = _make_recorder()
 
-        result = await run_agent_cycle(ceo, cycle_number=1, recorder=recorder)
+        hire_json = '[{"type": "hire", "role": "analyst", "target": "NewAnalyst", "reason": "need market coverage"}]'
+        mock_react_result = {"messages": [AIMessage(content=f"I'll hire a new analyst.\n```json\n{hire_json}\n```")]}
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value=mock_react_result)
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+            result = await run_agent_cycle(ceo, cycle_number=1, recorder=recorder)
 
         assert len(result.get("decisions", [])) >= 1
         # Verify recording happened
