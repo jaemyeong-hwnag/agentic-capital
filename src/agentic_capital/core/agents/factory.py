@@ -60,12 +60,11 @@ def create_agent(
     *,
     llm: object | None = None,
     trading: object | None = None,
-    market_data: object | None = None,
 ) -> BaseAgent:
     """Create a typed agent based on role.
 
     Args:
-        role: Agent role — 'ceo', 'analyst', 'trader'.
+        role: Agent role — 'ceo', 'analyst', 'trader', or any custom role.
         name: Agent name.
         philosophy: Investment/management philosophy.
         allocated_capital: Initial capital allocation.
@@ -73,7 +72,6 @@ def create_agent(
         personality: Pre-defined personality (overrides seed).
         llm: LLMPort instance (required for all roles).
         trading: TradingPort instance (required for trader).
-        market_data: MarketDataPort instance (required for trader).
 
     Returns:
         A concrete BaseAgent subclass instance.
@@ -82,7 +80,6 @@ def create_agent(
     from agentic_capital.core.agents.ceo import CEOAgent
     from agentic_capital.core.agents.trader import TraderAgent
     from agentic_capital.ports.llm import LLMPort
-    from agentic_capital.ports.market_data import MarketDataPort
     from agentic_capital.ports.trading import TradingPort
 
     profile = create_agent_profile(name, philosophy, allocated_capital)
@@ -99,13 +96,7 @@ def create_agent(
         if not isinstance(trading, TradingPort):
             msg = f"trading must be a TradingPort instance for trader, got {type(trading)}"
             raise TypeError(msg)
-        if not isinstance(market_data, MarketDataPort):
-            msg = f"market_data must be a MarketDataPort instance for trader, got {type(market_data)}"
-            raise TypeError(msg)
-        return TraderAgent(
-            profile=profile, personality=p, llm=llm,
-            trading=trading, market_data=market_data,
-        )
+        return TraderAgent(profile=profile, personality=p, llm=llm, trading=trading)
     else:
         # Any other role (analyst, CIO, quant strategist, risk manager, etc.)
         # defaults to AnalystAgent — AI agents create any role they want

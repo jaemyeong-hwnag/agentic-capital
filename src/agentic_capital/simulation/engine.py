@@ -45,7 +45,6 @@ class SimulationEngine:
         # Adapters (initialized in start())
         self._llm = None
         self._trading = None
-        self._market_data = None
         self._recorder = None
 
     def _init_adapters(self) -> None:
@@ -87,7 +86,6 @@ class SimulationEngine:
                 seed=seed + 2,
                 llm=self._llm,
                 trading=self._trading,
-                market_data=self._market_data,
             ),
         ]
 
@@ -200,7 +198,6 @@ class SimulationEngine:
                     agent,
                     cycle_number=self._cycle_count,
                     trading=self._trading,
-                    market_data=self._market_data,
                     open_markets=open_markets,
                     recorder=self._recorder,
                 )
@@ -285,7 +282,6 @@ class SimulationEngine:
             kwargs = {"role": role, "name": name, "llm": self._llm, "personality": personality}
             if role.lower() == "trader":
                 kwargs["trading"] = self._trading
-                kwargs["market_data"] = self._market_data
 
             new_agent = create_agent(
                 allocated_capital=capital,

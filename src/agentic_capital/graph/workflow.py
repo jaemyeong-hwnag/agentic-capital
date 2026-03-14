@@ -50,13 +50,14 @@ def _build_system_prompt(agent: BaseAgent) -> str:
         )
     elif "Analyst" in agent_class:
         role_hint = (
-            "You are an analyst. Research markets, generate trading signals, "
-            "and send findings to the CEO and traders via send_message."
+            "You are an analyst. Use any method you choose — fundamental, technical, "
+            "quantitative, unconventional, or entirely novel approaches. "
+            "Share findings with traders via send_message."
         )
     elif "Trader" in agent_class:
         role_hint = (
             "You are a trader. Execute trades using submit_order. "
-            "Analyze data, time entries/exits, and manage positions."
+            "Use any trading methodology you see fit — no restrictions whatsoever."
         )
 
     return f"""You are {agent.name}, an autonomous AI agent at an investment fund.
@@ -82,12 +83,10 @@ current_emotion:
 MANDATE:
 - Your sole goal is to make money for the fund.
 - Your only constraint is available capital.
-- Use the provided tools however you see fit.
-- No required sequence. No forced steps. You decide everything.
-- Use get_symbols(market) to discover tradeable symbols in any market.
-- Markets: kr_stock (KOSPI/KOSDAQ), us_stock (NASDAQ/NYSE/AMEX),
-  hk_stock (SEHK), cn_stock (SHAA/SZAA), jp_stock (TKSE), vn_stock (HASE/VNSE)
-- When you are done with your analysis and actions, stop calling tools."""
+- Use any method, theory, philosophy, or approach you choose — zero restrictions.
+- Rational, irrational, conventional, unconventional — all valid if it makes money.
+- No required sequence. No forced steps. You decide everything autonomously.
+- When you are done with your actions, stop calling tools."""
 
 
 async def run_agent_cycle(
@@ -95,7 +94,6 @@ async def run_agent_cycle(
     cycle_number: int,
     *,
     trading: Any = None,
-    market_data: Any = None,
     symbols: list[str] | None = None,
     open_markets: list[str] | None = None,
     recorder: Any = None,
@@ -112,7 +110,6 @@ async def run_agent_cycle(
 
     tools, decisions_sink, messages_sink = build_agent_tools(
         trading=trading,
-        market_data=market_data,
         recorder=recorder,
         agent_id=str(agent.agent_id),
         agent_name=agent.name,
@@ -132,8 +129,7 @@ async def run_agent_cycle(
     cycle_trigger = (
         f"Cycle {cycle_number}. {market_status} "
         f"Assess the situation and take action. "
-        f"Use get_symbols(market) to find tradeable symbols. "
-        f"Use your tools to analyze, decide, and execute. When done, stop."
+        f"Use your tools to check your positions, decide, and execute. When done, stop."
     )
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)

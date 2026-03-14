@@ -1,7 +1,8 @@
-"""Agent tools — all trading and data tools available to agents.
+"""Agent tools — account/position queries and order execution for agents.
 
-System provides these tools. Agents call them freely, in any order, any number
-of times. No workflow. No restrictions beyond capital constraints.
+System provides only: account queries (balance, positions, fills) and trading (submit/cancel).
+Everything else — research, analysis, market data — the AI figures out on its own.
+No methodology constraints. No trading restrictions. Only limit: available capital.
 """
 
 from __future__ import annotations
@@ -18,29 +19,6 @@ logger = structlog.get_logger()
 # ---------------------------------------------------------------------------
 # Input schemas for structured tool calling
 # ---------------------------------------------------------------------------
-
-
-class GetQuoteInput(BaseModel):
-    symbol: str = Field(description="Ticker symbol, e.g. '005930' or 'AAPL'")
-    market: str = Field(default="kr_stock", description="Market: kr_stock | us_stock | hk_stock | cn_stock | jp_stock | vn_stock")
-    exchange: str | None = Field(default=None, description="Exchange code: NASD, NYSE, AMEX, SEHK, SHAA, SZAA, TKSE, HASE, VNSE")
-
-
-class GetOHLCVInput(BaseModel):
-    symbol: str = Field(description="Ticker symbol")
-    timeframe: str = Field(default="1d", description="Candle period: 1d | 1w | 1mo | 1m | 3m | 5m | 10m | 15m | 30m | 60m")
-    limit: int = Field(default=30, description="Number of candles to return")
-    market: str = Field(default="kr_stock", description="Market")
-    exchange: str | None = Field(default=None, description="Exchange code for overseas markets")
-
-
-class GetOrderBookInput(BaseModel):
-    symbol: str = Field(description="Domestic stock ticker symbol")
-    depth: int = Field(default=10, description="Order book depth (max 10)")
-
-
-class GetSymbolsInput(BaseModel):
-    market: str = Field(default="kr_stock", description="Market to get symbols for")
 
 
 class GetFillsInput(BaseModel):
@@ -89,7 +67,6 @@ class SendMessageInput(BaseModel):
 def build_agent_tools(
     *,
     trading: Any = None,
-    market_data: Any = None,
     recorder: Any = None,
     agent_id: str = "",
     agent_name: str = "",
@@ -98,6 +75,8 @@ def build_agent_tools(
 ) -> list:
     """Build LangChain StructuredTools bound to the given adapters.
 
+    Provides: account queries (balance, positions, fills) + order execution.
+    AI agents handle all other research and analysis autonomously.
     Returns a list of tools the agent can call freely during its cycle.
     """
     memory = agent_memory if agent_memory is not None else {}
@@ -137,76 +116,6 @@ def build_agent_tools(
             ]
         except Exception as e:
             return [{"error": str(e)}]
-
-    async def get_quote(symbol: str, market: str = "kr_stock", exchange: str | None = None) -> dict:
-        """Get current price quote for a symbol."""
-        if not market_data:
-            return {"error": "market data adapter not available"}
-        try:
-            quote = await market_data.get_quote(symbol, market=market, exchange=exchange)
-            return {
-                "symbol": quote.symbol,
-                "price": quote.price,
-                "bid": quote.bid,
-                "ask": quote.ask,
-                "volume": quote.volume,
-                "market": quote.market,
-                "currency": quote.currency,
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    async def get_ohlcv(
-        symbol: str,
-        timeframe: str = "1d",
-        limit: int = 30,
-        market: str = "kr_stock",
-        exchange: str | None = None,
-    ) -> list[dict]:
-        """Get historical OHLCV candles."""
-        if not market_data:
-            return []
-        try:
-            candles = await market_data.get_ohlcv(
-                symbol, timeframe=timeframe, limit=limit, market=market, exchange=exchange
-            )
-            return [
-                {
-                    "timestamp": str(c.timestamp),
-                    "open": c.open,
-                    "high": c.high,
-                    "low": c.low,
-                    "close": c.close,
-                    "volume": c.volume,
-                }
-                for c in candles
-            ]
-        except Exception as e:
-            return [{"error": str(e)}]
-
-    async def get_order_book(symbol: str, depth: int = 10) -> dict:
-        """Get order book (호가창) for a domestic stock."""
-        if not market_data:
-            return {"error": "market data adapter not available"}
-        try:
-            book = await market_data.get_order_book(symbol, depth=depth)
-            return {
-                "symbol": book.symbol,
-                "bids": [{"price": l.price, "quantity": l.quantity} for l in book.bids],
-                "asks": [{"price": l.price, "quantity": l.quantity} for l in book.asks],
-                "timestamp": str(book.timestamp),
-            }
-        except Exception as e:
-            return {"error": str(e)}
-
-    async def get_symbols(market: str = "kr_stock") -> list[str]:
-        """Get available symbols for a market (starting set — any valid symbol works)."""
-        if not market_data:
-            return []
-        try:
-            return await market_data.get_symbols(market)
-        except Exception as e:
-            return []
 
     async def get_fills(
         start_date: str | None = None,
@@ -362,30 +271,6 @@ def build_agent_tools(
             coroutine=get_positions,
             name="get_positions",
             description="Get all open positions with quantity, avg price, unrealized P&L",
-        ),
-        StructuredTool.from_function(
-            coroutine=get_quote,
-            name="get_quote",
-            description="Get current price quote for any symbol on any supported market",
-            args_schema=GetQuoteInput,
-        ),
-        StructuredTool.from_function(
-            coroutine=get_ohlcv,
-            name="get_ohlcv",
-            description="Get historical OHLCV candles. Supports daily, weekly, monthly, and minute timeframes",
-            args_schema=GetOHLCVInput,
-        ),
-        StructuredTool.from_function(
-            coroutine=get_order_book,
-            name="get_order_book",
-            description="Get real-time order book (bid/ask levels) for a domestic stock",
-            args_schema=GetOrderBookInput,
-        ),
-        StructuredTool.from_function(
-            coroutine=get_symbols,
-            name="get_symbols",
-            description="Get a list of tradable symbols for a market. Any valid exchange symbol works beyond this list.",
-            args_schema=GetSymbolsInput,
         ),
         StructuredTool.from_function(
             coroutine=get_fills,
