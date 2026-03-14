@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0] - 2026-03-14
+
+### Added
+- `formats/compact.py`: AI-to-AI compact encoding module (LLMLingua-2 + XML-tag + TOON)
+  - `psych()`: `<P>O C E A N H LA RAG RAL PW</P>` + `<E>V AR D ST CF</E>` — ~75% token reduction
+  - `bal/pos/fills/order/mem_entries()`: compact string tool outputs — 50-60% reduction
+  - `LEGEND` schema defined once per session, implicit thereafter
+  - `MANDATE`: `GOAL=profit|LIMIT=capital|METHOD=any|STOP=done`
+
+### Changed
+- System prompts (all agents + workflow): replaced verbose YAML-style personality blocks with compact XML tags
+- Tool outputs (`data_query.py`): all tools now return compact strings instead of verbose dicts
+  - `get_balance` → `"tot:X,avl:Y,ccy:Z"`
+  - `get_positions` → TOON `@pos` table
+  - `get_fills` → TOON `@fills` table
+  - `submit_order` → `"oid:X,sym:Y,sd:B,qty:N,px:P,st:S,mkt:M"`
+  - `save_memory/search_memory/send_message` → compact strings
+- Prompt builders (`prompts.py`): compact KV, abbreviated TOON column names, minimal response schemas
+
 ## [0.13.0] - 2026-03-14
 
 ### Changed
