@@ -98,3 +98,4 @@ Semantic Versioning (`MAJOR.MINOR.PATCH`)을 따른다.
 - `/docs` - 문서 자동 정리 및 동기화
 - `/security` - 보안 이슈 검토 및 감사
 - `/finalize` - 작업 완료 후 테스트 → 커버리지 → 문서 정리 → 커밋 일괄 실행
+- `/ai-optimize` - AI 소비 최적화 (토큰 최소화, AI 이해도 극대화) — env/md 제외, LLMLingua-2·TOON·XML-tag 적용
