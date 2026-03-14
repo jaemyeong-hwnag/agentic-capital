@@ -53,13 +53,11 @@ class SimulationEngine:
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
-        from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
 
         self._llm = GeminiLLMAdapter()
         kis_session = KISSession()
         self._trading = KISTradingAdapter(session=kis_session)
-        self._market_data = KISMarketDataAdapter(session=kis_session)
         logger.info("adapters_initialized")
 
     def _init_agents(self) -> None:

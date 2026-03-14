@@ -41,7 +41,6 @@ _KR_TR = {
     "order_sell":    {"real": "TTTC0801U", "paper": "VTTC0801U"},
     "order_cancel":  {"real": "TTTC0803U", "paper": "VTTC0803U"},
     "fills":         {"real": "TTTC8001R", "paper": "VTTC8001R"},
-    "price":         {"real": "FHKST01010100", "paper": "FHKST01010100"},
 }
 
 # ── Overseas stock TR IDs (real only — paper mode not supported by KIS) ───────
@@ -771,30 +770,3 @@ class KISTradingAdapter(TradingPort):
             logger.exception("kis_get_overseas_fills_failed")
             raise
 
-    # ── Current price (legacy helper) ────────────────────────────────────────
-
-    async def get_quote(self, symbol: str) -> dict:
-        """Get current price quote for a domestic stock (legacy dict interface)."""
-        await self._session.ensure_token()
-        try:
-            r = await self._session.get(
-                f"{self._session.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-                headers=self._session.headers(_KR_TR["price"]["real"]),
-                params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
-            )
-            data = r.json()
-            if data.get("rt_cd") != "0":
-                raise RuntimeError(f"KIS quote failed: {data.get('msg1', data)}")
-
-            output = data.get("output", {})
-            logger.debug("kis_quote_fetched", symbol=symbol, price=output.get("stck_prpr"))
-            return {
-                "symbol": symbol,
-                "price": int(output.get("stck_prpr", 0)),
-                "change": int(output.get("prdy_vrss", 0)),
-                "change_pct": float(output.get("prdy_ctrt", 0)),
-                "volume": int(output.get("acml_vol", 0)),
-            }
-        except Exception:
-            logger.exception("kis_get_quote_failed", symbol=symbol)
-            raise
