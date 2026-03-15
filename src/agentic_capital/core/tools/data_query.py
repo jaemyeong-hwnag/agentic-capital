@@ -59,6 +59,10 @@ class SendMessageInput(BaseModel):
     content: str = Field(default="", description="Compact k:v payload e.g. sym:005930,act:BUY,cf:0.87,why:RSI_OS")
 
 
+class RequestWakeupInput(BaseModel):
+    seconds: int = Field(description="Seconds until next cycle. 0=immediately, 3600=1h, 86400=1d")
+
+
 # ---------------------------------------------------------------------------
 # Tool builder — creates bound tools for a given agent cycle
 # ---------------------------------------------------------------------------
@@ -72,16 +76,18 @@ def build_agent_tools(
     agent_name: str = "",
     agent_memory: dict | None = None,
     agents_registry: dict | None = None,  # name → agent_id
-) -> list:
+) -> tuple:
     """Build LangChain StructuredTools bound to the given adapters.
 
-    Provides: account queries (balance, positions, fills) + order execution.
+    Provides: account queries (balance, positions, fills) + order execution
+    + request_wakeup so the agent controls its own cycle timing.
     AI agents handle all other research and analysis autonomously.
-    Returns a list of tools the agent can call freely during its cycle.
+    Returns (tools, decisions_sink, messages_sink, wakeup_sink).
     """
     memory = agent_memory if agent_memory is not None else {}
     decisions_sink: list[dict] = []   # collects all decisions for recording
     messages_sink: list[dict] = []    # collects outbound messages
+    wakeup_sink: list[int] = []       # agent-requested next cycle delay (seconds)
 
     # ---- Account query tools (compact AI-to-AI format) -------------------
 
@@ -270,6 +276,20 @@ def build_agent_tools(
         logger.info("agent_message_sent", from_agent=agent_name, to=to_agent, type=type)
         return "sent:1"
 
+    # ---- Timing control --------------------------------------------------
+
+    async def request_wakeup(seconds: int) -> str:
+        """Request when to be called again. Agent controls its own cycle timing.
+
+        seconds=0: run again immediately
+        seconds=300: wait 5 minutes
+        seconds=3600: wait 1 hour
+        seconds=86400: wait until tomorrow
+        """
+        wakeup_sink.append(max(0, seconds))
+        logger.info("agent_wakeup_requested", agent=agent_name, seconds=seconds)
+        return f"wakeup:{seconds}s"
+
     # ---- Build tool list -----------------------------------------------
 
     tools = [
@@ -319,9 +339,15 @@ def build_agent_tools(
             description="Send a message (signal, instruction, report) to another agent",
             args_schema=SendMessageInput,
         ),
+        StructuredTool.from_function(
+            coroutine=request_wakeup,
+            name="request_wakeup",
+            description="Control when this agent runs next. Agent decides its own cycle timing.",
+            args_schema=RequestWakeupInput,
+        ),
     ]
 
-    return tools, decisions_sink, messages_sink
+    return tools, decisions_sink, messages_sink, wakeup_sink
 
 
 # ---------------------------------------------------------------------------

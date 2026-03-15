@@ -42,19 +42,18 @@ def _build_system_prompt(agent: BaseAgent) -> str:
     ~75% token reduction vs verbose format.
     Uses XML tags (Claude-native), Big5 abbreviations (LLM-universal),
     and LEGEND schema defined once for implicit reuse.
+
+    No workflow prescribed — agent decides everything.
     """
     from agentic_capital.formats.compact import LEGEND, MANDATE, psych
 
     agent_class = type(agent).__name__
     if "CEO" in agent_class:
         role = "CEO"
-        role_ctx = "act:hire|fire|restructure|strategy|trade|send_message"
     elif "Analyst" in agent_class:
         role = "analyst"
-        role_ctx = "act:analyze→signal→send_message(traders)"
     else:
         role = "trader"
-        role_ctx = "act:assess→decide→submit_order"
 
     return (
         f"{LEGEND}\n"
@@ -62,8 +61,7 @@ def _build_system_prompt(agent: BaseAgent) -> str:
         f"<phi>{agent.profile.philosophy}</phi>\n"
         f"{psych(agent.personality, agent.emotion)}\n"
         f"</agent>\n"
-        f"{MANDATE}\n"
-        f"{role_ctx}"
+        f"{MANDATE}"
     )
 
 
@@ -86,7 +84,7 @@ async def run_agent_cycle(
     """
     from langchain_core.messages import HumanMessage
 
-    tools, decisions_sink, messages_sink = build_agent_tools(
+    tools, decisions_sink, messages_sink, wakeup_sink = build_agent_tools(
         trading=trading,
         recorder=recorder,
         agent_id=str(agent.agent_id),
@@ -100,11 +98,11 @@ async def run_agent_cycle(
     react_agent = create_react_agent(llm, tools, prompt=system_prompt)
 
     if open_markets:
-        market_status = f"Currently open markets: {', '.join(open_markets)}."
+        market_status = f"open:{','.join(open_markets)}"
     else:
-        market_status = "All major markets are currently closed."
+        market_status = "markets:closed"
 
-    cycle_trigger = f"C{cycle_number}|{market_status}|act_now"
+    cycle_trigger = f"C{cycle_number}|{market_status}"
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)
 
@@ -114,7 +112,7 @@ async def run_agent_cycle(
     try:
         result = await react_agent.ainvoke(
             {"messages": [HumanMessage(content=cycle_trigger)]},
-            config={"recursion_limit": 50},  # type: ignore[arg-type]
+            config={"recursion_limit": 200},  # type: ignore[arg-type]
         )
         result_messages = result.get("messages", [])
     except Exception as e:
@@ -135,6 +133,9 @@ async def run_agent_cycle(
         recorder=recorder,
     )
 
+    # Agent-requested wakeup delay: take the last request (most recent intent)
+    next_cycle_seconds = wakeup_sink[-1] if wakeup_sink else 0
+
     logger.info(
         "agent_cycle_complete",
         agent=agent.name,
@@ -142,6 +143,7 @@ async def run_agent_cycle(
         decisions=len(all_decisions),
         tool_calls=len(decisions_sink),
         errors=len(errors),
+        next_cycle_seconds=next_cycle_seconds,
     )
 
     return {
@@ -151,6 +153,7 @@ async def run_agent_cycle(
         "decisions": all_decisions,
         "messages_to_send": messages_sink,
         "errors": errors,
+        "next_cycle_seconds": next_cycle_seconds,
         "emotion": {
             "valence": agent.emotion.valence,
             "arousal": agent.emotion.arousal,

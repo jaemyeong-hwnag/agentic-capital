@@ -28,16 +28,11 @@ def _make_profile(name="Test"):
 class TestSimulationEngine:
     def test_init_defaults(self):
         engine = SimulationEngine()
-        assert engine._cycle_interval == 300
         assert engine._agents == []
         assert engine._running is False
 
     def test_init_custom(self):
-        engine = SimulationEngine(
-            cycle_interval_seconds=60,
-            symbols=["005930", "000660"],
-        )
-        assert engine._cycle_interval == 60
+        engine = SimulationEngine(symbols=["005930", "000660"])
         assert engine._symbols == ["005930", "000660"]
 
     def test_stop(self):
@@ -86,11 +81,12 @@ class TestSimulationEngine:
         )
 
         with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"decisions": [], "emotion": {}}
-            await engine._run_cycle()
+            mock_run.return_value = {"decisions": [], "emotion": {}, "next_cycle_seconds": 0}
+            result = await engine._run_cycle()
 
         assert engine._cycle_count == 1
         assert mock_run.call_count == 2  # CEO + Analyst
+        assert isinstance(result, int)
 
     @pytest.mark.asyncio
     async def test_run_cycle_market_closed_still_runs(self):
@@ -107,7 +103,7 @@ class TestSimulationEngine:
         )
 
         with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"decisions": [], "emotion": {}}
+            mock_run.return_value = {"decisions": [], "emotion": {}, "next_cycle_seconds": 0}
             with patch("agentic_capital.simulation.engine.is_market_open", return_value=False):
                 await engine._run_cycle()
 
@@ -167,17 +163,19 @@ class TestSimulationEngine:
         assert len(engine._agents) == 1  # CEO still there
 
     @pytest.mark.asyncio
-    async def test_process_org_actions_non_ceo_ignored(self):
-        """Non-CEO agents' org actions are not processed."""
+    async def test_process_org_actions_any_agent_can_propose(self):
+        """Any agent can propose org actions — not restricted to CEO."""
         engine = SimulationEngine()
         llm = _make_llm()
 
         analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=create_random_personality(42), llm=llm)
-        engine._agents = [analyst]
+        target = AnalystAgent(profile=_make_profile("BadAgent"), personality=create_random_personality(99), llm=llm)
+        engine._agents = [analyst, target]
 
-        result = {"decisions": [{"type": "fire", "target": "someone"}]}
+        result = {"decisions": [{"type": "fire", "target": "BadAgent", "reason": "underperforming"}]}
         await engine._process_org_actions(analyst, result)
         assert len(engine._agents) == 1
+        assert engine._agents[0].name == "Analyst"
 
     @pytest.mark.asyncio
     async def test_process_org_actions_create_role(self):
@@ -212,7 +210,7 @@ class TestSimulationEngine:
         engine._recorder.commit = AsyncMock()
 
         with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"decisions": [], "emotion": {}}
+            mock_run.return_value = {"decisions": [], "emotion": {}, "next_cycle_seconds": 0}
             await engine._run_cycle()
 
         engine._recorder.record_company_snapshot.assert_called_once()

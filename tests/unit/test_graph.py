@@ -153,6 +153,7 @@ class TestRunAgentCycle:
         assert result["cycle_number"] == 1
         assert "decisions" in result
         assert "emotion" in result
+        assert "next_cycle_seconds" in result
 
     @pytest.mark.asyncio
     async def test_full_cycle_analyst(self):

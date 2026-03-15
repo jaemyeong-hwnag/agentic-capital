@@ -36,14 +36,15 @@ class TestBuildAgentTools:
     """Test build_agent_tools() returns correct tools and they work."""
 
     def test_returns_tools_and_sinks(self):
-        tools, decisions, messages = build_agent_tools()
+        tools, decisions, messages, wakeups = build_agent_tools()
         assert isinstance(tools, list)
         assert len(tools) > 0
         assert isinstance(decisions, list)
         assert isinstance(messages, list)
+        assert isinstance(wakeups, list)
 
     def test_tool_names(self):
-        tools, _, _ = build_agent_tools()
+        tools, _, _, _ = build_agent_tools()
         names = {t.name for t in tools}
         assert "get_balance" in names
         assert "get_positions" in names
@@ -53,6 +54,7 @@ class TestBuildAgentTools:
         assert "save_memory" in names
         assert "search_memory" in names
         assert "send_message" in names
+        assert "request_wakeup" in names
         # Market data tools are removed — AI finds data autonomously
         assert "get_quote" not in names
         assert "get_ohlcv" not in names
@@ -62,7 +64,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_get_balance_tool(self):
         trading = _make_trading()
-        tools, _, _ = build_agent_tools(trading=trading)
+        tools, _, _, _ = build_agent_tools(trading=trading)
         tool = next(t for t in tools if t.name == "get_balance")
         result = await tool.coroutine()
         assert "tot:10000000" in result
@@ -71,7 +73,7 @@ class TestBuildAgentTools:
 
     @pytest.mark.asyncio
     async def test_get_balance_no_trading(self):
-        tools, _, _ = build_agent_tools()
+        tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "get_balance")
         result = await tool.coroutine()
         assert result.startswith("ERR:")
@@ -79,7 +81,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_get_positions_tool(self):
         trading = _make_trading()
-        tools, _, _ = build_agent_tools(trading=trading)
+        tools, _, _, _ = build_agent_tools(trading=trading)
         tool = next(t for t in tools if t.name == "get_positions")
         result = await tool.coroutine()
         assert "@pos[1]" in result
@@ -88,7 +90,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_get_fills_tool(self):
         trading = _make_trading()
-        tools, _, _ = build_agent_tools(trading=trading)
+        tools, _, _, _ = build_agent_tools(trading=trading)
         tool = next(t for t in tools if t.name == "get_fills")
         result = await tool.coroutine()
         assert "@fills[1]" in result
@@ -98,7 +100,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_submit_order_tool_records_decision(self):
         trading = _make_trading()
-        tools, decisions, _ = build_agent_tools(trading=trading, agent_name="Trader-1")
+        tools, decisions, _, _ = build_agent_tools(trading=trading, agent_name="Trader-1")
         tool = next(t for t in tools if t.name == "submit_order")
         result = await tool.coroutine(
             symbol="005930", side="buy", quantity=10, price=70000.0
@@ -111,7 +113,7 @@ class TestBuildAgentTools:
 
     @pytest.mark.asyncio
     async def test_submit_order_no_trading(self):
-        tools, _, _ = build_agent_tools()
+        tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "submit_order")
         result = await tool.coroutine(symbol="005930", side="buy", quantity=10)
         assert result.startswith("ERR:")
@@ -119,7 +121,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_cancel_order_tool(self):
         trading = _make_trading()
-        tools, _, _ = build_agent_tools(trading=trading)
+        tools, _, _, _ = build_agent_tools(trading=trading)
         tool = next(t for t in tools if t.name == "cancel_order")
         result = await tool.coroutine(order_id="ORDER123")
         assert "cancelled:True" in result
@@ -128,7 +130,7 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_save_and_search_memory(self):
         memory = {}
-        tools, _, _ = build_agent_tools(agent_memory=memory)
+        tools, _, _, _ = build_agent_tools(agent_memory=memory)
 
         save_tool = next(t for t in tools if t.name == "save_memory")
         search_tool = next(t for t in tools if t.name == "search_memory")
@@ -143,14 +145,14 @@ class TestBuildAgentTools:
     @pytest.mark.asyncio
     async def test_search_memory_no_match(self):
         memory = {}
-        tools, _, _ = build_agent_tools(agent_memory=memory)
+        tools, _, _, _ = build_agent_tools(agent_memory=memory)
         search_tool = next(t for t in tools if t.name == "search_memory")
         results = await search_tool.coroutine(query="nonexistent")
         assert results == "[]"
 
     @pytest.mark.asyncio
     async def test_send_message_tool(self):
-        tools, _, messages = build_agent_tools(agent_name="CEO-Alpha")
+        tools, _, messages, _ = build_agent_tools(agent_name="CEO-Alpha")
         tool = next(t for t in tools if t.name == "send_message")
         result = await tool.coroutine(
             to_agent="Trader-Gamma",
@@ -163,3 +165,25 @@ class TestBuildAgentTools:
         assert messages[0]["from"] == "CEO-Alpha"
         assert "wire" in messages[0]
         assert "INSTR|CEO-Alpha|Trader-Gamma" in messages[0]["wire"]
+
+    @pytest.mark.asyncio
+    async def test_request_wakeup_records_delay(self):
+        tools, _, _, wakeups = build_agent_tools(agent_name="CEO-Alpha")
+        tool = next(t for t in tools if t.name == "request_wakeup")
+        result = await tool.coroutine(seconds=3600)
+        assert "3600" in result
+        assert wakeups == [3600]
+
+    @pytest.mark.asyncio
+    async def test_request_wakeup_zero_immediate(self):
+        tools, _, _, wakeups = build_agent_tools()
+        tool = next(t for t in tools if t.name == "request_wakeup")
+        await tool.coroutine(seconds=0)
+        assert wakeups == [0]
+
+    @pytest.mark.asyncio
+    async def test_request_wakeup_negative_clamped(self):
+        tools, _, _, wakeups = build_agent_tools()
+        tool = next(t for t in tools if t.name == "request_wakeup")
+        await tool.coroutine(seconds=-100)
+        assert wakeups == [0]
