@@ -255,3 +255,51 @@ class TestSimulationRecorder:
         recorder = self._make_recorder()
         await recorder.commit()
         recorder._session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_save_tool_new(self):
+        recorder = self._make_recorder()
+        # First execute (SELECT) returns None → insert path
+        # Second execute (flush) handled by flush mock
+        recorder._session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+        )
+        await recorder.save_tool(
+            name="my_tool",
+            description="A tool",
+            code="async def my_tool() -> str: return 'hi'",
+            created_by=uuid.uuid4(),
+        )
+        assert recorder._session.flush.called
+        assert recorder._session.add.called
+
+    @pytest.mark.asyncio
+    async def test_save_tool_update_existing(self):
+        recorder = self._make_recorder()
+        existing = MagicMock()
+        recorder._session.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing))
+        )
+        await recorder.save_tool(
+            name="my_tool",
+            description="Updated",
+            code="async def my_tool() -> str: return 'updated'",
+        )
+        # execute called twice: SELECT + UPDATE
+        assert recorder._session.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_load_tools_returns_list(self):
+        recorder = self._make_recorder()
+        # Use PropertyMock-style object to avoid MagicMock name collision
+        tool_mock = MagicMock()
+        tool_mock.name = "calc_pnl"
+        tool_mock.description = "Calc P&L"
+        tool_mock.code = "async def calc_pnl() -> str: return 'pnl:0'"
+        recorder._session.execute = AsyncMock(
+            return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[tool_mock]))))
+        )
+        tools = await recorder.load_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "calc_pnl"
+        assert "code" in tools[0]

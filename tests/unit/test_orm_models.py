@@ -10,6 +10,7 @@ from agentic_capital.infra.models import (
     AgentModel,
     AgentPersonalityHistoryModel,
     AgentPersonalityModel,
+    AgentToolModel,
     Base,
     CompanySnapshotModel,
     EpisodicDetailModel,
@@ -26,7 +27,7 @@ from agentic_capital.infra.models import (
 
 class TestAllTablesRegistered:
     def test_table_count(self) -> None:
-        assert len(Base.metadata.tables) == 16
+        assert len(Base.metadata.tables) == 17
 
     def test_expected_tables(self) -> None:
         expected = {
@@ -34,7 +35,7 @@ class TestAllTablesRegistered:
             "agent_emotion_history", "agent_decisions", "trades", "positions",
             "roles", "permission_history", "hr_events", "agent_messages",
             "memories", "episodic_details", "market_ohlcv",
-            "simulation_runs", "company_snapshots",
+            "simulation_runs", "company_snapshots", "agent_tools",
         }
         assert set(Base.metadata.tables.keys()) == expected
 

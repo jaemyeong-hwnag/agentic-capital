@@ -30,6 +30,7 @@ from agentic_capital.infra.models.organization import (
     RoleModel,
 )
 from agentic_capital.infra.models.simulation import CompanySnapshotModel, SimulationRunModel
+from agentic_capital.infra.models.tool import AgentToolModel
 from agentic_capital.infra.models.trade import PositionModel, TradeModel
 
 logger = structlog.get_logger()
@@ -400,6 +401,54 @@ class SimulationRecorder:
             ).values(ended_at=datetime.now(), status=status)
             await self._session.execute(stmt)
             await self._session.flush()
+
+    async def save_tool(
+        self,
+        name: str,
+        description: str,
+        code: str,
+        created_by: uuid.UUID | None = None,
+    ) -> None:
+        """Persist AI-created tool. Upserts by name so AI can iterate on tools."""
+        from sqlalchemy import select, update as sa_update
+        from agentic_capital.infra.models.tool import AgentToolModel
+
+        existing = (
+            await self._session.execute(
+                select(AgentToolModel).where(AgentToolModel.name == name)
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            await self._session.execute(
+                sa_update(AgentToolModel)
+                .where(AgentToolModel.name == name)
+                .values(description=description, code=code, status="active")
+            )
+        else:
+            self._session.add(
+                AgentToolModel(
+                    name=name,
+                    description=description,
+                    code=code,
+                    created_by=created_by,
+                )
+            )
+        await self._session.flush()
+        logger.info("agent_tool_saved", name=name, created_by=str(created_by))
+
+    async def load_tools(self) -> list[dict]:
+        """Load all active AI-created tools for injection into next cycle."""
+        from sqlalchemy import select
+        from agentic_capital.infra.models.tool import AgentToolModel
+
+        result = await self._session.execute(
+            select(AgentToolModel).where(AgentToolModel.status == "active")
+        )
+        return [
+            {"name": t.name, "description": t.description, "code": t.code}
+            for t in result.scalars().all()
+        ]
 
     async def commit(self) -> None:
         """Commit all pending changes."""

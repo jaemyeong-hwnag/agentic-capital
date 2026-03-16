@@ -84,6 +84,21 @@ async def run_agent_cycle(
         dict with 'decisions', 'messages', 'errors' for the engine to process.
     """
     from langchain_core.messages import HumanMessage
+    from agentic_capital.core.tools.data_query import _build_dynamic_tool
+
+    # Load AI-created tools from DB and build StructuredTool instances
+    preloaded: list = []
+    if recorder:
+        try:
+            specs = await recorder.load_tools()
+            for spec in specs:
+                t = _build_dynamic_tool(spec, trading, market_data, recorder)
+                if t is not None:
+                    preloaded.append(t)
+            if preloaded:
+                logger.info("dynamic_tools_loaded", agent=agent.name, count=len(preloaded))
+        except Exception:
+            logger.warning("dynamic_tools_load_failed", agent=agent.name)
 
     tools, decisions_sink, messages_sink, wakeup_sink = build_agent_tools(
         trading=trading,
@@ -92,6 +107,7 @@ async def run_agent_cycle(
         agent_id=str(agent.agent_id),
         agent_name=agent.name,
         agent_memory=getattr(agent, "_memory", None),
+        preloaded_tools=preloaded,
     )
 
     system_prompt = _build_system_prompt(agent)

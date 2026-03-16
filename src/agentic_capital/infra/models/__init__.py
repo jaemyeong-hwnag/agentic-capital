@@ -17,9 +17,11 @@ from agentic_capital.infra.models.organization import (
     RoleModel,
 )
 from agentic_capital.infra.models.simulation import CompanySnapshotModel, SimulationRunModel
+from agentic_capital.infra.models.tool import AgentToolModel
 from agentic_capital.infra.models.trade import PositionModel, TradeModel
 
 __all__ = [
+    "AgentToolModel",
     "AgentDecisionModel",
     "AgentEmotionHistoryModel",
     "AgentMessageModel",

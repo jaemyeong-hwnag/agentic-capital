@@ -6,13 +6,103 @@ No methodology constraints. No trading restrictions. Only limit: available capit
 
 from __future__ import annotations
 
+import builtins
+import inspect
 from typing import Any
 
 import structlog
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 logger = structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# Dynamic tool execution sandbox
+# ---------------------------------------------------------------------------
+
+_SAFE_BUILTINS: dict = {
+    name: getattr(builtins, name)
+    for name in [
+        "len", "str", "int", "float", "bool", "list", "dict", "tuple", "set",
+        "range", "enumerate", "zip", "map", "filter", "min", "max", "sum",
+        "abs", "round", "sorted", "reversed", "any", "all", "print", "repr",
+        "isinstance", "issubclass", "type", "hasattr", "getattr", "setattr",
+        "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+        "AttributeError", "StopIteration", "True", "False", "None",
+    ]
+    if hasattr(builtins, name)
+}
+
+_FORBIDDEN_TOKENS = [
+    "import os", "import sys", "import subprocess", "import socket",
+    "__import__", "open(", "exec(", "eval(",
+]
+
+
+def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
+    """Restricted execution namespace exposed to AI-created tools."""
+    import json
+    import math
+    from datetime import datetime as _dt
+    return {
+        "__builtins__": _SAFE_BUILTINS,
+        "trading": trading,
+        "market_data": market_data,
+        "recorder": recorder,
+        "json": json,
+        "math": math,
+        "datetime": _dt,
+    }
+
+
+def _build_dynamic_tool(
+    spec: dict,
+    trading: Any,
+    market_data: Any,
+    recorder: Any,
+) -> StructuredTool | None:
+    """Exec AI-written tool code and wrap as StructuredTool. Returns None on failure."""
+    name = spec["name"]
+    description = spec.get("description", "")
+    code = spec["code"]
+
+    for token in _FORBIDDEN_TOKENS:
+        if token in code:
+            logger.warning("dynamic_tool_forbidden_token", name=name, token=token)
+            return None
+
+    namespace = _make_tool_namespace(trading, market_data, recorder)
+    try:
+        exec(code, namespace)  # noqa: S102
+    except Exception as exc:
+        logger.warning("dynamic_tool_exec_failed", name=name, error=str(exc))
+        return None
+
+    fn = namespace.get(name)
+    if not fn or not callable(fn):
+        logger.warning("dynamic_tool_fn_not_found", name=name)
+        return None
+
+    # Auto-build Pydantic schema from function signature
+    sig = inspect.signature(fn)
+    fields: dict = {}
+    for pname, param in sig.parameters.items():
+        annotation = param.annotation if param.annotation != inspect.Parameter.empty else str
+        default = param.default if param.default != inspect.Parameter.empty else ...
+        fields[pname] = (annotation, default)
+
+    schema = create_model(f"{name}_schema", **fields) if fields else None
+
+    try:
+        return StructuredTool.from_function(
+            coroutine=fn,
+            name=name,
+            description=description,
+            args_schema=schema,
+        )
+    except Exception as exc:
+        logger.warning("dynamic_tool_register_failed", name=name, error=str(exc))
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +162,31 @@ class GetOHLCVInput(BaseModel):
     limit: int = Field(default=20, description="Number of candles to return (max 100)")
 
 
+class CreateToolInput(BaseModel):
+    name: str = Field(description="Tool name in snake_case (e.g. evaluate_agent_pnl)")
+    description: str = Field(description="What this tool does and its parameters")
+    code: str = Field(
+        description=(
+            "Complete async Python function. Must define 'async def {name}(...):'.\n"
+            "Available in scope: trading, market_data, recorder, json, math, datetime\n"
+            "Return type must be str (compact AI-friendly format).\n"
+            "Forbidden: import os/sys/subprocess/socket, open(), exec(), eval()\n"
+            "Example:\n"
+            "async def calc_sharpe(agent_id: str, days: int = 7) -> str:\n"
+            "    from sqlalchemy import text\n"
+            "    rows = (await recorder._session.execute(\n"
+            "        text('SELECT pnl FROM trades WHERE agent_id=:id'), {'id': agent_id}\n"
+            "    )).fetchall()\n"
+            "    pnls = [r[0] for r in rows]\n"
+            "    if not pnls: return 'sharpe:N/A'\n"
+            "    avg = sum(pnls) / len(pnls)\n"
+            "    std = (sum((x-avg)**2 for x in pnls) / len(pnls)) ** 0.5\n"
+            "    sharpe = avg / std if std else 0\n"
+            "    return f'sharpe:{sharpe:.2f},n:{len(pnls)}'"
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool builder — creates bound tools for a given agent cycle
 # ---------------------------------------------------------------------------
@@ -86,6 +201,7 @@ def build_agent_tools(
     agent_name: str = "",
     agent_memory: dict | None = None,
     agents_registry: dict | None = None,  # name → agent_id
+    preloaded_tools: list | None = None,   # dynamic tools pre-loaded from DB
 ) -> tuple:
     """Build LangChain StructuredTools bound to the given adapters.
 
@@ -323,6 +439,47 @@ def build_agent_tools(
         except Exception as e:
             return f"ERR:{e}"
 
+    # ---- Dynamic tool creation -------------------------------------------
+
+    async def create_tool(name: str, description: str, code: str) -> str:
+        """AI creates a new persistent tool. Available from the next cycle for ALL agents.
+
+        The tool code runs in a restricted sandbox with access to:
+        trading, market_data, recorder, json, math, datetime.
+        Forbidden: os, sys, subprocess, socket, open, exec, eval.
+        """
+        for token in _FORBIDDEN_TOKENS:
+            if token in code:
+                return f"ERR:forbidden_token:{token}"
+
+        # Compile check before saving
+        try:
+            compile(code, "<dynamic>", "exec")
+        except SyntaxError as exc:
+            return f"ERR:syntax:{exc}"
+
+        # Quick exec test in sandbox to catch runtime errors
+        test_ns = _make_tool_namespace(trading, market_data, recorder)
+        try:
+            exec(code, test_ns)  # noqa: S102
+        except Exception as exc:
+            return f"ERR:exec:{exc}"
+
+        fn = test_ns.get(name)
+        if not fn or not callable(fn):
+            return f"ERR:fn_not_found — function must be named '{name}'"
+
+        if recorder:
+            try:
+                from uuid import UUID
+                creator = UUID(agent_id) if agent_id else None
+                await recorder.save_tool(name, description, code, created_by=creator)
+            except Exception as exc:
+                return f"ERR:save:{exc}"
+
+        logger.info("agent_tool_created", creator=agent_name, name=name)
+        return f"OK:tool_created:{name}|available_next_cycle|all_agents_can_use"
+
     # ---- Timing control --------------------------------------------------
 
     async def request_wakeup(seconds: int) -> str:
@@ -409,7 +566,24 @@ def build_agent_tools(
             description="Control when this agent runs next. Agent decides its own cycle timing.",
             args_schema=RequestWakeupInput,
         ),
+        StructuredTool.from_function(
+            coroutine=create_tool,
+            name="create_tool",
+            description=(
+                "Create a new persistent tool that YOU and all other agents can use from the next cycle. "
+                "Use this to build capabilities the system doesn't provide: "
+                "HR evaluation, performance metrics, risk calculators, portfolio analyzers, "
+                "hiring criteria checkers, strategy backtests — anything you need. "
+                "Tools persist across simulations and compound over time."
+            ),
+            args_schema=CreateToolInput,
+        ),
     ]
+
+    # Inject pre-loaded AI-created tools (built from DB before this call)
+    for dynamic_tool in (preloaded_tools or []):
+        if dynamic_tool is not None:
+            tools.append(dynamic_tool)
 
     return tools, decisions_sink, messages_sink, wakeup_sink
 
