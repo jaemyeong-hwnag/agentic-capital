@@ -185,15 +185,26 @@ def build_agent_tools(
                 exchange=exchange,
             )
             result = await trading.submit_order(o)
-            trade_value = result.filled_price * result.quantity if result.filled_price else 0
+
+            # For market orders KIS paper API returns filled_price=0.
+            # Fall back to current quote price as best estimate.
+            effective_price = price or result.filled_price
+            if not effective_price and market_data:
+                try:
+                    q = await market_data.get_quote(symbol)
+                    effective_price = q.price
+                except Exception:
+                    pass
+
             from agentic_capital.simulation.recorder import _estimate_commission
+            trade_value = effective_price * result.quantity if effective_price else 0
             commission = _estimate_commission(market, trade_value)
             outcome = {
                 "order_id": result.order_id,
                 "symbol": result.symbol,
                 "side": result.side,
                 "quantity": result.quantity,
-                "filled_price": result.filled_price,
+                "filled_price": effective_price,
                 "status": result.status,
                 "market": result.market,
                 "commission": commission,
@@ -204,7 +215,7 @@ def build_agent_tools(
                 "action": side.upper(),
                 "symbol": symbol,
                 "quantity": quantity,
-                "price": price or result.filled_price,
+                "price": effective_price,
                 "market": market,
                 "exchange": exchange,
                 "order_id": result.order_id,
