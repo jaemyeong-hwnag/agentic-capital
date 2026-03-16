@@ -1,7 +1,6 @@
-"""Agent tools — account/position queries and order execution for agents.
+"""Agent tools — account/position queries, market data, and order execution.
 
-System provides only: account queries (balance, positions, fills) and trading (submit/cancel).
-Everything else — research, analysis, market data — the AI figures out on its own.
+System provides: account queries, market data (quote/ohlcv), and trading.
 No methodology constraints. No trading restrictions. Only limit: available capital.
 """
 
@@ -63,6 +62,16 @@ class RequestWakeupInput(BaseModel):
     seconds: int = Field(description="Seconds until next cycle. 0=immediately, 3600=1h, 86400=1d")
 
 
+class GetQuoteInput(BaseModel):
+    symbol: str = Field(description="Symbol to quote. KR stocks: 6-digit code (e.g. 005930). US: ticker (e.g. AAPL)")
+
+
+class GetOHLCVInput(BaseModel):
+    symbol: str = Field(description="Symbol. KR: 6-digit code. US: ticker.")
+    timeframe: str = Field(default="1d", description="Candle size: 1m|5m|15m|60m|1d|1w|1mo|3mo")
+    limit: int = Field(default=20, description="Number of candles to return (max 100)")
+
+
 # ---------------------------------------------------------------------------
 # Tool builder — creates bound tools for a given agent cycle
 # ---------------------------------------------------------------------------
@@ -71,6 +80,7 @@ class RequestWakeupInput(BaseModel):
 def build_agent_tools(
     *,
     trading: Any = None,
+    market_data: Any = None,
     recorder: Any = None,
     agent_id: str = "",
     agent_name: str = "",
@@ -79,9 +89,7 @@ def build_agent_tools(
 ) -> tuple:
     """Build LangChain StructuredTools bound to the given adapters.
 
-    Provides: account queries (balance, positions, fills) + order execution
-    + request_wakeup so the agent controls its own cycle timing.
-    AI agents handle all other research and analysis autonomously.
+    Provides: account queries, market data (quote/ohlcv), trading, messaging.
     Returns (tools, decisions_sink, messages_sink, wakeup_sink).
     """
     memory = agent_memory if agent_memory is not None else {}
@@ -276,19 +284,48 @@ def build_agent_tools(
         logger.info("agent_message_sent", from_agent=agent_name, to=to_agent, type=type)
         return "sent:1"
 
+    # ---- Market data tools -----------------------------------------------
+
+    async def get_quote(symbol: str) -> str:
+        """Get current price quote. KR stocks: 6-digit code (005930). US: ticker (AAPL)."""
+        if not market_data:
+            return "ERR:no_market_data"
+        try:
+            from agentic_capital.formats.compact import quote as _quote
+            q = await market_data.get_quote(symbol)
+            return _quote(q.symbol, q.price, q.bid, q.ask, q.volume, q.currency)
+        except Exception as e:
+            return f"ERR:{e}"
+
+    async def get_ohlcv(symbol: str, timeframe: str = "1d", limit: int = 20) -> str:
+        """Get historical OHLCV candles. Returns TOON table. timeframe: 1m|5m|15m|60m|1d|1w|1mo|3mo"""
+        if not market_data:
+            return "ERR:no_market_data"
+        try:
+            from agentic_capital.formats.compact import ohlcv as _ohlcv
+            candles = await market_data.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
+            return _ohlcv(symbol, candles)
+        except Exception as e:
+            return f"ERR:{e}"
+
     # ---- Timing control --------------------------------------------------
 
     async def request_wakeup(seconds: int) -> str:
-        """Request when to be called again. Agent controls its own cycle timing.
+        """Schedule next wakeup and END this cycle. Call this ONCE when done.
+
+        After calling this, stop all tool calls and return your final response.
+        Do NOT call this multiple times — only the first call is used.
 
         seconds=0: run again immediately
+        seconds=60: wait 1 minute
         seconds=300: wait 5 minutes
-        seconds=3600: wait 1 hour
-        seconds=86400: wait until tomorrow
+        seconds=3600: wait 1 hour (max — HORIZON=1h)
         """
-        wakeup_sink.append(max(0, seconds))
+        capped = min(max(0, seconds), 3600)
+        if not wakeup_sink:  # only first call counts
+            wakeup_sink.append(capped)
         logger.info("agent_wakeup_requested", agent=agent_name, seconds=seconds)
-        return f"wakeup:{seconds}s"
+        return f"CYCLE_DONE. Next wakeup in {capped}s. Stop here — do not call any more tools."
 
     # ---- Build tool list -----------------------------------------------
 
@@ -338,6 +375,18 @@ def build_agent_tools(
             name="send_message",
             description="Send a message (signal, instruction, report) to another agent",
             args_schema=SendMessageInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=get_quote,
+            name="get_quote",
+            description="Get current price quote for any symbol. KR stocks: 6-digit code (e.g. 005930 for Samsung). US stocks: ticker (e.g. AAPL).",
+            args_schema=GetQuoteInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=get_ohlcv,
+            name="get_ohlcv",
+            description="Get historical OHLCV price candles for technical analysis. timeframe: 1d|60m|15m|5m|1w|1mo",
+            args_schema=GetOHLCVInput,
         ),
         StructuredTool.from_function(
             coroutine=request_wakeup,

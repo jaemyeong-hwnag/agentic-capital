@@ -43,6 +43,7 @@ class SimulationEngine:
         # Adapters (initialized in start())
         self._llm = None
         self._trading = None
+        self._market_data = None
         self._recorder = None
 
     def _init_adapters(self) -> None:
@@ -55,6 +56,8 @@ class SimulationEngine:
         self._llm = GeminiLLMAdapter()
         kis_session = KISSession()
         self._trading = KISTradingAdapter(session=kis_session)
+        from agentic_capital.adapters.market_data.yfinance_adapter import YFinanceMarketDataAdapter
+        self._market_data = YFinanceMarketDataAdapter()
         logger.info("adapters_initialized")
 
     def _init_agents(self) -> None:
@@ -201,6 +204,7 @@ class SimulationEngine:
                     agent,
                     cycle_number=self._cycle_count,
                     trading=self._trading,
+                    market_data=self._market_data,
                     open_markets=open_markets,
                     recorder=self._recorder,
                 )

@@ -70,6 +70,7 @@ async def run_agent_cycle(
     cycle_number: int,
     *,
     trading: Any = None,
+    market_data: Any = None,
     symbols: list[str] | None = None,
     open_markets: list[str] | None = None,
     recorder: Any = None,
@@ -86,6 +87,7 @@ async def run_agent_cycle(
 
     tools, decisions_sink, messages_sink, wakeup_sink = build_agent_tools(
         trading=trading,
+        market_data=market_data,
         recorder=recorder,
         agent_id=str(agent.agent_id),
         agent_name=agent.name,
@@ -100,9 +102,9 @@ async def run_agent_cycle(
     if open_markets:
         market_status = f"open:{','.join(open_markets)}"
     else:
-        market_status = "markets:closed"
+        market_status = "closed"
 
-    cycle_trigger = f"C{cycle_number}|{market_status}"
+    cycle_trigger = f"cycle:{cycle_number}|market:{market_status}"
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)
 

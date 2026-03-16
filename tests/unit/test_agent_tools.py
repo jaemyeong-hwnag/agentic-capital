@@ -55,11 +55,8 @@ class TestBuildAgentTools:
         assert "search_memory" in names
         assert "send_message" in names
         assert "request_wakeup" in names
-        # Market data tools are removed — AI finds data autonomously
-        assert "get_quote" not in names
-        assert "get_ohlcv" not in names
-        assert "get_order_book" not in names
-        assert "get_symbols" not in names
+        assert "get_quote" in names
+        assert "get_ohlcv" in names
 
     @pytest.mark.asyncio
     async def test_get_balance_tool(self):

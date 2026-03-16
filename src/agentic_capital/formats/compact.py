@@ -33,7 +33,7 @@ LEGEND = (
 )
 
 # Universal mandate — same for all agents, short and unambiguous
-MANDATE = "GOAL=profit|LIMIT=capital|METHOD=any|STOP=done"
+MANDATE = "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done"
 
 # Message type abbreviations (MetaGPT: explicit type tags reduce parse errors 60%)
 MSG_TYPES = "SIG|INSTR|RPT|QRY|ACK|ERR"
@@ -148,6 +148,36 @@ def order(result: dict) -> str:
         f",st:{result.get('status', '')}"
         f",mkt:{result.get('market', '')}"
     )
+
+
+def quote(symbol: str, price: float, bid: float | None, ask: float | None, volume: float | None, currency: str) -> str:
+    """Compact price quote. ~60% token reduction vs JSON."""
+    parts = [f"sym:{symbol}", f"px:{price:.0f}", f"ccy:{currency}"]
+    if bid:
+        parts.append(f"bid:{bid:.0f}")
+    if ask:
+        parts.append(f"ask:{ask:.0f}")
+    if volume:
+        parts.append(f"vol:{volume:.0f}")
+    return ",".join(parts)
+
+
+def ohlcv(symbol: str, candles: list) -> str:
+    """Encode OHLCV candles as TOON table."""
+    if not candles:
+        return f"@ohlcv[0](sym={symbol})"
+    rows = [
+        [
+            c.timestamp.strftime("%y%m%d"),
+            str(int(c.open)),
+            str(int(c.high)),
+            str(int(c.low)),
+            str(int(c.close)),
+            str(int(c.volume)),
+        ]
+        for c in candles
+    ]
+    return to_toon(f"ohlcv:{symbol}", ["dt", "o", "h", "l", "c", "v"], rows)
 
 
 def mem_entries(entries: list[dict]) -> str:
