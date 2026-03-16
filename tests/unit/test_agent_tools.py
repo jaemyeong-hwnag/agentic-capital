@@ -57,6 +57,8 @@ class TestBuildAgentTools:
         assert "request_wakeup" in names
         assert "get_quote" in names
         assert "get_ohlcv" in names
+        assert "get_market_status" in names
+        assert "create_tool" in names
 
     @pytest.mark.asyncio
     async def test_get_balance_tool(self):
@@ -184,3 +186,21 @@ class TestBuildAgentTools:
         tool = next(t for t in tools if t.name == "request_wakeup")
         await tool.coroutine(seconds=-100)
         assert wakeups == [0]
+
+    @pytest.mark.asyncio
+    async def test_get_market_status_tool(self):
+        from unittest.mock import patch, MagicMock
+        tools, _, _, _ = build_agent_tools()
+        tool = next(t for t in tools if t.name == "get_market_status")
+
+        mock_info = {"marketState": "POSTPOST"}
+        mock_ticker = MagicMock()
+        mock_ticker.info = mock_info
+
+        with patch("yfinance.Ticker", return_value=mock_ticker):
+            result = await tool.coroutine()
+
+        assert "KRX" in result
+        assert "NASDAQ" in result
+        assert "NYSE" in result
+        assert "POSTPOST" in result

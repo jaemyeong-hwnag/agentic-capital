@@ -115,12 +115,7 @@ async def run_agent_cycle(
 
     react_agent = create_react_agent(llm, tools, prompt=system_prompt)
 
-    if open_markets:
-        market_status = f"open:{','.join(open_markets)}"
-    else:
-        market_status = "closed"
-
-    cycle_trigger = f"cycle:{cycle_number}|market:{market_status}"
+    cycle_trigger = f"cycle:{cycle_number}"
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)
 

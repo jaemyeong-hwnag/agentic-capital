@@ -439,6 +439,39 @@ def build_agent_tools(
         except Exception as e:
             return f"ERR:{e}"
 
+    # ---- Market status ---------------------------------------------------
+
+    async def get_market_status() -> str:
+        """Query real-time market session state across major exchanges.
+
+        Returns current session state per market:
+          REGULAR  = regular trading hours (매매 가능)
+          PRE      = pre-market / 장전 시간외
+          POST     = after-hours / 장후 시간외
+          POSTPOST = extended after-hours
+          CLOSED   = closed
+
+        Use this to decide when and where to trade — do NOT assume market is closed.
+        """
+        import yfinance as yf
+        from datetime import datetime, timezone, timedelta
+
+        checks = [
+            ("KRX",    "^KS11",  timezone(timedelta(hours=9))),
+            ("NASDAQ", "^IXIC",  timezone(timedelta(hours=-5))),
+            ("NYSE",   "^GSPC",  timezone(timedelta(hours=-5))),
+        ]
+        results = []
+        for market, sym, tz in checks:
+            local_time = datetime.now(tz).strftime("%H:%M")
+            try:
+                info = yf.Ticker(sym).info
+                state = info.get("marketState", "UNKNOWN")
+                results.append(f"{market}:{state}@{local_time}")
+            except Exception as e:
+                results.append(f"{market}:ERR@{local_time}")
+        return "|".join(results)
+
     # ---- Dynamic tool creation -------------------------------------------
 
     async def create_tool(name: str, description: str, code: str) -> str:
@@ -565,6 +598,15 @@ def build_agent_tools(
             name="request_wakeup",
             description="Control when this agent runs next. Agent decides its own cycle timing.",
             args_schema=RequestWakeupInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=get_market_status,
+            name="get_market_status",
+            description=(
+                "Query real-time market session state: REGULAR|PRE|POST|POSTPOST|CLOSED. "
+                "Check this first to decide whether and where to trade. "
+                "PRE/POST = time-extended trading available. Do not assume market is closed."
+            ),
         ),
         StructuredTool.from_function(
             coroutine=create_tool,
