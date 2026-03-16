@@ -25,6 +25,8 @@ class TradeModel(Base):
     quantity: Mapped[float] = mapped_column(DECIMAL(20, 8), nullable=False)
     price: Mapped[float] = mapped_column(DECIMAL(20, 8), nullable=False)
     total_value: Mapped[float] = mapped_column(DECIMAL(20, 4), nullable=False)
+    commission: Mapped[float] = mapped_column(DECIMAL(20, 4), default=0)  # estimated fee
+    net_value: Mapped[float] = mapped_column(DECIMAL(20, 4), default=0)   # total_value ± commission
     thesis: Mapped[str] = mapped_column(Text, default="")  # Investment rationale
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     personality_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)

@@ -139,15 +139,18 @@ def fills(fills_list: list[dict]) -> str:
 def order(result: dict) -> str:
     """Compact order result. ~55% token reduction vs JSON."""
     sd = str(result.get("side", ""))[:1].upper()
-    return (
-        f"oid:{result.get('order_id', '')}"
-        f",sym:{result.get('symbol', '')}"
-        f",sd:{sd}"
-        f",qty:{result.get('quantity', '')}"
-        f",px:{result.get('filled_price', '')}"
-        f",st:{result.get('status', '')}"
-        f",mkt:{result.get('market', '')}"
-    )
+    parts = [
+        f"oid:{result.get('order_id', '')}",
+        f"sym:{result.get('symbol', '')}",
+        f"sd:{sd}",
+        f"qty:{result.get('quantity', '')}",
+        f"px:{result.get('filled_price', '')}",
+        f"st:{result.get('status', '')}",
+        f"mkt:{result.get('market', '')}",
+    ]
+    if result.get("commission"):
+        parts.append(f"fee:{result['commission']:.0f}")
+    return ",".join(parts)
 
 
 def quote(symbol: str, price: float, bid: float | None, ask: float | None, volume: float | None, currency: str) -> str:

@@ -185,6 +185,9 @@ def build_agent_tools(
                 exchange=exchange,
             )
             result = await trading.submit_order(o)
+            trade_value = result.filled_price * result.quantity if result.filled_price else 0
+            from agentic_capital.simulation.recorder import _estimate_commission
+            commission = _estimate_commission(market, trade_value)
             outcome = {
                 "order_id": result.order_id,
                 "symbol": result.symbol,
@@ -193,6 +196,7 @@ def build_agent_tools(
                 "filled_price": result.filled_price,
                 "status": result.status,
                 "market": result.market,
+                "commission": commission,
             }
 
             decisions_sink.append({

@@ -34,6 +34,24 @@ from agentic_capital.infra.models.trade import PositionModel, TradeModel
 
 logger = structlog.get_logger()
 
+# KIS commission rates (estimated, paper trading does not deduct actual fees)
+_COMMISSION_RATES: dict[str, float] = {
+    "kr_stock": 0.00015,   # 0.015% domestic stock
+    "kr_futures": 0.00005, # 0.005% domestic futures
+    "kr_options": 0.00005,
+    "us_stock": 0.0025,    # 0.25% overseas stock
+    "hk_stock": 0.0025,
+    "cn_stock": 0.0025,
+    "jp_stock": 0.0025,
+    "vn_stock": 0.0025,
+}
+
+
+def _estimate_commission(market: str, total_value: float) -> float:
+    """Estimate trading commission. AI uses this for P&L awareness."""
+    rate = _COMMISSION_RATES.get(market, 0.00015)
+    return round(total_value * rate, 4)
+
 
 class SimulationRecorder:
     """Records all simulation events to PostgreSQL."""
@@ -140,6 +158,10 @@ class SimulationRecorder:
             self._session.add(decision_record)
 
             if status in ("submitted", "filled") and decision.action != "HOLD":
+                total_val = price * decision.quantity
+                commission = _estimate_commission(market, total_val)
+                side_sign = -1 if decision.action.upper() == "BUY" else 1
+                net_val = total_val + side_sign * commission  # buy: cost+fee, sell: proceeds-fee
                 trade = TradeModel(
                     simulation_id=self._simulation_id,
                     agent_id=agent_id,
@@ -149,7 +171,9 @@ class SimulationRecorder:
                     order_type="limit" if price > 0 else "market",
                     quantity=decision.quantity,
                     price=price,
-                    total_value=price * decision.quantity,
+                    total_value=total_val,
+                    commission=commission,
+                    net_value=net_val,
                     thesis=decision.reason,
                     confidence=decision.confidence,
                     personality_snapshot=p_snap,
