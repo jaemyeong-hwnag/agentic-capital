@@ -31,15 +31,15 @@ class SubmitOrderInput(BaseModel):
     side: str = Field(description="Trade direction: buy | sell")
     quantity: float = Field(description="Number of shares/units")
     price: float | None = Field(default=None, description="Limit price (omit for market order)")
-    market: str = Field(default="kr_stock", description="Market")
-    exchange: str | None = Field(default=None, description="Exchange code for overseas")
+    market: str = Field(description="Market you choose: kr_stock (KRX stocks+ETFs+leverage ETFs) | us_stock (NYSE/NASDAQ stocks+ETFs+leveraged ETFs) | kr_futures | kr_options | hk_stock | cn_stock | jp_stock | vn_stock")
+    exchange: str | None = Field(default=None, description="Exchange code for overseas (NASD|NYSE|AMEX|SEHK|SHAA|TKSE|HASE)")
 
 
 class CancelOrderInput(BaseModel):
     order_id: str = Field(description="Order ID to cancel")
+    market: str = Field(description="Market: kr_stock | us_stock | kr_futures | kr_options | hk_stock | cn_stock | jp_stock | vn_stock")
     symbol: str = Field(default="", description="Symbol (required for some exchanges)")
     quantity: float = Field(default=0.0, description="Quantity (required for KIS cancel)")
-    market: str = Field(default="kr_stock", description="Market")
 
 
 class SaveMemoryInput(BaseModel):
@@ -164,8 +164,8 @@ def build_agent_tools(
         symbol: str,
         side: str,
         quantity: float,
+        market: str,
         price: float | None = None,
-        market: str = "kr_stock",
         exchange: str | None = None,
     ) -> str:
         """Submit a buy or sell order. Returns compact order result."""
@@ -222,9 +222,9 @@ def build_agent_tools(
 
     async def cancel_order(
         order_id: str,
+        market: str,
         symbol: str = "",
         quantity: float = 0.0,
-        market: str = "kr_stock",
     ) -> str:
         """Cancel a pending order."""
         if not trading:
@@ -349,7 +349,7 @@ def build_agent_tools(
         StructuredTool.from_function(
             coroutine=submit_order,
             name="submit_order",
-            description="Submit a buy or sell order. Use market orders for immediate execution, limit for price control.",
+            description="Submit a buy or sell order. Any instrument: stocks, ETFs, leveraged ETFs, futures, options, derivatives. You decide market, symbol, and price. No restrictions.",
             args_schema=SubmitOrderInput,
         ),
         StructuredTool.from_function(
@@ -379,7 +379,7 @@ def build_agent_tools(
         StructuredTool.from_function(
             coroutine=get_quote,
             name="get_quote",
-            description="Get current price quote for any symbol. KR stocks: 6-digit code (e.g. 005930 for Samsung). US stocks: ticker (e.g. AAPL).",
+            description="Get current price quote for any symbol. KR stocks/ETFs: 6-digit code (e.g. 005930, 069500). US stocks/ETFs: ticker (e.g. AAPL, SPY, TQQQ, SOXL).",
             args_schema=GetQuoteInput,
         ),
         StructuredTool.from_function(

@@ -100,7 +100,7 @@ class TestBuildAgentTools:
         tools, decisions, _, _ = build_agent_tools(trading=trading, agent_name="Trader-1")
         tool = next(t for t in tools if t.name == "submit_order")
         result = await tool.coroutine(
-            symbol="005930", side="buy", quantity=10, price=70000.0
+            symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
         )
         assert "submitted" in result
         assert "005930" in result
@@ -112,7 +112,7 @@ class TestBuildAgentTools:
     async def test_submit_order_no_trading(self):
         tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "submit_order")
-        result = await tool.coroutine(symbol="005930", side="buy", quantity=10)
+        result = await tool.coroutine(symbol="005930", side="buy", quantity=10, market="kr_stock")
         assert result.startswith("ERR:")
 
     @pytest.mark.asyncio
@@ -120,7 +120,7 @@ class TestBuildAgentTools:
         trading = _make_trading()
         tools, _, _, _ = build_agent_tools(trading=trading)
         tool = next(t for t in tools if t.name == "cancel_order")
-        result = await tool.coroutine(order_id="ORDER123")
+        result = await tool.coroutine(order_id="ORDER123", market="kr_stock")
         assert "cancelled:True" in result
         assert "ORDER123" in result
 
