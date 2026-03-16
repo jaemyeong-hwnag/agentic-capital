@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 
 import httpx
@@ -17,6 +19,45 @@ _PAPER_BASE = "https://openapivts.koreainvestment.com:29443"
 
 # KIS 모의투자 rate limit is strict (~1 req/sec for some endpoints)
 _MIN_REQUEST_INTERVAL = 0.35  # 350ms between requests
+
+# Token cache path — persists across process restarts to avoid 1/min rate limit
+_TOKEN_CACHE_PATH = os.path.join(os.path.expanduser("~"), ".cache", "agentic_capital", "kis_token.json")
+_TOKEN_BUFFER_SECS = 300  # Treat token as expired 5 min before actual expiry
+
+
+def _load_cached_token(app_key: str, is_paper: bool) -> str | None:
+    """Load token from file cache if still valid."""
+    try:
+        with open(_TOKEN_CACHE_PATH) as f:
+            data = json.load(f)
+        # Cache is keyed by (app_key prefix + mode) to handle multiple accounts
+        cache_key = f"{app_key[:8]}:{'paper' if is_paper else 'real'}"
+        entry = data.get(cache_key)
+        if not entry:
+            return None
+        expires_at = entry.get("expires_at", 0)
+        if time.time() < expires_at - _TOKEN_BUFFER_SECS:
+            return entry.get("token")
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+    return None
+
+
+def _save_cached_token(app_key: str, is_paper: bool, token: str, expires_in: int = 86400) -> None:
+    """Save token to file cache with expiry timestamp."""
+    try:
+        os.makedirs(os.path.dirname(_TOKEN_CACHE_PATH), exist_ok=True)
+        try:
+            with open(_TOKEN_CACHE_PATH) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        cache_key = f"{app_key[:8]}:{'paper' if is_paper else 'real'}"
+        data[cache_key] = {"token": token, "expires_at": time.time() + expires_in}
+        with open(_TOKEN_CACHE_PATH, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass  # Cache write failure is non-fatal
 
 
 class KISSession:
@@ -43,7 +84,7 @@ class KISSession:
 
         self.base_url = _PAPER_BASE if self.is_paper else _REAL_BASE
         self.client = httpx.AsyncClient(timeout=15.0)
-        self._access_token: str | None = None
+        self._access_token: str | None = _load_cached_token(self.app_key, self.is_paper)
         self._last_request_time: float = 0.0
         self._throttle_lock = asyncio.Lock()
 
@@ -92,6 +133,12 @@ class KISSession:
         """Get or reuse cached access token. Retries on rate limit (1/min)."""
         if self._access_token:
             return self._access_token
+        # Check file cache (populated on previous runs)
+        cached = _load_cached_token(self.app_key, self.is_paper)
+        if cached:
+            self._access_token = cached
+            logger.info("kis_token_reused_from_cache")
+            return self._access_token
 
         max_retries = 3
         for attempt in range(max_retries + 1):
@@ -108,6 +155,8 @@ class KISSession:
                 data = r.json()
                 if "access_token" in data:
                     self._access_token = data["access_token"]
+                    expires_in = int(data.get("expires_in", 86400))
+                    _save_cached_token(self.app_key, self.is_paper, self._access_token, expires_in)
                     logger.info("kis_token_acquired")
                     return self._access_token
 

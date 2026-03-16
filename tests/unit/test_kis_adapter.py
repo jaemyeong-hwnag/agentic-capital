@@ -10,8 +10,11 @@ from agentic_capital.ports.trading import Order, OrderSide, OrderType
 
 
 def _make_session(*, is_paper: bool = True) -> KISSession:
-    """Create a KISSession with mocked settings."""
-    with patch("agentic_capital.adapters.kis_session.settings") as mock_s:
+    """Create a KISSession with mocked settings and no file-cache lookup."""
+    with (
+        patch("agentic_capital.adapters.kis_session.settings") as mock_s,
+        patch("agentic_capital.adapters.kis_session._load_cached_token", return_value=None),
+    ):
         mock_s.kis_app_key = "test-key"
         mock_s.kis_app_secret = "test-secret"
         mock_s.kis_account_no = "5017463701"
@@ -40,7 +43,8 @@ class TestKISSession:
         session.client = MagicMock()
         session.client.post = AsyncMock(return_value=mock_response)
 
-        token = await session.ensure_token()
+        with patch("agentic_capital.adapters.kis_session._save_cached_token"):
+            token = await session.ensure_token()
         assert token == "test-token-123"
 
     @pytest.mark.asyncio
@@ -58,7 +62,12 @@ class TestKISSession:
         session.client = MagicMock()
         session.client.post = AsyncMock(return_value=mock_response)
 
-        with pytest.raises(RuntimeError, match="KIS token failed"):
+        # Patch cache so ensure_token() can't short-circuit via disk cache
+        with (
+            patch("agentic_capital.adapters.kis_session._load_cached_token", return_value=None),
+            patch("agentic_capital.adapters.kis_session._save_cached_token"),
+            pytest.raises(RuntimeError, match="KIS token failed"),
+        ):
             await session.ensure_token()
 
     def test_headers(self):
