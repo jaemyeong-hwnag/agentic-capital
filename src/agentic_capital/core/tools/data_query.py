@@ -202,6 +202,7 @@ def build_agent_tools(
     agent_memory: dict | None = None,
     agents_registry: dict | None = None,  # name → agent_id
     preloaded_tools: list | None = None,   # dynamic tools pre-loaded from DB
+    capital_limit: float | None = None,    # min(KIS balance, ENV) — company operating cap
 ) -> tuple:
     """Build LangChain StructuredTools bound to the given adapters.
 
@@ -222,7 +223,14 @@ def build_agent_tools(
         try:
             from agentic_capital.formats.compact import bal as _bal
             b = await trading.get_balance()
-            return _bal(b.total, b.available, b.currency)
+            # Cap at company operating limit: min(KIS balance, ENV setting)
+            # Reflects actual P&L — shrinks on losses, capped on gains
+            if capital_limit is not None:
+                total = min(b.total, capital_limit)
+                available = min(b.available, capital_limit)
+            else:
+                total, available = b.total, b.available
+            return _bal(total, available, b.currency)
         except Exception as e:
             return f"ERR:{e}"
 

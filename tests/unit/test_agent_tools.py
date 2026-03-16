@@ -71,6 +71,26 @@ class TestBuildAgentTools:
         assert "ccy:KRW" in result
 
     @pytest.mark.asyncio
+    async def test_get_balance_capped_by_capital_limit(self):
+        trading = _make_trading()  # total=10M, available=8M
+        # Capital limit lower than KIS balance → use limit
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=5_000_000)
+        tool = next(t for t in tools if t.name == "get_balance")
+        result = await tool.coroutine()
+        assert "tot:5000000" in result
+        assert "avl:5000000" in result  # available also capped
+
+    @pytest.mark.asyncio
+    async def test_get_balance_kis_lower_than_limit(self):
+        trading = _make_trading()  # total=10M, available=8M
+        # Capital limit higher than KIS balance → use KIS
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=15_000_000)
+        tool = next(t for t in tools if t.name == "get_balance")
+        result = await tool.coroutine()
+        assert "tot:10000000" in result
+        assert "avl:8000000" in result
+
+    @pytest.mark.asyncio
     async def test_get_balance_no_trading(self):
         tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "get_balance")

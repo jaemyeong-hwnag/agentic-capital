@@ -74,6 +74,7 @@ async def run_agent_cycle(
     symbols: list[str] | None = None,
     open_markets: list[str] | None = None,
     recorder: Any = None,
+    capital_limit: float | None = None,
 ) -> dict:
     """Run one autonomous cycle for an agent using ReAct tool-use loop.
 
@@ -108,6 +109,7 @@ async def run_agent_cycle(
         agent_name=agent.name,
         agent_memory=getattr(agent, "_memory", None),
         preloaded_tools=preloaded,
+        capital_limit=capital_limit,
     )
 
     system_prompt = _build_system_prompt(agent)

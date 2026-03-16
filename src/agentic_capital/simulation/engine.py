@@ -45,6 +45,7 @@ class SimulationEngine:
         self._trading = None
         self._market_data = None
         self._recorder = None
+        self._capital_limit: float = float(settings.initial_capital)
 
     def _init_adapters(self) -> None:
         """Initialize all adapters and tracing from settings."""
@@ -153,11 +154,14 @@ class SimulationEngine:
         await self._init_recorder()
 
         balance = await self._trading.get_balance()
+        # Effective capital = min(KIS account, ENV setting) — whichever is smaller
+        self._capital_limit = min(balance.total, settings.initial_capital)
         logger.info(
             "initial_state",
             balance_total=balance.total,
             balance_available=balance.available,
             currency=balance.currency,
+            capital_limit=self._capital_limit,
         )
 
         self._running = True
@@ -207,6 +211,7 @@ class SimulationEngine:
                     market_data=self._market_data,
                     open_markets=open_markets,
                     recorder=self._recorder,
+                    capital_limit=self._capital_limit,
                 )
                 cycle_results.append(result)
 
