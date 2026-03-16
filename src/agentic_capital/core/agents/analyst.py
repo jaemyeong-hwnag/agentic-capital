@@ -19,35 +19,22 @@ from agentic_capital.ports.llm import LLMPort
 logger = structlog.get_logger()
 
 
-ANALYST_SYSTEM_PROMPT = """You are {name}, a market analyst at an autonomous AI investment fund.
-
-philosophy: {philosophy}
-
-personality:
-  openness: {openness:.2f}
-  conscientiousness: {conscientiousness:.2f}
-  neuroticism: {neuroticism:.2f}
-  risk_aversion_gains: {risk_aversion_gains:.2f}
-  probability_weighting: {probability_weighting:.2f}
-
-current_emotion:
-  valence: {valence:.2f}
-  stress: {stress:.2f}
-  confidence: {confidence:.2f}
-
-Your job is to analyze market data and generate trading signals.
-Your personality influences your analysis:
-- High conscientiousness = thorough, detail-oriented analysis
-- High neuroticism = cautious, sees more risks
-- High openness = considers unconventional opportunities
-- Your stress and confidence affect signal strength
-
-Your only goal is helping the fund make money. No other constraints.
-
-RULES:
-- You MUST respond in valid JSON only.
-- Generate clear BUY/SELL/HOLD signals with reasoning.
-- Include confidence level for each signal."""
+def _analyst_system_prompt(name: str, philosophy: str, personality, emotion) -> str:
+    """Compact analyst system prompt. ~75% token reduction vs verbose format."""
+    from agentic_capital.formats.compact import LEGEND, MANDATE, psych
+    p, e = personality, emotion
+    p_str = (
+        f"O:{p.openness:.2f} C:{p.conscientiousness:.2f} N:{p.neuroticism:.2f} "
+        f"RAG:{p.risk_aversion_gains:.2f} PW:{p.probability_weighting:.2f}"
+    )
+    e_str = f"V:{e.valence:.2f} ST:{e.stress:.2f} CF:{e.confidence:.2f}"
+    return (
+        f"{LEGEND}\n"
+        f"<agent name=\"{name}\" role=\"analyst\"><phi>{philosophy}</phi>\n"
+        f"<P>{p_str}</P>\n<E>{e_str}</E></agent>\n"
+        f"{MANDATE}\n"
+        "JSON:{signals:[{sym,sig:BUY|SELL|HOLD,cf:float,why:str}],outlook}"
+    )
 
 
 class AnalystSignal:
@@ -97,17 +84,11 @@ class AnalystAgent(BaseAgent):
         portfolio = context.get("portfolio", {})
         memories = context.get("working_memory", [])
 
-        system = ANALYST_SYSTEM_PROMPT.format(
+        system = _analyst_system_prompt(
             name=self.name,
             philosophy=self.profile.philosophy or "Data-driven analysis for maximum returns",
-            openness=self.personality.openness,
-            conscientiousness=self.personality.conscientiousness,
-            neuroticism=self.personality.neuroticism,
-            risk_aversion_gains=self.personality.risk_aversion_gains,
-            probability_weighting=self.personality.probability_weighting,
-            valence=self.emotion.valence,
-            stress=self.emotion.stress,
-            confidence=self.emotion.confidence,
+            personality=self.personality,
+            emotion=self.emotion,
         )
 
         prompt = self._build_analysis_prompt(
@@ -164,7 +145,7 @@ class AnalystAgent(BaseAgent):
         portfolio: dict,
         memories: list,
     ) -> str:
-        """Build analysis prompt with market context."""
+        """Build compact analysis prompt."""
         parts = []
 
         if market_data:
@@ -172,35 +153,17 @@ class AnalystAgent(BaseAgent):
                 [
                     d.get("symbol", ""),
                     f"{d.get('price', 0):,.0f}",
-                    f"{d.get('change_pct', 0):.2f}%",
+                    f"{d.get('change_pct', 0):.2f}",
                     f"{d.get('volume', 0):,.0f}",
                 ]
                 for d in market_data
             ]
-            parts.append("## Market Data")
-            parts.append(to_toon("market", ["symbol", "price", "change_pct", "volume"], mkt_rows))
+            parts.append(to_toon("mkt", ["sym", "px", "Δ%", "vol"], mkt_rows))
 
         if portfolio:
-            parts.append("\n## Portfolio Context")
             parts.append(to_markdown_kv(portfolio))
 
-        parts.append("""
-## Analysis Required
-
-Analyze each symbol and generate trading signals.
-
-Respond in JSON:
-{
-  "signals": [
-    {
-      "symbol": "005930",
-      "signal": "BUY" | "SELL" | "HOLD",
-      "confidence": 0.0 to 1.0,
-      "thesis": "brief reasoning"
-    }
-  ],
-  "market_outlook": "brief overall assessment"
-}""")
+        parts.append("JSON:{signals:[{sym,sig:BUY|SELL|HOLD,cf:float,why:str}],outlook}")
 
         return "\n".join(parts)
 

@@ -33,10 +33,8 @@ class SimulationEngine:
     def __init__(
         self,
         *,
-        cycle_interval_seconds: int = 300,
         symbols: list[str] | None = None,
     ) -> None:
-        self._cycle_interval = cycle_interval_seconds
         self._symbols = symbols
         self._agents: list[BaseAgent] = []
         self._running = False
@@ -45,7 +43,6 @@ class SimulationEngine:
         # Adapters (initialized in start())
         self._llm = None
         self._trading = None
-        self._market_data = None
         self._recorder = None
 
     def _init_adapters(self) -> None:
@@ -53,13 +50,11 @@ class SimulationEngine:
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
-        from agentic_capital.adapters.market_data.kis import KISMarketDataAdapter
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
 
         self._llm = GeminiLLMAdapter()
         kis_session = KISSession()
         self._trading = KISTradingAdapter(session=kis_session)
-        self._market_data = KISMarketDataAdapter(session=kis_session)
         logger.info("adapters_initialized")
 
     def _init_agents(self) -> None:
@@ -89,7 +84,6 @@ class SimulationEngine:
                 seed=seed + 2,
                 llm=self._llm,
                 trading=self._trading,
-                market_data=self._market_data,
             ),
         ]
 
@@ -119,8 +113,6 @@ class SimulationEngine:
                 seed=settings.simulation_seed,
                 initial_capital=settings.initial_capital,
                 config={
-                    "cycle_interval": self._cycle_interval,
-                    "symbols": self._symbols or [],
                     "agents": [a.name for a in self._agents],
                 },
             )
@@ -141,19 +133,19 @@ class SimulationEngine:
             self._recorder = None
 
     async def start(self) -> None:
-        """Start the simulation loop."""
+        """Start the simulation loop.
+
+        Agents control their own timing via request_wakeup().
+        System only provides trade execution — agents decide everything else.
+        """
         logger.info(
             "simulation_starting",
             initial_capital=settings.initial_capital,
             seed=settings.simulation_seed,
-            cycle_interval=self._cycle_interval,
         )
 
         self._init_adapters()
         self._init_agents()
-
-        if not self._symbols:
-            self._symbols = await self._market_data.get_symbols()
 
         await self._init_recorder()
 
@@ -163,22 +155,20 @@ class SimulationEngine:
             balance_total=balance.total,
             balance_available=balance.available,
             currency=balance.currency,
-            symbols=self._symbols[:5],
         )
 
         self._running = True
         try:
             while self._running:
-                await self._run_cycle()
+                next_delay = await self._run_cycle()
 
-                if self._running:
+                if self._running and next_delay > 0:
                     logger.info(
                         "cycle_sleeping",
-                        next_cycle_in=f"{self._cycle_interval}s",
+                        next_cycle_in=f"{next_delay}s",
                         total_cycles=self._cycle_count,
-                        market_open=is_market_open(),
                     )
-                    await asyncio.sleep(self._cycle_interval)
+                    await asyncio.sleep(next_delay)
         except asyncio.CancelledError:
             logger.info("simulation_cancelled")
         finally:
@@ -192,8 +182,12 @@ class SimulationEngine:
         """Signal the simulation to stop."""
         self._running = False
 
-    async def _run_cycle(self) -> None:
-        """Run one complete cycle for all agents using LangGraph."""
+    async def _run_cycle(self) -> int:
+        """Run one complete cycle for all agents using LangGraph.
+
+        Returns minimum next_cycle_seconds across all agents (0 = run immediately).
+        Agents control timing via request_wakeup() tool.
+        """
         self._cycle_count += 1
         market_open = is_market_open()
         open_markets = get_open_markets()
@@ -201,19 +195,18 @@ class SimulationEngine:
 
         # Run each agent through LangGraph workflow
         cycle_results = []
-        for agent in list(self._agents):  # Copy list — CEO might modify roster
+        for agent in list(self._agents):  # Copy list — any agent might modify roster
             try:
                 result = await run_agent_cycle(
                     agent,
                     cycle_number=self._cycle_count,
                     trading=self._trading,
-                    market_data=self._market_data,
-                    symbols=self._symbols,
+                    open_markets=open_markets,
                     recorder=self._recorder,
                 )
                 cycle_results.append(result)
 
-                # Process CEO organizational actions
+                # Process organizational actions — any agent can propose
                 await self._process_org_actions(agent, result)
 
             except Exception:
@@ -238,24 +231,26 @@ class SimulationEngine:
             except Exception:
                 logger.exception("snapshot_recording_failed")
 
+        # Collect agent-requested delays — use minimum (most urgent wins)
+        delays = [r.get("next_cycle_seconds", 0) for r in cycle_results if r]
+        next_delay = min(delays) if delays else 0
+
         logger.info(
             "cycle_complete",
             cycle=self._cycle_count,
             agents_count=len(self._agents),
             total_decisions=sum(len(r.get("decisions", [])) for r in cycle_results),
+            next_cycle_in=f"{next_delay}s",
         )
+
+        return next_delay
 
     async def _process_org_actions(self, agent: BaseAgent, result: dict) -> None:
         """Process organizational actions from any agent's decisions.
 
-        CEO (or any agent with authority) can hire, fire, create roles, etc.
-        System executes these actions and records everything.
+        Any agent can propose org actions — AI decides who has authority.
+        System executes what agents decide and records everything.
         """
-        from agentic_capital.core.agents.ceo import CEOAgent
-
-        if not isinstance(agent, CEOAgent):
-            return
-
         for decision in result.get("decisions", []):
             if not isinstance(decision, dict):
                 continue
@@ -292,7 +287,6 @@ class SimulationEngine:
             kwargs = {"role": role, "name": name, "llm": self._llm, "personality": personality}
             if role.lower() == "trader":
                 kwargs["trading"] = self._trading
-                kwargs["market_data"] = self._market_data
 
             new_agent = create_agent(
                 allocated_capital=capital,

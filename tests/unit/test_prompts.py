@@ -1,4 +1,4 @@
-"""Unit tests for prompt templates."""
+"""Unit tests for compact prompt templates."""
 
 import pytest
 
@@ -18,29 +18,29 @@ class TestSystemPrompt:
         assert "Alpha" in prompt
         assert "trader" in prompt
         assert "aggressive" in prompt
-        assert "openness:" in prompt
-        assert "loss_aversion:" in prompt
+        assert "O:" in prompt       # compact Big5 abbreviation
+        assert "LA:" in prompt      # compact loss_aversion
 
     def test_includes_emotion(self):
         p = PersonalityVector()
         e = EmotionState(valence=0.8, stress=0.2)
         prompt = build_system_prompt("Beta", "analyst", "", p, e)
-        assert "valence: 0.80" in prompt
-        assert "stress: 0.20" in prompt
+        assert "V:0.80" in prompt   # compact valence
+        assert "ST:0.20" in prompt  # compact stress
 
     def test_default_philosophy(self):
         prompt = build_system_prompt("X", "trader", "", PersonalityVector(), EmotionState())
-        assert "Maximize returns" in prompt
+        assert "maximize returns" in prompt
 
     def test_json_instruction(self):
         prompt = build_system_prompt("X", "trader", "", PersonalityVector(), EmotionState())
-        assert "JSON" in prompt
+        assert "GOAL=profit" in prompt
 
 
 class TestTradingPrompt:
     def test_includes_balance(self):
         prompt = build_trading_prompt(1_000_000, [], [], [])
-        assert "1,000,000" in prompt
+        assert "avl:1000000" in prompt   # compact balance
 
     def test_includes_positions(self):
         positions = [
@@ -48,12 +48,12 @@ class TestTradingPrompt:
         ]
         prompt = build_trading_prompt(500_000, positions, [], [])
         assert "005930" in prompt
-        assert "@positions" in prompt
+        assert "@pos" in prompt          # compact TOON name
 
     def test_includes_market_data(self):
         mkt = [{"symbol": "005930", "price": 72000, "change_pct": 1.5, "volume": 5000000}]
         prompt = build_trading_prompt(500_000, [], mkt, [])
-        assert "@market" in prompt
+        assert "@mkt" in prompt          # compact TOON name
         assert "005930" in prompt
 
     def test_includes_memories(self):
@@ -73,11 +73,11 @@ class TestCeoPrompt:
         prompt = build_ceo_prompt(
             [], {"total_capital": 10_000_000, "total_agents": 3, "daily_pnl_pct": 1.5}, []
         )
-        assert "10,000,000" in prompt
+        assert "cap:10000000" in prompt  # compact capital
         assert "hire" in prompt
 
     def test_includes_agents(self):
         agents = [{"name": "Alpha", "role": "trader", "capital": 1_000_000, "pnl_pct": 2.5}]
         prompt = build_ceo_prompt(agents, {"total_capital": 0, "total_agents": 1, "daily_pnl_pct": 0}, [])
         assert "Alpha" in prompt
-        assert "@agents" in prompt
+        assert "@ag" in prompt           # compact TOON name

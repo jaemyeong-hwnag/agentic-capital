@@ -6,6 +6,7 @@ import structlog
 
 from agentic_capital.ports.trading import (
     Balance,
+    Market,
     Order,
     OrderResult,
     OrderSide,
@@ -82,6 +83,8 @@ class PaperTradingAdapter(TradingPort):
                     current_price=fill_price,
                     unrealized_pnl=0.0,
                     unrealized_pnl_pct=0.0,
+                    market=order.market,
+                    exchange=order.exchange,
                 )
             else:
                 self._positions[order.symbol] = Position(
@@ -91,6 +94,8 @@ class PaperTradingAdapter(TradingPort):
                     current_price=fill_price,
                     unrealized_pnl=0.0,
                     unrealized_pnl_pct=0.0,
+                    market=order.market,
+                    exchange=order.exchange,
                 )
         else:  # SELL
             if order.symbol not in self._positions:

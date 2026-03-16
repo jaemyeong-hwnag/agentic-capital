@@ -29,6 +29,7 @@ class BaseAgent(ABC):
         self.profile = profile
         self.personality = personality
         self.emotion = EmotionState()
+        self._memory: dict = {}  # Persistent in-session memory for save_memory/search_memory tools
 
     @abstractmethod
     async def think(self, context: dict[str, object]) -> dict[str, object]:

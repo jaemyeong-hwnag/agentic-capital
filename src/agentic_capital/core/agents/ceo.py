@@ -25,37 +25,23 @@ from agentic_capital.ports.llm import LLMPort
 logger = structlog.get_logger()
 
 
-CEO_SYSTEM_PROMPT = """You are {name}, the CEO of an autonomous AI investment fund.
-
-philosophy: {philosophy}
-
-personality:
-  openness: {openness:.2f}
-  conscientiousness: {conscientiousness:.2f}
-  extraversion: {extraversion:.2f}
-  agreeableness: {agreeableness:.2f}
-  neuroticism: {neuroticism:.2f}
-  loss_aversion: {loss_aversion:.2f}
-
-current_emotion:
-  valence: {valence:.2f}
-  stress: {stress:.2f}
-  confidence: {confidence:.2f}
-
-You have FULL AUTONOMY over the organization. You can do anything:
-- Hire agents, fire agents, promote, demote
-- Create/abolish/rename roles
-- Reallocate capital between agents
-- Set or change strategy direction
-- Restructure the entire organization
-- Or do nothing if you judge that's best
-
-Your only goal is making money. Your only constraint is available capital.
-All decisions are yours — no restrictions on what you can do or how.
-Your personality deeply influences your management style.
-
-RULES:
-- You MUST respond in valid JSON only."""
+def _ceo_system_prompt(name: str, philosophy: str, personality, emotion) -> str:
+    """Compact CEO system prompt. ~75% token reduction vs verbose format."""
+    from agentic_capital.formats.compact import LEGEND, MANDATE
+    p, e = personality, emotion
+    p_str = (
+        f"O:{p.openness:.2f} C:{p.conscientiousness:.2f} E:{p.extraversion:.2f} "
+        f"A:{p.agreeableness:.2f} N:{p.neuroticism:.2f} LA:{p.loss_aversion:.2f}"
+    )
+    e_str = f"V:{e.valence:.2f} ST:{e.stress:.2f} CF:{e.confidence:.2f}"
+    return (
+        f"{LEGEND}\n"
+        f"<agent name=\"{name}\" role=\"CEO\"><phi>{philosophy}</phi>\n"
+        f"<P>{p_str}</P>\n<E>{e_str}</E></agent>\n"
+        f"{MANDATE}\n"
+        "act:hire|fire|promote|demote|reallocate|strategy|create_role|abolish_role|noop\n"
+        "JSON:{actions:[{type,target,detail,reason,capital?}],strategy,cf}"
+    )
 
 
 class CEOAction:
@@ -108,18 +94,11 @@ class CEOAgent(BaseAgent):
         company_state = context.get("company_state", {})
         recent_performance = context.get("recent_performance", [])
 
-        system = CEO_SYSTEM_PROMPT.format(
+        system = _ceo_system_prompt(
             name=self.name,
             philosophy=self.profile.philosophy or "Maximize returns through optimal organization",
-            openness=self.personality.openness,
-            conscientiousness=self.personality.conscientiousness,
-            extraversion=self.personality.extraversion,
-            agreeableness=self.personality.agreeableness,
-            neuroticism=self.personality.neuroticism,
-            loss_aversion=self.personality.loss_aversion,
-            valence=self.emotion.valence,
-            stress=self.emotion.stress,
-            confidence=self.emotion.confidence,
+            personality=self.personality,
+            emotion=self.emotion,
         )
 
         prompt = build_ceo_prompt(

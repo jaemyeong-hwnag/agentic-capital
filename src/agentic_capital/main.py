@@ -41,9 +41,7 @@ async def run() -> None:
 
     from agentic_capital.simulation.engine import SimulationEngine
 
-    engine = SimulationEngine(
-        cycle_interval_seconds=300,  # 5분 간격
-    )
+    engine = SimulationEngine()
     await engine.start()
 
 

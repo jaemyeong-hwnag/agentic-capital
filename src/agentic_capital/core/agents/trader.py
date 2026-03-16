@@ -1,60 +1,43 @@
 """Trader Agent — autonomous trade execution.
 
-Traders receive signals from analysts, make final execution decisions,
-and manage orders. Their execution style is driven by personality traits.
+Traders execute trades using any method they choose.
+No methodology constraints — complete autonomy within available capital.
 """
 
 from __future__ import annotations
 
-import orjson
 import structlog
 
 from agentic_capital.core.agents.base import BaseAgent, AgentProfile
-from agentic_capital.core.decision.pipeline import DecisionPipeline, TradingDecision
-from agentic_capital.core.personality.models import EmotionState, PersonalityVector
+from agentic_capital.core.personality.models import PersonalityVector
 from agentic_capital.ports.llm import LLMPort
-from agentic_capital.ports.market_data import MarketDataPort
 from agentic_capital.ports.trading import TradingPort
 
 logger = structlog.get_logger()
 
 
-TRADER_SYSTEM_PROMPT = """You are {name}, a trader at an autonomous AI investment fund.
-
-philosophy: {philosophy}
-
-personality:
-  openness: {openness:.2f}
-  conscientiousness: {conscientiousness:.2f}
-  extraversion: {extraversion:.2f}
-  neuroticism: {neuroticism:.2f}
-  loss_aversion: {loss_aversion:.2f}
-  risk_aversion_gains: {risk_aversion_gains:.2f}
-
-current_emotion:
-  valence: {valence:.2f}
-  stress: {stress:.2f}
-  confidence: {confidence:.2f}
-
-You execute trades based on your own analysis and signals from analysts.
-Your personality influences your trading:
-- High loss_aversion = smaller positions, tighter stops
-- High extraversion = more trades, momentum-following
-- High neuroticism = emotional reactions to P&L
-- High conscientiousness = careful position sizing
-
-Your only goal is making money. Your only constraint is available capital.
-
-RULES:
-- You MUST respond in valid JSON only.
-- Be specific about quantities and reasoning."""
+def _trader_system_prompt(name: str, philosophy: str, personality, emotion) -> str:
+    """Compact trader system prompt. ~75% token reduction vs verbose format."""
+    from agentic_capital.formats.compact import LEGEND, MANDATE
+    p, e = personality, emotion
+    p_str = (
+        f"O:{p.openness:.2f} C:{p.conscientiousness:.2f} E:{p.extraversion:.2f} "
+        f"N:{p.neuroticism:.2f} LA:{p.loss_aversion:.2f} RAG:{p.risk_aversion_gains:.2f}"
+    )
+    e_str = f"V:{e.valence:.2f} ST:{e.stress:.2f} CF:{e.confidence:.2f}"
+    return (
+        f"{LEGEND}\n"
+        f"<agent name=\"{name}\" role=\"trader\"><phi>{philosophy}</phi>\n"
+        f"<P>{p_str}</P>\n<E>{e_str}</E></agent>\n"
+        f"{MANDATE}"
+    )
 
 
 class TraderAgent(BaseAgent):
-    """Trade execution agent with autonomous decision-making.
+    """Trade execution agent with complete autonomy.
 
-    Receives signals, analyzes market conditions, and executes trades.
-    Uses DecisionPipeline for the actual order flow.
+    No methodology constraints. Executes trades via KIS using any approach.
+    Main execution runs through the ReAct tool-use loop in workflow.py.
     """
 
     def __init__(
@@ -63,52 +46,20 @@ class TraderAgent(BaseAgent):
         personality: PersonalityVector,
         llm: LLMPort,
         trading: TradingPort,
-        market_data: MarketDataPort,
     ) -> None:
         super().__init__(profile, personality)
         self._llm = llm
-        self._pipeline = DecisionPipeline(llm=llm, trading=trading, market_data=market_data)
         self._trading = trading
-        self._market_data = market_data
 
     async def think(self, context: dict[str, object]) -> dict[str, object]:
-        """Make trading decisions based on signals and market data.
+        """Autonomous trading decisions — no forced methodology.
 
-        Args:
-            context: Must contain 'symbols'. Optional: 'signals', 'recent_memories'.
-
-        Returns:
-            Dict with 'decisions' (list of TradingDecision) and 'updated_emotion'.
+        Main execution happens via ReAct loop in workflow.py.
         """
-        symbols = context.get("symbols", [])
-        signals = context.get("signals", [])
-        recent_memories = context.get("recent_memories", [])
-
-        # Use DecisionPipeline for the full cycle
-        decisions, updated_emotion = await self._pipeline.run_cycle(
-            agent_name=self.name,
-            agent_role="trader",
-            philosophy=self.profile.philosophy or "Execute trades with precision",
-            personality=self.personality,
-            emotion=self.emotion,
-            symbols=symbols,  # type: ignore[arg-type]
-            recent_memories=recent_memories,  # type: ignore[arg-type]
-        )
-
-        self.emotion = updated_emotion
-
-        return {
-            "decisions": decisions,
-            "updated_emotion": updated_emotion,
-        }
+        return {"decisions": [], "updated_emotion": self.emotion}
 
     async def reflect(self, outcome: dict[str, object]) -> None:
-        """Reflect on outcomes — AI decides how to process experience.
-
-        No system-enforced personality drift or emotion formula.
-        The agent autonomously decides what to feel and how to adapt
-        based on raw data. Data is available — agent decides what to do with it.
-        """
+        """Reflect on outcomes — agent decides autonomously how to adapt."""
         logger.info(
             "trader_reflection",
             agent=self.name,

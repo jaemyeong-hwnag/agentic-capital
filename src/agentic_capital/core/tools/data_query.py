@@ -1,7 +1,8 @@
-"""Data query tools — agents autonomously decide what to query.
+"""Agent tools — account/position queries and order execution for agents.
 
-System provides these tools. Agents decide when and how to use them.
-No restrictions on what data an agent can access.
+System provides only: account queries (balance, positions, fills) and trading (submit/cancel).
+Everything else — research, analysis, market data — the AI figures out on its own.
+No methodology constraints. No trading restrictions. Only limit: available capital.
 """
 
 from __future__ import annotations
@@ -9,24 +10,358 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 logger = structlog.get_logger()
 
 
-class DataQueryTools:
-    """Collection of data query functions available to all agents.
+# ---------------------------------------------------------------------------
+# Input schemas for structured tool calling
+# ---------------------------------------------------------------------------
 
-    Agents autonomously decide which queries to run.
-    System provides access — agents decide what to look at.
+
+class GetFillsInput(BaseModel):
+    start_date: str | None = Field(default=None, description="Start date YYYYMMDD")
+    end_date: str | None = Field(default=None, description="End date YYYYMMDD")
+    symbol: str = Field(default="", description="Filter by symbol (empty = all)")
+
+
+class SubmitOrderInput(BaseModel):
+    symbol: str = Field(description="Ticker symbol to trade")
+    side: str = Field(description="Trade direction: buy | sell")
+    quantity: float = Field(description="Number of shares/units")
+    price: float | None = Field(default=None, description="Limit price (omit for market order)")
+    market: str = Field(default="kr_stock", description="Market")
+    exchange: str | None = Field(default=None, description="Exchange code for overseas")
+
+
+class CancelOrderInput(BaseModel):
+    order_id: str = Field(description="Order ID to cancel")
+    symbol: str = Field(default="", description="Symbol (required for some exchanges)")
+    quantity: float = Field(default=0.0, description="Quantity (required for KIS cancel)")
+    market: str = Field(default="kr_stock", description="Market")
+
+
+class SaveMemoryInput(BaseModel):
+    content: str = Field(description="Memory content to save")
+    keywords: list[str] = Field(default_factory=list, description="Keywords for search")
+
+
+class SearchMemoryInput(BaseModel):
+    query: str = Field(description="Search query")
+    limit: int = Field(default=5, description="Max results")
+
+
+class SendMessageInput(BaseModel):
+    to_agent: str = Field(description="Target agent name or ID")
+    type: str = Field(default="SIG", description="SIG|INSTR|RPT|QRY|ACK|ERR")
+    content: str = Field(default="", description="Compact k:v payload e.g. sym:005930,act:BUY,cf:0.87,why:RSI_OS")
+
+
+class RequestWakeupInput(BaseModel):
+    seconds: int = Field(description="Seconds until next cycle. 0=immediately, 3600=1h, 86400=1d")
+
+
+# ---------------------------------------------------------------------------
+# Tool builder — creates bound tools for a given agent cycle
+# ---------------------------------------------------------------------------
+
+
+def build_agent_tools(
+    *,
+    trading: Any = None,
+    recorder: Any = None,
+    agent_id: str = "",
+    agent_name: str = "",
+    agent_memory: dict | None = None,
+    agents_registry: dict | None = None,  # name → agent_id
+) -> tuple:
+    """Build LangChain StructuredTools bound to the given adapters.
+
+    Provides: account queries (balance, positions, fills) + order execution
+    + request_wakeup so the agent controls its own cycle timing.
+    AI agents handle all other research and analysis autonomously.
+    Returns (tools, decisions_sink, messages_sink, wakeup_sink).
+    """
+    memory = agent_memory if agent_memory is not None else {}
+    decisions_sink: list[dict] = []   # collects all decisions for recording
+    messages_sink: list[dict] = []    # collects outbound messages
+    wakeup_sink: list[int] = []       # agent-requested next cycle delay (seconds)
+
+    # ---- Account query tools (compact AI-to-AI format) -------------------
+
+    async def get_balance() -> str:
+        """Get current account balance (total equity, available cash, currency)."""
+        if not trading:
+            return "ERR:no_trading"
+        try:
+            from agentic_capital.formats.compact import bal as _bal
+            b = await trading.get_balance()
+            return _bal(b.total, b.available, b.currency)
+        except Exception as e:
+            return f"ERR:{e}"
+
+    async def get_positions() -> str:
+        """Get all open positions with quantity, avg price, unrealized P&L."""
+        if not trading:
+            return "@pos[0](sym,qty,avg,cur,pnl,pct,mkt,ccy)"
+        try:
+            from agentic_capital.formats.compact import pos as _pos
+            positions = await trading.get_positions()
+            return _pos([
+                {
+                    "symbol": p.symbol,
+                    "quantity": p.quantity,
+                    "avg_price": p.avg_price,
+                    "current_price": p.current_price,
+                    "unrealized_pnl": p.unrealized_pnl,
+                    "unrealized_pnl_pct": p.unrealized_pnl_pct,
+                    "market": p.market,
+                    "currency": p.currency,
+                }
+                for p in positions
+            ])
+        except Exception as e:
+            return f"ERR:{e}"
+
+    async def get_fills(
+        start_date: str | None = None,
+        end_date: str | None = None,
+        symbol: str = "",
+    ) -> str:
+        """Get order fill history."""
+        if not trading:
+            return "@fills[0](oid,sym,sd,qty,px,st)"
+        try:
+            from agentic_capital.formats.compact import fills as _fills
+            fill_list = await trading.get_fills(start_date=start_date, end_date=end_date, symbol=symbol)
+            return _fills([
+                {
+                    "order_id": f.order_id,
+                    "symbol": f.symbol,
+                    "side": f.side,
+                    "quantity": f.quantity,
+                    "filled_price": f.filled_price,
+                    "status": f.status,
+                }
+                for f in fill_list
+            ])
+        except Exception as e:
+            return f"ERR:{e}"
+
+    # ---- Trading tools ---------------------------------------------------
+
+    async def submit_order(
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float | None = None,
+        market: str = "kr_stock",
+        exchange: str | None = None,
+    ) -> str:
+        """Submit a buy or sell order. Returns compact order result."""
+        if not trading:
+            return "ERR:no_trading"
+        try:
+            from agentic_capital.formats.compact import order as _order
+            from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
+
+            o = Order(
+                symbol=symbol,
+                side=OrderSide(side.lower()),
+                order_type=OrderType.LIMIT if price is not None else OrderType.MARKET,
+                quantity=quantity,
+                price=price,
+                market=Market(market),
+                exchange=exchange,
+            )
+            result = await trading.submit_order(o)
+            outcome = {
+                "order_id": result.order_id,
+                "symbol": result.symbol,
+                "side": result.side,
+                "quantity": result.quantity,
+                "filled_price": result.filled_price,
+                "status": result.status,
+                "market": result.market,
+            }
+
+            decisions_sink.append({
+                "type": "trade",
+                "action": side.upper(),
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": price or result.filled_price,
+                "market": market,
+                "exchange": exchange,
+                "order_id": result.order_id,
+                "status": result.status,
+            })
+
+            logger.info(
+                "agent_order_submitted",
+                agent=agent_name,
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                status=result.status,
+            )
+            return _order(outcome)
+        except Exception as e:
+            logger.exception("agent_submit_order_failed", agent=agent_name, symbol=symbol)
+            return f"ERR:{e}"
+
+    async def cancel_order(
+        order_id: str,
+        symbol: str = "",
+        quantity: float = 0.0,
+        market: str = "kr_stock",
+    ) -> str:
+        """Cancel a pending order."""
+        if not trading:
+            return "ERR:no_trading"
+        try:
+            success = await trading.cancel_order(order_id, symbol=symbol, quantity=quantity, market=market)
+            return f"cancelled:{success},oid:{order_id}"
+        except Exception as e:
+            return f"ERR:{e}"
+
+    # ---- Memory tools ----------------------------------------------------
+
+    async def save_memory(content: str, keywords: list[str] | None = None) -> str:
+        """Save a memory entry for future reference."""
+        import time
+        entry = {
+            "content": content,
+            "keywords": keywords or [],
+            "timestamp": time.time(),
+        }
+        key = f"mem_{len(memory)}"
+        memory[key] = entry
+        return f"saved:1,key:{key}"
+
+    async def search_memory(query: str, limit: int = 5) -> str:
+        """Search agent memory by keyword or content match."""
+        from agentic_capital.formats.compact import mem_entries
+        query_lower = query.lower()
+        results = []
+        for entry in memory.values():
+            content = entry.get("content", "").lower()
+            kws = [k.lower() for k in entry.get("keywords", [])]
+            if query_lower in content or any(query_lower in k for k in kws):
+                results.append(entry)
+            if len(results) >= limit:
+                break
+        return mem_entries(results)
+
+    # ---- Messaging tools -------------------------------------------------
+
+    async def send_message(to_agent: str, type: str = "SIG", content: str = "") -> str:
+        """Send a compact message to another agent.
+
+        content: compact k:v pairs e.g. "sym:005930,act:BUY,cf:0.87,why:RSI_OS"
+        Full wire format: TYPE|FROM|TO|TS|content
+        """
+        from agentic_capital.formats.compact import msg_encode
+        wire = msg_encode(type, agent_name, to_agent, content)
+        msg = {
+            "from": agent_name,
+            "to": to_agent,
+            "type": type,
+            "content": content,
+            "wire": wire,
+        }
+        messages_sink.append(msg)
+        logger.info("agent_message_sent", from_agent=agent_name, to=to_agent, type=type)
+        return "sent:1"
+
+    # ---- Timing control --------------------------------------------------
+
+    async def request_wakeup(seconds: int) -> str:
+        """Request when to be called again. Agent controls its own cycle timing.
+
+        seconds=0: run again immediately
+        seconds=300: wait 5 minutes
+        seconds=3600: wait 1 hour
+        seconds=86400: wait until tomorrow
+        """
+        wakeup_sink.append(max(0, seconds))
+        logger.info("agent_wakeup_requested", agent=agent_name, seconds=seconds)
+        return f"wakeup:{seconds}s"
+
+    # ---- Build tool list -----------------------------------------------
+
+    tools = [
+        StructuredTool.from_function(
+            coroutine=get_balance,
+            name="get_balance",
+            description="Get current account balance (total equity, available cash, currency)",
+        ),
+        StructuredTool.from_function(
+            coroutine=get_positions,
+            name="get_positions",
+            description="Get all open positions with quantity, avg price, unrealized P&L",
+        ),
+        StructuredTool.from_function(
+            coroutine=get_fills,
+            name="get_fills",
+            description="Get order fill history for review",
+            args_schema=GetFillsInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=submit_order,
+            name="submit_order",
+            description="Submit a buy or sell order. Use market orders for immediate execution, limit for price control.",
+            args_schema=SubmitOrderInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=cancel_order,
+            name="cancel_order",
+            description="Cancel a pending order by order ID",
+            args_schema=CancelOrderInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=save_memory,
+            name="save_memory",
+            description="Save analysis, observations, or decisions to memory for future cycles",
+            args_schema=SaveMemoryInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=search_memory,
+            name="search_memory",
+            description="Search previous memories by keyword",
+            args_schema=SearchMemoryInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=send_message,
+            name="send_message",
+            description="Send a message (signal, instruction, report) to another agent",
+            args_schema=SendMessageInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=request_wakeup,
+            name="request_wakeup",
+            description="Control when this agent runs next. Agent decides its own cycle timing.",
+            args_schema=RequestWakeupInput,
+        ),
+    ]
+
+    return tools, decisions_sink, messages_sink, wakeup_sink
+
+
+# ---------------------------------------------------------------------------
+# Legacy class — kept for backward compatibility
+# ---------------------------------------------------------------------------
+
+
+class DataQueryTools:
+    """Legacy data query class for backward compatibility.
+
+    New code should use build_agent_tools() directly.
     """
 
-    def __init__(
-        self,
-        *,
-        trading: Any = None,
-        market_data: Any = None,
-        recorder: Any = None,
-    ) -> None:
+    def __init__(self, *, trading: Any = None, market_data: Any = None, recorder: Any = None) -> None:
         self._trading = trading
         self._market_data = market_data
         self._recorder = recorder
@@ -36,12 +371,8 @@ class DataQueryTools:
         if not self._trading:
             return {"error": "trading adapter not available"}
         try:
-            balance = await self._trading.get_balance()
-            return {
-                "total": balance.total,
-                "available": balance.available,
-                "currency": balance.currency,
-            }
+            bal = await self._trading.get_balance()
+            return {"total": bal.total, "available": bal.available, "currency": bal.currency}
         except Exception as e:
             logger.warning("query_balance_failed", error=str(e))
             return {"error": str(e)}
@@ -93,12 +424,7 @@ class DataQueryTools:
                 results.append(result)
         return results
 
-    async def query_ohlcv(
-        self,
-        symbol: str,
-        timeframe: str = "1d",
-        limit: int = 30,
-    ) -> list[dict]:
+    async def query_ohlcv(self, symbol: str, timeframe: str = "1d", limit: int = 30) -> list[dict]:
         """Query historical OHLCV candles."""
         if not self._market_data:
             return []
@@ -130,51 +456,19 @@ class DataQueryTools:
             return []
 
     def get_tool_descriptions(self) -> list[dict]:
-        """Return tool descriptions for LLM function calling.
-
-        These descriptions are provided to agents so they can
-        autonomously decide which tools to use.
-        """
+        """Return tool descriptions for LLM function calling."""
         return [
-            {
-                "name": "query_balance",
-                "description": "Get current account balance (total, available, currency)",
-                "parameters": {},
-            },
-            {
-                "name": "query_positions",
-                "description": "Get all open positions with P&L",
-                "parameters": {},
-            },
-            {
-                "name": "query_quote",
-                "description": "Get current price for a symbol",
-                "parameters": {"symbol": "string — ticker symbol"},
-            },
-            {
-                "name": "query_quotes",
-                "description": "Get current prices for multiple symbols",
-                "parameters": {"symbols": "list[string] — ticker symbols"},
-            },
-            {
-                "name": "query_ohlcv",
-                "description": "Get historical price candles (OHLCV)",
-                "parameters": {
-                    "symbol": "string — ticker symbol",
-                    "timeframe": "string — candle period (1m/5m/1h/1d), default 1d",
-                    "limit": "int — number of candles, default 30",
-                },
-            },
-            {
-                "name": "query_symbols",
-                "description": "Get all available trading symbols",
-                "parameters": {},
-            },
+            {"name": "query_balance", "description": "Get current account balance", "parameters": {}},
+            {"name": "query_positions", "description": "Get all open positions with P&L", "parameters": {}},
+            {"name": "query_quote", "description": "Get current price for a symbol", "parameters": {"symbol": "string"}},
+            {"name": "query_quotes", "description": "Get current prices for multiple symbols", "parameters": {"symbols": "list[string]"}},
+            {"name": "query_ohlcv", "description": "Get historical OHLCV candles", "parameters": {"symbol": "string", "timeframe": "string", "limit": "int"}},
+            {"name": "query_symbols", "description": "Get all available trading symbols", "parameters": {}},
         ]
 
     async def execute_tool(self, tool_name: str, **kwargs: Any) -> Any:
-        """Execute a tool by name — agents call this autonomously."""
-        tools = {
+        """Execute a tool by name."""
+        tools_map = {
             "query_balance": self.query_balance,
             "query_positions": self.query_positions,
             "query_quote": self.query_quote,
@@ -182,9 +476,7 @@ class DataQueryTools:
             "query_ohlcv": self.query_ohlcv,
             "query_symbols": self.query_symbols,
         }
-
-        tool = tools.get(tool_name)
+        tool = tools_map.get(tool_name)
         if not tool:
             return {"error": f"Unknown tool: {tool_name}"}
-
         return await tool(**kwargs)
