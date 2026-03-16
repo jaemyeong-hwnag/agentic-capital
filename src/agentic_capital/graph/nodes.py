@@ -66,6 +66,8 @@ async def record_cycle(
                         personality=agent.personality,
                         emotion=agent.emotion,
                         status=d.get("status", "executed"),
+                        price=float(d.get("price") or 0.0),
+                        market=d.get("market", "kr_stock"),
                     )
                 except Exception:
                     logger.warning("trade_decision_record_failed", decision=d)

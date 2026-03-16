@@ -113,8 +113,7 @@ class KISTradingAdapter(TradingPort):
     def _assert_real_for_overseas(self) -> None:
         if self._session.is_paper:
             raise NotImplementedError(
-                "KIS paper trading (모의투자) does not support overseas stock orders. "
-                "Switch to a real trading account (KIS_IS_PAPER=false)."
+                "ERR:paper_no_overseas|KIS_IS_PAPER=true blocks overseas orders|set KIS_IS_PAPER=false for real account"
             )
 
     # ── Balance ───────────────────────────────────────────────────────────────
