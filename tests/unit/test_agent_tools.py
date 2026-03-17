@@ -301,24 +301,24 @@ class TestBuildAgentTools:
         assert "Risk-Alpha" in policy
 
     @pytest.mark.asyncio
-    async def test_position_policy_blocks_oversized_order(self):
+    async def test_position_policy_no_longer_enforced(self):
+        """Position policy is informational only — system does NOT block orders based on it.
+        Only capital hard limit is enforced. AI agents self-regulate based on policy info.
+        """
         from agentic_capital.core.tools import data_query as dq
-        # Reset policy first
         dq._POSITION_POLICY["max_per_trade_pct"] = 0.20
         dq._POSITION_POLICY["set_by"] = "Risk-Alpha"
 
         trading = _make_trading()  # available=8_000_000
         tools, _, _, _ = build_agent_tools(trading=trading, agent_name="Trader-X")
-        set_tool = next(t for t in tools if t.name == "set_position_policy")
-        await set_tool.coroutine(max_per_trade_pct=0.20)
-
         submit_tool = next(t for t in tools if t.name == "submit_order")
-        # 8_000_000 * 20% = 1_600_000 max. 100 × 70000 = 7_000_000 → blocked
+
+        # 100 × 70000 = 7_000_000 — exceeds 20% policy but system allows it
         result = await submit_tool.coroutine(
             symbol="005930", side="buy", quantity=100, price=70000.0, market="kr_stock"
         )
-        assert result.startswith("ERR:position_policy")
-        assert "20%" in result
+        # Should NOT be blocked by position policy (only capital limit enforced)
+        assert not result.startswith("ERR:position_policy")
 
         # Reset policy
         dq._POSITION_POLICY["max_per_trade_pct"] = None
@@ -332,7 +332,7 @@ class TestBuildAgentTools:
         await set_tool.coroutine(max_per_trade_pct=0.20)  # max 1_600_000
 
         submit_tool = next(t for t in tools if t.name == "submit_order")
-        # 10 × 70000 = 700_000 < 1_600_000 → allowed
+        # 10 × 70000 = 700_000 — allowed regardless of policy
         result = await submit_tool.coroutine(
             symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
         )

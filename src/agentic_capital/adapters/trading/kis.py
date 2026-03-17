@@ -37,6 +37,7 @@ logger = structlog.get_logger()
 # ── Domestic stock TR IDs ─────────────────────────────────────────────────────
 _KR_TR = {
     "balance":       {"real": "TTTC8434R", "paper": "VTTC8434R"},
+    "orderable":     {"real": "TTTC8908R", "paper": "VTTC8908R"},  # 주식매수가능조회
     "order_buy":     {"real": "TTTC0802U", "paper": "VTTC0802U"},
     "order_sell":    {"real": "TTTC0801U", "paper": "VTTC0801U"},
     "order_cancel":  {"real": "TTTC0803U", "paper": "VTTC0803U"},
@@ -118,6 +119,36 @@ class KISTradingAdapter(TradingPort):
 
     # ── Balance ───────────────────────────────────────────────────────────────
 
+    async def _get_orderable_cash(self) -> float | None:
+        """Query actual orderable cash via TTTC8908R (주식매수가능조회).
+
+        This returns the true order-eligible amount after T+2 unsettled deductions,
+        which is not available in the standard balance endpoint.
+        Returns None on failure (caller falls back to dnca_tot_amt).
+        """
+        try:
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+                headers=self._session.headers(self._kr_tr("orderable")),
+                params={
+                    "CANO": self._session.cano,
+                    "ACNT_PRDT_CD": self._session.prdt_cd,
+                    "PDNO": "005930",   # dummy symbol — we only care about cash amount
+                    "ORD_UNPR": "0",    # 0 = 시장가 기준
+                    "ORD_DVSN": "01",   # 시장가
+                    "CMA_EVLU_AMT_ICLD_YN": "N",
+                    "OVRS_ICLD_YN": "N",
+                },
+            )
+            data = r.json()
+            if data.get("rt_cd") != "0":
+                return None
+            output = data.get("output", {})
+            ord_psbl = output.get("ord_psbl_cash_amt") or output.get("nrcvb_buy_amt")
+            return float(ord_psbl) if ord_psbl else None
+        except Exception:
+            return None
+
     async def get_balance(self) -> Balance:
         """Get domestic account balance (KRW).
 
@@ -148,15 +179,30 @@ class KISTradingAdapter(TradingPort):
 
             o2 = data.get("output2", [{}])
             info = o2[0] if o2 else {}
-            total = float(info.get("tot_evlu_amt", 0))
-            # ord_psbl_cash_amt = 주문가능현금 (실제 주문가능금액, T+2 정산 반영)
-            # dnca_tot_amt = 예수금총금액 (미결제 포함 총합, 주문가능 != 예수금)
-            available = float(info.get("ord_psbl_cash_amt") or info.get("dnca_tot_amt", 0))
+
+            # nass_amt = 순자산금액 (현금 + 주식 평가금액 합산 — 실제 총자산)
+            # tot_evlu_amt = 총평가금액 (포지션 없으면 0이 될 수 있어 단독 사용 부적합)
+            nass = float(info.get("nass_amt") or 0)
+            evlu = float(info.get("tot_evlu_amt") or 0)
+            total = nass if nass > 0 else evlu
+
+            # Try TTTC8908R for true orderable cash (T+2 settlement-adjusted)
+            orderable = await self._get_orderable_cash()
+
+            # Fallback priority: 주식매수가능조회 > ord_psbl_cash_amt > dnca_tot_amt
+            # nxdy_excc_amt = 익일정산금액 (T+2 기준 출금가능금액, available의 좋은 대안)
+            available = orderable or float(
+                info.get("ord_psbl_cash_amt")
+                or info.get("nxdy_excc_amt")
+                or info.get("dnca_tot_amt")
+                or 0
+            )
 
             logger.debug(
                 "kis_balance_fetched",
                 total=total,
                 available=available,
+                orderable_api=orderable,
                 dnca_tot=info.get("dnca_tot_amt"),
                 ord_psbl=info.get("ord_psbl_cash_amt"),
                 thdt_buy=info.get("thdt_buy_amt"),

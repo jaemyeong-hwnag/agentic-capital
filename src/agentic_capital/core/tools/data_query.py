@@ -343,32 +343,19 @@ def build_agent_tools(
             from agentic_capital.formats.compact import order as _order
             from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
-            # Guard: BUY orders must not exceed available capital or position policy
+            # Capital hard limit only — the ONLY system-imposed constraint
+            # Position policy is AI-decided and informational only (not enforced here)
             if side.lower() == "buy" and price and price > 0:
                 order_value = price * quantity
                 b = await trading.get_balance()
                 effective_available = min(b.available, capital_limit) if capital_limit else b.available
 
-                # Capital hard limit
                 if order_value > effective_available:
                     return (
                         f"ERR:insufficient_capital|"
                         f"need:{order_value:.0f}|avl:{effective_available:.0f}|"
                         f"max_qty:{int(effective_available // price)}"
                     )
-
-                # Position policy soft limit (set by CEO/risk_manager)
-                max_pct = _POSITION_POLICY.get("max_per_trade_pct")
-                if max_pct:
-                    max_allowed = effective_available * max_pct
-                    if order_value > max_allowed:
-                        set_by = _POSITION_POLICY.get("set_by", "policy")
-                        return (
-                            f"ERR:position_policy|"
-                            f"need:{order_value:.0f}|max_allowed:{max_allowed:.0f}|"
-                            f"max_qty:{int(max_allowed // price)}|"
-                            f"limit:{max_pct:.0%}_per_trade|set_by:{set_by}"
-                        )
 
             o = Order(
                 symbol=symbol,
@@ -798,10 +785,9 @@ def build_agent_tools(
             coroutine=set_position_policy,
             name="set_position_policy",
             description=(
-                "Set position sizing policy for ALL agents. Enforced automatically in every order. "
-                "CEO or risk_manager should call this to prevent over-concentration. "
-                "Example: set_position_policy(0.2) → each trade ≤20% of available cash. "
-                "Call get_position_policy to check current limits."
+                "Record position sizing policy (max % per trade, per symbol). "
+                "Other agents can read this via get_position_policy to self-regulate. "
+                "Example: set_position_policy(0.2) → max_per_trade=20% of capital."
             ),
         ),
         StructuredTool.from_function(
