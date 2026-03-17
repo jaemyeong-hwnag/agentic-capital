@@ -59,6 +59,8 @@ class Balance(BaseModel):
     total: float
     available: float
     currency: str = "USD"
+    daily_pnl: float = 0.0      # today's P&L (positive = profit, negative = loss)
+    daily_fee: float = 0.0      # today's commissions + taxes paid
 
 
 class Position(BaseModel):

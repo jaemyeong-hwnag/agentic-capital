@@ -103,9 +103,13 @@ def psych(personality, emotion) -> str:
     return f"<P>{p_str}</P>\n<E>{e_str}</E>"
 
 
-def bal(total: float, available: float, currency: str) -> str:
-    """Compact balance. ~60% token reduction vs JSON."""
-    return f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
+def bal(total: float, available: float, currency: str,
+        daily_pnl: float = 0.0, daily_fee: float = 0.0) -> str:
+    """Compact balance with daily P&L visibility."""
+    base = f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
+    if daily_pnl != 0.0 or daily_fee != 0.0:
+        base += f",pnl_today:{daily_pnl:.0f},fee_today:{daily_fee:.0f}"
+    return base
 
 
 def pos(positions: list[dict]) -> str:

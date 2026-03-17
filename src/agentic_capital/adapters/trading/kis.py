@@ -198,11 +198,17 @@ class KISTradingAdapter(TradingPort):
                 or 0
             )
 
+            # 오늘 P&L: asst_icdc_amt (자산증감금액), 수수료+세금: thdt_tlex_amt
+            daily_pnl = float(info.get("asst_icdc_amt") or 0)
+            daily_fee = float(info.get("thdt_tlex_amt") or 0)
+
             logger.debug(
                 "kis_balance_fetched",
                 total=total,
                 available=available,
                 orderable_api=orderable,
+                daily_pnl=daily_pnl,
+                daily_fee=daily_fee,
                 dnca_tot=info.get("dnca_tot_amt"),
                 ord_psbl=info.get("ord_psbl_cash_amt"),
                 thdt_buy=info.get("thdt_buy_amt"),
@@ -212,7 +218,8 @@ class KISTradingAdapter(TradingPort):
                 nass=info.get("nass_amt"),
                 all_keys=list(info.keys()) if info else [],
             )
-            return Balance(total=total, available=available, currency="KRW")
+            return Balance(total=total, available=available, currency="KRW",
+                           daily_pnl=daily_pnl, daily_fee=daily_fee)
         except Exception:
             logger.exception("kis_get_balance_failed")
             raise

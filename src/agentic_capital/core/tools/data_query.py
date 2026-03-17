@@ -270,7 +270,7 @@ def build_agent_tools(
                 available = min(b.available, capital_limit)
             else:
                 total, available = b.total, b.available
-            return _bal(total, available, b.currency)
+            return _bal(total, available, b.currency, b.daily_pnl, b.daily_fee)
         except Exception as e:
             return f"ERR:{e}"
 

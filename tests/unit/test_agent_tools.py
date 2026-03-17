@@ -10,7 +10,8 @@ from agentic_capital.core.tools.data_query import build_agent_tools
 def _make_trading():
     trading = MagicMock()
     trading.get_balance = AsyncMock(
-        return_value=MagicMock(total=10_000_000, available=8_000_000, currency="KRW")
+        return_value=MagicMock(total=10_000_000, available=8_000_000, currency="KRW",
+                               daily_pnl=0.0, daily_fee=0.0)
     )
     trading.get_positions = AsyncMock(return_value=[
         MagicMock(
