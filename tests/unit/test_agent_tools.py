@@ -226,7 +226,27 @@ class TestBuildAgentTools:
         assert "KRX" in result
         assert "NASDAQ" in result
         assert "NYSE" in result
-        assert "POSTPOST" in result
+        # POSTPOST is normalized → POST (not tradeable extended hours)
+        assert "POST" in result
+        assert "POSTPOST" not in result
+
+    @pytest.mark.asyncio
+    async def test_get_market_status_prepre_normalized(self):
+        """PREPRE (before 04:00 ET) must be normalized to CLOSED."""
+        from unittest.mock import patch, MagicMock
+        tools, _, _, _ = build_agent_tools()
+        tool = next(t for t in tools if t.name == "get_market_status")
+
+        mock_info = {"marketState": "PREPRE"}
+        mock_ticker = MagicMock()
+        mock_ticker.info = mock_info
+
+        with patch("yfinance.Ticker", return_value=mock_ticker):
+            result = await tool.coroutine()
+
+        # PREPRE must be treated as CLOSED
+        assert "CLOSED" in result
+        assert "PREPRE" not in result
 
     @pytest.mark.asyncio
     async def test_submit_order_blocked_when_exceeds_capital(self):

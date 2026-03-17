@@ -525,13 +525,10 @@ def build_agent_tools(
         """Query real-time market session state across major exchanges.
 
         Returns current session state per market:
-          REGULAR  = regular trading hours (매매 가능)
-          PRE      = pre-market / 장전 시간외
-          POST     = after-hours / 장후 시간외
-          POSTPOST = extended after-hours
-          CLOSED   = closed
-
-        Use this to decide when and where to trade — do NOT assume market is closed.
+          REGULAR  = regular trading hours
+          PRE      = pre-market (04:00-09:30 ET / 17:00-22:30 KST)
+          POST     = after-hours (16:00-20:00 ET / 05:00-09:00 KST next day)
+          CLOSED   = closed (weekend, holiday, or outside all sessions)
         """
         import yfinance as yf
         from datetime import datetime
@@ -539,6 +536,12 @@ def build_agent_tools(
 
         KST = ZoneInfo("Asia/Seoul")
         ET = ZoneInfo("America/New_York")  # DST-aware
+
+        # yfinance raw → normalized state
+        # PREPRE = before pre-market opens (01:00-04:00 ET) → not tradeable
+        # POSTPOST = very late after-hours → treat same as POST
+        def _normalize(raw: str) -> str:
+            return {"PREPRE": "CLOSED", "POSTPOST": "POST"}.get(raw, raw)
 
         checks = [
             ("KRX",    "^KS11",  KST),
@@ -550,7 +553,7 @@ def build_agent_tools(
             local_time = datetime.now(tz).strftime("%H:%M")
             try:
                 info = yf.Ticker(sym).info
-                state = info.get("marketState", "UNKNOWN")
+                state = _normalize(info.get("marketState", "CLOSED"))
                 results.append(f"{market}:{state}@{local_time}")
             except Exception:
                 results.append(f"{market}:ERR@{local_time}")
@@ -774,9 +777,9 @@ def build_agent_tools(
             coroutine=get_market_status,
             name="get_market_status",
             description=(
-                "Query real-time market session state: REGULAR|PRE|POST|POSTPOST|CLOSED. "
-                "Check this first to decide whether and where to trade. "
-                "PRE/POST = time-extended trading available. Do not assume market is closed."
+                "Query real-time market session state per exchange. "
+                "Returns REGULAR|PRE|POST|CLOSED with local exchange time. "
+                "PRE = pre-market (04:00-09:30 ET), POST = after-hours (16:00-20:00 ET)."
             ),
         ),
         StructuredTool.from_function(
