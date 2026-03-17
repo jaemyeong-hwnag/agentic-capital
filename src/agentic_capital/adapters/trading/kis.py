@@ -149,7 +149,9 @@ class KISTradingAdapter(TradingPort):
             o2 = data.get("output2", [{}])
             info = o2[0] if o2 else {}
             total = float(info.get("tot_evlu_amt", 0))
-            available = float(info.get("dnca_tot_amt", 0))
+            # ord_psbl_cash_amt = 주문가능현금 (실제 주문가능금액, T+2 정산 반영)
+            # dnca_tot_amt = 예수금총금액 (미결제 포함 총합, 주문가능 != 예수금)
+            available = float(info.get("ord_psbl_cash_amt") or info.get("dnca_tot_amt", 0))
 
             logger.debug("kis_balance_fetched", total=total, available=available)
             return Balance(total=total, available=available, currency="KRW")
