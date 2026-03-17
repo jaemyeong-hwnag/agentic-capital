@@ -450,6 +450,33 @@ class SimulationRecorder:
             for t in result.scalars().all()
         ]
 
+    async def get_position_owner(
+        self,
+        symbol: str,
+        active_agent_ids: set[uuid.UUID],
+    ) -> uuid.UUID | None:
+        """Return the active agent who last traded a given symbol.
+
+        Looks up the most recent trade for the symbol and checks if that
+        agent is still in the active roster. Returns None if the original
+        trader is gone (caller should reassign to a fallback agent).
+        """
+        from sqlalchemy import select
+        from agentic_capital.infra.models.trade import TradeModel
+
+        stmt = (
+            select(TradeModel.agent_id, TradeModel.executed_at)
+            .where(TradeModel.symbol == symbol)
+            .order_by(TradeModel.executed_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        row = result.first()
+        if row is None:
+            return None
+        agent_id = row[0]
+        return agent_id if agent_id in active_agent_ids else None
+
     async def get_last_positions(self) -> list[dict]:
         """Fetch the most recent position snapshot per symbol from DB.
 

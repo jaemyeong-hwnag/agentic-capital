@@ -459,9 +459,22 @@ class SimulationEngine:
             else:
                 logger.info("position_reconciliation_ok", positions=len(real_by_symbol))
 
-            # Record real positions as authoritative snapshot (agent[0] = CEO as owner)
-            owner_id = self._agents[0].agent_id if self._agents else None
+            # Resolve position owner per symbol:
+            # - use the agent who last traded that symbol (if still active)
+            # - fall back to any active agent if original trader is gone
+            active_ids = {a.agent_id for a in self._agents}
+            fallback_id = self._agents[0].agent_id if self._agents else None
+
             for pos in real_positions:
+                owner_id = await self._recorder.get_position_owner(pos.symbol, active_ids)
+                if owner_id is None:
+                    owner_id = fallback_id
+                    if fallback_id:
+                        logger.info(
+                            "position_owner_reassigned",
+                            symbol=pos.symbol,
+                            new_owner=str(fallback_id),
+                        )
                 await self._recorder.record_position_snapshot(
                     agent_id=owner_id,
                     symbol=pos.symbol,
