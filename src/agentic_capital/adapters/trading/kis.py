@@ -198,8 +198,15 @@ class KISTradingAdapter(TradingPort):
                 or 0
             )
 
-            # 오늘 P&L: asst_icdc_amt (자산증감금액), 수수료+세금: thdt_tlex_amt
-            daily_pnl = float(info.get("asst_icdc_amt") or 0)
+            # 오늘 P&L: 현재 순자산 - 전일 총자산 (bfdy_tot_asst_evlu_amt)
+            # 전일 데이터 없는 신규 계좌는 initial_capital 기준으로 fallback
+            bfdy_total = float(info.get("bfdy_tot_asst_evlu_amt") or 0)
+            if bfdy_total > 0:
+                daily_pnl = total - bfdy_total
+            else:
+                from agentic_capital.config import settings
+                daily_pnl = total - settings.initial_capital
+            # 오늘 수수료+세금: thdt_tlex_amt
             daily_fee = float(info.get("thdt_tlex_amt") or 0)
 
             logger.debug(
