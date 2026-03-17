@@ -384,6 +384,102 @@ class TestSimulationEngine:
         assert engine._recorder is None
 
     @pytest.mark.asyncio
+    async def test_reconcile_with_broker_ok(self):
+        """Reconciliation succeeds with no discrepancies when DB and broker match."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        # KIS has one position
+        real_pos = MagicMock()
+        real_pos.symbol = "005930"
+        real_pos.quantity = 100
+        real_pos.avg_price = 70000
+        real_pos.unrealized_pnl = 5000
+        real_pos.unrealized_pnl_pct = 0.07
+        real_pos.market = "kr_stock"
+
+        engine._trading = MagicMock()
+        engine._trading.get_positions = AsyncMock(return_value=[real_pos])
+        engine._trading.get_balance = AsyncMock(return_value=MagicMock(total=10_000_000))
+
+        engine._recorder = MagicMock()
+        # DB has matching position
+        engine._recorder.get_last_positions = AsyncMock(return_value=[
+            {"symbol": "005930", "quantity": 100.0, "avg_price": 70000.0, "market": "kr_stock"}
+        ])
+        engine._recorder.record_position_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+
+        await engine._reconcile_with_broker()
+
+        engine._recorder.record_position_snapshot.assert_called_once()
+        engine._recorder.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_with_broker_detects_discrepancy(self):
+        """Reconciliation logs discrepancy when DB qty differs from broker."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        real_pos = MagicMock()
+        real_pos.symbol = "005930"
+        real_pos.quantity = 100
+        real_pos.avg_price = 70000
+        real_pos.unrealized_pnl = 0
+        real_pos.unrealized_pnl_pct = 0
+        real_pos.market = "kr_stock"
+
+        engine._trading = MagicMock()
+        engine._trading.get_positions = AsyncMock(return_value=[real_pos])
+        engine._trading.get_balance = AsyncMock(return_value=MagicMock(total=10_000_000))
+
+        engine._recorder = MagicMock()
+        # DB has 50 shares but broker has 100
+        engine._recorder.get_last_positions = AsyncMock(return_value=[
+            {"symbol": "005930", "quantity": 50.0, "avg_price": 70000.0, "market": "kr_stock"}
+        ])
+        engine._recorder.record_position_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+
+        await engine._reconcile_with_broker()
+
+        # Despite discrepancy, real positions still recorded
+        engine._recorder.record_position_snapshot.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_no_recorder_skips_gracefully(self):
+        """Reconciliation skips when recorder is not initialized."""
+        engine = SimulationEngine()
+        engine._trading = MagicMock()
+        engine._recorder = None  # No recorder
+
+        # Should not raise
+        await engine._reconcile_with_broker()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_broker_error_handled(self):
+        """Reconciliation handles broker errors without crashing."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._trading = MagicMock()
+        engine._trading.get_positions = AsyncMock(side_effect=Exception("KIS timeout"))
+
+        engine._recorder = MagicMock()
+        engine._recorder.get_last_positions = AsyncMock(return_value=[])
+        engine._recorder.commit = AsyncMock()
+
+        # Should not raise
+        await engine._reconcile_with_broker()
+
+    @pytest.mark.asyncio
     async def test_hire_duplicate_name_gets_uuid_suffix(self):
         """Hiring an agent with a name that already exists renames with UUID suffix."""
         engine = SimulationEngine()

@@ -450,6 +450,41 @@ class SimulationRecorder:
             for t in result.scalars().all()
         ]
 
+    async def get_last_positions(self) -> list[dict]:
+        """Fetch the most recent position snapshot per symbol from DB.
+
+        Returns list of dicts with symbol/quantity/avg_price for comparison
+        with real broker account during reconciliation.
+        """
+        from sqlalchemy import select, func
+        from agentic_capital.infra.models.trade import PositionModel
+
+        # Get latest updated_at per symbol across all simulations
+        subq = (
+            select(
+                PositionModel.symbol,
+                func.max(PositionModel.updated_at).label("max_ts"),
+            )
+            .group_by(PositionModel.symbol)
+            .subquery()
+        )
+        stmt = select(PositionModel).join(
+            subq,
+            (PositionModel.symbol == subq.c.symbol)
+            & (PositionModel.updated_at == subq.c.max_ts),
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "symbol": row.symbol,
+                "quantity": float(row.quantity),
+                "avg_price": float(row.avg_price),
+                "market": row.market,
+            }
+            for row in result.scalars().all()
+            if float(row.quantity) > 0
+        ]
+
     async def commit(self) -> None:
         """Commit all pending changes."""
         await self._session.commit()

@@ -164,6 +164,9 @@ class SimulationEngine:
             capital_limit=self._capital_limit,
         )
 
+        # Reconcile DB positions with real broker account
+        await self._reconcile_with_broker()
+
         self._running = True
         try:
             while self._running:
@@ -395,3 +398,87 @@ class SimulationEngine:
             )
 
         logger.info("role_abolished", name=role_name, abolished_by=ceo.name)
+
+    async def _reconcile_with_broker(self) -> None:
+        """Reconcile DB positions with real broker account at startup.
+
+        Fetches the current real positions from KIS and records them as a
+        reconciliation snapshot so agents start with accurate ground truth.
+        Logs any discrepancies between the last DB snapshot and real account.
+        """
+        if not self._trading or not self._recorder:
+            return
+
+        try:
+            real_positions = await self._trading.get_positions()
+            real_balance = await self._trading.get_balance()
+
+            # Get last recorded positions from DB for comparison
+            db_positions = await self._recorder.get_last_positions()
+
+            # Build lookup dicts for comparison
+            real_by_symbol = {p.symbol: p for p in real_positions}
+            db_by_symbol = {p["symbol"]: p for p in db_positions}
+
+            discrepancies: list[dict] = []
+
+            # Check for positions in real account missing or different from DB
+            for symbol, real_pos in real_by_symbol.items():
+                db_pos = db_by_symbol.get(symbol)
+                if db_pos is None:
+                    discrepancies.append({
+                        "symbol": symbol,
+                        "issue": "missing_in_db",
+                        "real_qty": real_pos.quantity,
+                        "db_qty": 0,
+                    })
+                elif abs(float(db_pos.get("quantity", 0)) - real_pos.quantity) > 0.001:
+                    discrepancies.append({
+                        "symbol": symbol,
+                        "issue": "qty_mismatch",
+                        "real_qty": real_pos.quantity,
+                        "db_qty": db_pos.get("quantity", 0),
+                    })
+
+            # Check for positions in DB that no longer exist in real account
+            for symbol, db_pos in db_by_symbol.items():
+                if symbol not in real_by_symbol:
+                    discrepancies.append({
+                        "symbol": symbol,
+                        "issue": "closed_in_broker",
+                        "real_qty": 0,
+                        "db_qty": db_pos.get("quantity", 0),
+                    })
+
+            if discrepancies:
+                logger.warning(
+                    "position_reconciliation_discrepancies",
+                    count=len(discrepancies),
+                    discrepancies=discrepancies,
+                )
+            else:
+                logger.info("position_reconciliation_ok", positions=len(real_by_symbol))
+
+            # Record real positions as authoritative snapshot (agent[0] = CEO as owner)
+            owner_id = self._agents[0].agent_id if self._agents else None
+            for pos in real_positions:
+                await self._recorder.record_position_snapshot(
+                    agent_id=owner_id,
+                    symbol=pos.symbol,
+                    quantity=pos.quantity,
+                    avg_price=pos.avg_price,
+                    unrealized_pnl=getattr(pos, "unrealized_pnl", 0.0),
+                    unrealized_pnl_pct=getattr(pos, "unrealized_pnl_pct", 0.0),
+                    market=getattr(pos, "market", "kr_stock"),
+                )
+
+            await self._recorder.commit()
+            logger.info(
+                "broker_reconciliation_complete",
+                real_positions=len(real_positions),
+                real_balance=real_balance.total,
+                discrepancies=len(discrepancies),
+            )
+
+        except Exception:
+            logger.exception("broker_reconciliation_failed")
