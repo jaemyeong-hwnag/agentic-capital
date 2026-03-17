@@ -33,7 +33,11 @@ LEGEND = (
 )
 
 # Universal mandate — same for all agents, short and unambiguous
-MANDATE = "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done|OP_COST=10000KRW/day"
+MANDATE = (
+    "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done|OP_COST=10000KRW/day"
+    "|MARKETS=KRX(09:00-15:30KST)+NASDAQ/NYSE_PRE(17:00-22:30KST)+NASDAQ/NYSE_REG(22:30-05:00KST)"
+    "|USE_ALL_MARKETS — trade US stocks/ETFs during pre-market and regular hours via submit_order(market=us_stock)"
+)
 
 # CEO-specific HR mandate — appended after MANDATE for CEO role
 MANDATE_CEO_HR = (
