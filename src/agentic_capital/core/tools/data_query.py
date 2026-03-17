@@ -534,12 +534,16 @@ def build_agent_tools(
         Use this to decide when and where to trade — do NOT assume market is closed.
         """
         import yfinance as yf
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        KST = ZoneInfo("Asia/Seoul")
+        ET = ZoneInfo("America/New_York")  # DST-aware
 
         checks = [
-            ("KRX",    "^KS11",  timezone(timedelta(hours=9))),
-            ("NASDAQ", "^IXIC",  timezone(timedelta(hours=-5))),
-            ("NYSE",   "^GSPC",  timezone(timedelta(hours=-5))),
+            ("KRX",    "^KS11",  KST),
+            ("NASDAQ", "^IXIC",  ET),
+            ("NYSE",   "^GSPC",  ET),
         ]
         results = []
         for market, sym, tz in checks:
@@ -548,7 +552,7 @@ def build_agent_tools(
                 info = yf.Ticker(sym).info
                 state = info.get("marketState", "UNKNOWN")
                 results.append(f"{market}:{state}@{local_time}")
-            except Exception as e:
+            except Exception:
                 results.append(f"{market}:ERR@{local_time}")
         return "|".join(results)
 
