@@ -299,6 +299,18 @@ def build_agent_tools(
             from agentic_capital.formats.compact import order as _order
             from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
+            # Guard: BUY orders must not exceed available capital
+            if side.lower() == "buy" and price and price > 0:
+                order_value = price * quantity
+                b = await trading.get_balance()
+                effective_available = min(b.available, capital_limit) if capital_limit else b.available
+                if order_value > effective_available:
+                    return (
+                        f"ERR:insufficient_capital|"
+                        f"need:{order_value:.0f}|avl:{effective_available:.0f}|"
+                        f"max_qty:{int(effective_available // price)}"
+                    )
+
             o = Order(
                 symbol=symbol,
                 side=OrderSide(side.lower()),

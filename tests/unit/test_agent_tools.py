@@ -224,3 +224,40 @@ class TestBuildAgentTools:
         assert "NASDAQ" in result
         assert "NYSE" in result
         assert "POSTPOST" in result
+
+    @pytest.mark.asyncio
+    async def test_submit_order_blocked_when_exceeds_capital(self):
+        trading = _make_trading()  # available=8M
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=5_000_000)
+        tool = next(t for t in tools if t.name == "submit_order")
+        # 100 shares × 70,000 = 7,000,000 > capital_limit 5,000,000
+        result = await tool.coroutine(
+            symbol="005930", side="buy", quantity=100, price=70000.0, market="kr_stock"
+        )
+        assert result.startswith("ERR:insufficient_capital")
+        assert "need:7000000" in result
+        assert "avl:5000000" in result
+        assert "max_qty:71" in result
+
+    @pytest.mark.asyncio
+    async def test_submit_order_allowed_within_capital(self):
+        trading = _make_trading()  # available=8M
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=10_000_000)
+        tool = next(t for t in tools if t.name == "submit_order")
+        # 10 shares × 70,000 = 700,000 < capital_limit 10,000,000
+        result = await tool.coroutine(
+            symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
+        )
+        assert "submitted" in result
+
+    @pytest.mark.asyncio
+    async def test_submit_order_sell_not_blocked_by_capital(self):
+        trading = _make_trading()
+        trading.submit_order.return_value.side = "sell"
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=100)  # tiny limit
+        tool = next(t for t in tools if t.name == "submit_order")
+        # SELL should never be blocked by capital check
+        result = await tool.coroutine(
+            symbol="005930", side="sell", quantity=10, price=70000.0, market="kr_stock"
+        )
+        assert not result.startswith("ERR:insufficient_capital")
