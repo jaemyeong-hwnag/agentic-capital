@@ -1,11 +1,12 @@
 """Unit tests for multi-market clock."""
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from agentic_capital.simulation.clock import (
-    EST,
+    ET,
     KST,
     get_open_markets,
     is_market_open,
@@ -13,6 +14,9 @@ from agentic_capital.simulation.clock import (
     now_kst,
     seconds_until_market_open,
 )
+
+# EDT = UTC-4 (DST in effect for March 2026 test dates)
+EDT = timezone(timedelta(hours=-4))
 
 
 class TestIsMarketOpenFor:
@@ -25,19 +29,19 @@ class TestIsMarketOpenFor:
         assert is_market_open_for("KRX", dt) is False
 
     def test_nasdaq_open(self):
-        dt = datetime(2026, 3, 16, 10, 0, tzinfo=EST)
+        dt = datetime(2026, 3, 16, 10, 0, tzinfo=EDT)
         assert is_market_open_for("NASDAQ", dt) is True
 
     def test_nasdaq_before_open(self):
-        dt = datetime(2026, 3, 16, 9, 0, tzinfo=EST)
+        dt = datetime(2026, 3, 16, 9, 0, tzinfo=EDT)
         assert is_market_open_for("NASDAQ", dt) is False
 
     def test_nasdaq_at_close(self):
-        dt = datetime(2026, 3, 16, 16, 0, tzinfo=EST)
+        dt = datetime(2026, 3, 16, 16, 0, tzinfo=EDT)
         assert is_market_open_for("NASDAQ", dt) is False
 
     def test_nyse_open(self):
-        dt = datetime(2026, 3, 16, 12, 0, tzinfo=EST)
+        dt = datetime(2026, 3, 16, 12, 0, tzinfo=EDT)
         assert is_market_open_for("NYSE", dt) is True
 
     def test_weekend_all_closed(self):
@@ -49,16 +53,44 @@ class TestIsMarketOpenFor:
         dt = datetime(2026, 3, 16, 10, 0, tzinfo=KST)
         assert is_market_open_for("UNKNOWN", dt) is False
 
+    def test_nasdaq_pre_open(self):
+        # 4:00 AM EDT = 17:00 KST → pre-market starts
+        dt = datetime(2026, 3, 16, 4, 0, tzinfo=EDT)
+        assert is_market_open_for("NASDAQ_PRE", dt) is True
+
+    def test_nasdaq_pre_before_open(self):
+        dt = datetime(2026, 3, 16, 3, 59, tzinfo=EDT)
+        assert is_market_open_for("NASDAQ_PRE", dt) is False
+
+    def test_nasdaq_pre_ends_at_regular_open(self):
+        # Pre-market ends when regular opens
+        dt = datetime(2026, 3, 16, 9, 30, tzinfo=EDT)
+        assert is_market_open_for("NASDAQ_PRE", dt) is False
+        assert is_market_open_for("NASDAQ", dt) is True
+
+    def test_nasdaq_after_open(self):
+        dt = datetime(2026, 3, 16, 17, 0, tzinfo=EDT)
+        assert is_market_open_for("NASDAQ_AFTER", dt) is True
+
+    def test_nasdaq_after_at_close(self):
+        dt = datetime(2026, 3, 16, 20, 0, tzinfo=EDT)
+        assert is_market_open_for("NASDAQ_AFTER", dt) is False
+
 
 class TestIsMarketOpen:
     def test_krx_hours_only(self):
-        # Monday 10:00 KST = Monday 01:00 EST → KRX open, US closed
+        # Monday 10:00 KST → KRX open, US closed
         dt = datetime(2026, 3, 16, 10, 0, tzinfo=KST)
         assert is_market_open(dt) is True
 
     def test_us_hours_only(self):
-        # Monday 23:30 KST = Monday 10:30 EST → KRX closed, US open
+        # Monday 23:30 KST = Monday 10:30 EDT → KRX closed, US regular open
         dt = datetime(2026, 3, 16, 23, 30, tzinfo=KST)
+        assert is_market_open(dt) is True
+
+    def test_us_premarket(self):
+        # Monday 17:00 KST = Monday 04:00 EDT → pre-market open
+        dt = datetime(2026, 3, 16, 17, 0, tzinfo=KST)
         assert is_market_open(dt) is True
 
     def test_all_closed(self):
@@ -67,8 +99,8 @@ class TestIsMarketOpen:
         assert is_market_open(dt) is False
 
     def test_gap_between_markets(self):
-        # Monday 17:00 KST = Monday 04:00 EST → both closed
-        dt = datetime(2026, 3, 16, 17, 0, tzinfo=KST)
+        # Monday 8:00 KST = Sunday 23:00 EDT (weekend) → both closed
+        dt = datetime(2026, 3, 16, 8, 0, tzinfo=KST)
         assert is_market_open(dt) is False
 
 
@@ -78,13 +110,31 @@ class TestGetOpenMarkets:
         markets = get_open_markets(dt)
         assert "KRX" in markets
         assert "NASDAQ" not in markets
+        assert "NASDAQ_PRE" not in markets
 
-    def test_us_open(self):
+    def test_us_regular_open(self):
         dt = datetime(2026, 3, 16, 23, 30, tzinfo=KST)
         markets = get_open_markets(dt)
         assert "NASDAQ" in markets
         assert "NYSE" in markets
         assert "KRX" not in markets
+        assert "NASDAQ_PRE" not in markets
+
+    def test_us_premarket_open(self):
+        # 17:00 KST = 04:00 EDT → pre-market
+        dt = datetime(2026, 3, 16, 17, 0, tzinfo=KST)
+        markets = get_open_markets(dt)
+        assert "NASDAQ_PRE" in markets
+        assert "NYSE_PRE" in markets
+        assert "NASDAQ" not in markets
+
+    def test_us_aftermarket_open(self):
+        # Tuesday 05:00 KST = Monday 16:00 EDT → after-hours
+        dt = datetime(2026, 3, 17, 5, 0, tzinfo=KST)
+        markets = get_open_markets(dt)
+        assert "NASDAQ_AFTER" in markets
+        assert "NYSE_AFTER" in markets
+        assert "NASDAQ" not in markets
 
     def test_none_open(self):
         dt = datetime(2026, 3, 21, 12, 0, tzinfo=KST)

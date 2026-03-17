@@ -1,6 +1,6 @@
 """Market clock — multi-market trading hours and session management.
 
-Supports KRX, NASDAQ, NYSE, and other markets.
+Supports KRX, NASDAQ, NYSE, and other markets including pre/after-hours.
 The system checks ALL markets — if any market is open, trading is possible.
 No restrictions on which markets agents can trade.
 """
@@ -8,19 +8,25 @@ No restrictions on which markets agents can trade.
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 KST = timezone(timedelta(hours=9))
-EST = timezone(timedelta(hours=-5))  # US Eastern (simplified, no DST)
+ET = ZoneInfo("America/New_York")  # DST-aware Eastern Time (EST/EDT auto-switch)
 UTC = timezone.utc
 
 # Weekdays: Monday=0 ... Friday=4
 _TRADING_DAYS = {0, 1, 2, 3, 4}
 
 # Market sessions: (open_time, close_time, timezone)
+# US pre/after-hours included so agents can trade extended sessions.
 MARKETS = {
-    "KRX": (time(9, 0), time(15, 30), KST),       # 한국거래소
-    "NASDAQ": (time(9, 30), time(16, 0), EST),      # 나스닥
-    "NYSE": (time(9, 30), time(16, 0), EST),         # 뉴욕증권거래소
+    "KRX": (time(9, 0), time(15, 30), KST),              # 한국거래소 정규
+    "NASDAQ": (time(9, 30), time(16, 0), ET),             # 나스닥 정규
+    "NYSE": (time(9, 30), time(16, 0), ET),               # 뉴욕증권거래소 정규
+    "NASDAQ_PRE": (time(4, 0), time(9, 30), ET),          # 나스닥 프리마켓
+    "NYSE_PRE": (time(4, 0), time(9, 30), ET),            # NYSE 프리마켓
+    "NASDAQ_AFTER": (time(16, 0), time(20, 0), ET),       # 나스닥 애프터마켓
+    "NYSE_AFTER": (time(16, 0), time(20, 0), ET),         # NYSE 애프터마켓
 }
 
 
