@@ -270,7 +270,18 @@ def build_agent_tools(
                 available = min(b.available, capital_limit)
             else:
                 total, available = b.total, b.available
-            return _bal(total, available, b.currency, b.daily_pnl, b.daily_fee)
+
+            # Fetch overseas P&L in KRW (exchange rate already applied by KIS)
+            ovs_pnl_krw = 0.0
+            if hasattr(trading, "get_overseas_balance"):
+                try:
+                    ob = await trading.get_overseas_balance("USD")
+                    ovs_pnl_krw = ob.daily_pnl  # KRW-converted unrealized PnL
+                except Exception:
+                    pass
+
+            return _bal(total, available, b.currency, b.daily_pnl, b.daily_fee,
+                        ovs_pnl_krw=ovs_pnl_krw)
         except Exception as e:
             return f"ERR:{e}"
 

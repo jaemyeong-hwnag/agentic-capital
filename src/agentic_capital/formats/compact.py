@@ -111,11 +111,15 @@ _DAILY_OP_COST = 10_000  # fixed daily AI operating cost (KRW)
 
 
 def bal(total: float, available: float, currency: str,
-        daily_pnl: float = 0.0, daily_fee: float = 0.0) -> str:
-    """Compact balance with daily P&L and operating cost visibility."""
+        daily_pnl: float = 0.0, daily_fee: float = 0.0,
+        ovs_pnl_krw: float = 0.0) -> str:
+    """Compact balance with daily P&L (domestic + overseas) and operating cost."""
     base = f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
-    net = daily_pnl - _DAILY_OP_COST
-    base += f",pnl_today:{daily_pnl:.0f},fee_today:{daily_fee:.0f},op_cost:{_DAILY_OP_COST},net_today:{net:.0f}"
+    total_pnl = daily_pnl + ovs_pnl_krw
+    net = total_pnl - _DAILY_OP_COST
+    base += f",pnl_today:{total_pnl:.0f},fee_today:{daily_fee:.0f},op_cost:{_DAILY_OP_COST},net_today:{net:.0f}"
+    if ovs_pnl_krw != 0.0:
+        base += f",ovs_pnl_krw:{ovs_pnl_krw:.0f}"
     return base
 
 

@@ -261,7 +261,7 @@ class KISTradingAdapter(TradingPort):
 
             o2 = data.get("output2", [{}])
             info = o2[0] if o2 else {}
-            total_krw = float(info.get("tot_evlu_pfls_amt", 0))   # KRW equivalent total
+            total_krw = float(info.get("tot_evlu_pfls_amt", 0))   # KRW equivalent P&L
             total_foreign = float(info.get("frcr_evlu_amt2", 0))  # Foreign currency total
             available = float(info.get("frcr_dncl_amt_2", 0))     # Available foreign cash
 
@@ -269,9 +269,12 @@ class KISTradingAdapter(TradingPort):
                 "kis_overseas_balance_fetched",
                 currency=currency,
                 total_foreign=total_foreign,
+                total_krw_pnl=total_krw,
                 available=available,
             )
-            return Balance(total=total_foreign, available=available, currency=currency)
+            # daily_pnl = KRW-equivalent unrealized P&L (exchange rate applied by KIS)
+            return Balance(total=total_foreign, available=available, currency=currency,
+                           daily_pnl=total_krw)
         except Exception:
             logger.exception("kis_get_overseas_balance_failed")
             raise
