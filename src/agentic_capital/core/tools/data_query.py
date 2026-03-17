@@ -685,17 +685,18 @@ def build_agent_tools(
         After calling this, stop all tool calls and return your final response.
         Do NOT call this multiple times — only the first call is used.
 
-        seconds=60: market OPEN, actively watching
-        seconds=300: market open, no immediate action
+        seconds=60: market OPEN, actively trading
+        seconds=300: market open, monitoring
         seconds=1800: market open, low activity
         seconds=3600: 1 hour
-        seconds=14400: 4 hours (market closed, next session soon)
-        seconds=28800: 8 hours (night, all markets closed)
 
-        IMPORTANT: Each cycle costs money. Sleep longer when markets are CLOSED.
-        If KR closed AND US closed → use 3600-28800.
+        IMPORTANT: KR market 09:00-15:30 KST | US pre-market 17:00 KST | US regular 22:30 KST
+        Sleep no more than until the NEXT market session opens.
+        If KR closing soon (e.g. 15:20 KST) → sleep until US pre-market (17:00 KST) = ~5400s
+        Between US sessions → max 3600s
+        Never miss a session: KR or US pre/regular/after-hours all offer profit opportunities.
         """
-        capped = min(max(0, seconds), 28800)
+        capped = min(max(0, seconds), 7200)
         if not wakeup_sink:  # only first call counts
             wakeup_sink.append(capped)
         logger.info("agent_wakeup_requested", agent=agent_name, seconds=seconds)
