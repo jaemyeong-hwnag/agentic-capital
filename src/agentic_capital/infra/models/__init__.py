@@ -8,6 +8,7 @@ from agentic_capital.infra.models.agent import (
     AgentPersonalityModel,
 )
 from agentic_capital.infra.models.base import Base
+from agentic_capital.infra.models.cycle import AgentCycleModel
 from agentic_capital.infra.models.market import MarketOHLCVModel
 from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
 from agentic_capital.infra.models.organization import (
@@ -21,13 +22,14 @@ from agentic_capital.infra.models.tool import AgentToolModel
 from agentic_capital.infra.models.trade import PositionModel, TradeModel
 
 __all__ = [
-    "AgentToolModel",
+    "AgentCycleModel",
     "AgentDecisionModel",
     "AgentEmotionHistoryModel",
     "AgentMessageModel",
     "AgentModel",
     "AgentPersonalityHistoryModel",
     "AgentPersonalityModel",
+    "AgentToolModel",
     "Base",
     "CompanySnapshotModel",
     "EpisodicDetailModel",

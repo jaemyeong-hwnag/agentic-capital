@@ -53,11 +53,12 @@ async def record_cycle(
             ):
                 from agentic_capital.core.decision.pipeline import TradingDecision
                 try:
+                    trade_reason = d.get("reason", "")
                     decision = TradingDecision(
                         action=d.get("action", d.get("type", "HOLD")),
                         symbol=d.get("symbol", ""),
                         quantity=int(d.get("quantity", 0)),
-                        reason=d.get("reason", ""),
+                        reason=trade_reason,
                         confidence=float(d.get("confidence", 0.5)),
                     )
                     commission = float(d.get("commission") or 0.0)
@@ -69,7 +70,12 @@ async def record_cycle(
                         status=d.get("status", "executed"),
                         price=float(d.get("price") or 0.0),
                         market=d.get("market", "kr_stock"),
-                        outcome={"commission": commission, "pnl_impact": -commission},
+                        outcome={
+                            "commission": commission,
+                            "pnl_impact": -commission,
+                            "order_id": d.get("order_id", ""),
+                            "reason": trade_reason,
+                        },
                     )
                 except Exception:
                     logger.warning("trade_decision_record_failed", decision=d)

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from agentic_capital.infra.models import (
+    AgentCycleModel,
     AgentDecisionModel,
     AgentEmotionHistoryModel,
     AgentMessageModel,
@@ -27,12 +28,13 @@ from agentic_capital.infra.models import (
 
 class TestAllTablesRegistered:
     def test_table_count(self) -> None:
-        assert len(Base.metadata.tables) == 17
+        assert len(Base.metadata.tables) == 18
 
     def test_expected_tables(self) -> None:
         expected = {
             "agents", "agent_personality", "agent_personality_history",
-            "agent_emotion_history", "agent_decisions", "trades", "positions",
+            "agent_emotion_history", "agent_decisions", "agent_cycles",
+            "trades", "positions",
             "roles", "permission_history", "hr_events", "agent_messages",
             "memories", "episodic_details", "market_ohlcv",
             "simulation_runs", "company_snapshots", "agent_tools",

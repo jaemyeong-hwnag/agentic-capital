@@ -67,6 +67,44 @@ def _build_system_prompt(agent: BaseAgent) -> str:
     )
 
 
+def _extract_tool_sequence(messages: list) -> list[dict]:
+    """Extract compact tool call chain from LangGraph ReAct messages.
+
+    Format per call: {"t": tool_name, "in": compact_args, "out": result}
+    """
+    outputs: dict[str, str] = {}
+    for msg in messages:
+        call_id = getattr(msg, "tool_call_id", None)
+        if call_id:
+            outputs[call_id] = str(getattr(msg, "content", ""))[:400]
+
+    sequence = []
+    for msg in messages:
+        tool_calls = getattr(msg, "tool_calls", None)
+        if not tool_calls:
+            continue
+        for tc in tool_calls:
+            args = tc.get("args", {})
+            args_str = ",".join(f"{k}:{v}" for k, v in args.items() if v not in (None, "", []))
+            call_id = tc.get("id", "")
+            sequence.append({
+                "t": tc.get("name", ""),
+                "in": args_str[:200],
+                "out": outputs.get(call_id, "")[:300],
+            })
+    return sequence
+
+
+def _extract_llm_reasoning(messages: list) -> str:
+    """Extract final AI reasoning — last AIMessage with text content (no tool calls)."""
+    for msg in reversed(messages):
+        content = getattr(msg, "content", None)
+        if content and isinstance(content, str) and content.strip():
+            if not getattr(msg, "tool_calls", None):
+                return content[:2000]
+    return ""
+
+
 async def run_agent_cycle(
     agent: BaseAgent,
     cycle_number: int,
@@ -86,6 +124,7 @@ async def run_agent_cycle(
     Returns:
         dict with 'decisions', 'messages', 'errors' for the engine to process.
     """
+    from datetime import datetime
     from langchain_core.messages import HumanMessage
     from agentic_capital.core.tools.data_query import _build_dynamic_tool
 
@@ -125,6 +164,7 @@ async def run_agent_cycle(
 
     errors: list[str] = []
     result_messages = []
+    cycle_started_at = datetime.now()
 
     try:
         result = await react_agent.ainvoke(
@@ -136,12 +176,14 @@ async def run_agent_cycle(
         errors.append(str(e))
         logger.exception("agent_react_cycle_failed", agent=agent.name, cycle=cycle_number)
 
+    cycle_completed_at = datetime.now()
+
     # Extract any decisions from LLM output (hire/fire/org actions from text)
     org_decisions = _extract_org_decisions(result_messages)
 
     all_decisions = decisions_sink + org_decisions
 
-    # Record everything to DB
+    # Record decisions/emotions/messages to DB
     await record_cycle(
         agent=agent,
         cycle_number=cycle_number,
@@ -152,6 +194,35 @@ async def run_agent_cycle(
 
     # Agent-requested wakeup delay: take the last request (most recent intent)
     next_cycle_seconds = wakeup_sink[-1] if wakeup_sink else 0
+
+    # Record full LLM activity trace: tool sequence + reasoning
+    if recorder:
+        try:
+            tool_seq = _extract_tool_sequence(result_messages)
+            reasoning = _extract_llm_reasoning(result_messages)
+            emotion_snap = {
+                "V": round(agent.emotion.valence, 2),
+                "AR": round(agent.emotion.arousal, 2),
+                "D": round(agent.emotion.dominance, 2),
+                "ST": round(agent.emotion.stress, 2),
+                "CF": round(agent.emotion.confidence, 2),
+            }
+            await recorder.record_agent_cycle(
+                agent_id=agent.agent_id,
+                agent_name=agent.name,
+                cycle_number=cycle_number,
+                tool_sequence=tool_seq,
+                llm_reasoning=reasoning,
+                emotion_snapshot=emotion_snap,
+                started_at=cycle_started_at,
+                completed_at=cycle_completed_at,
+                decisions_count=len(all_decisions),
+                errors_count=len(errors),
+                next_cycle_seconds=next_cycle_seconds,
+            )
+            await recorder.commit()
+        except Exception:
+            logger.warning("agent_cycle_record_failed", agent=agent.name)
 
     logger.info(
         "agent_cycle_complete",

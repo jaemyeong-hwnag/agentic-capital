@@ -143,6 +143,7 @@ class SubmitOrderInput(BaseModel):
     price: float | None = Field(default=None, description="Limit price (omit for market order)")
     market: str = Field(description="Market you choose: kr_stock (KRX stocks+ETFs+leverage ETFs) | us_stock (NYSE/NASDAQ stocks+ETFs+leveraged ETFs) | kr_futures | kr_options | hk_stock | cn_stock | jp_stock | vn_stock")
     exchange: str | None = Field(default=None, description="Exchange code for overseas (NASD|NYSE|AMEX|SEHK|SHAA|TKSE|HASE)")
+    reason: str = Field(default="", description="Trade rationale — why this trade, what signal, what thesis")
 
 
 class CancelOrderInput(BaseModel):
@@ -335,6 +336,7 @@ def build_agent_tools(
         market: str,
         price: float | None = None,
         exchange: str | None = None,
+        reason: str = "",
     ) -> str:
         """Submit a buy or sell order. Returns compact order result."""
         if not trading:
@@ -402,7 +404,8 @@ def build_agent_tools(
                 "exchange": exchange,
                 "order_id": result.order_id,
                 "status": result.status,
-                "commission": commission,  # recorded as P&L cost (loss)
+                "commission": commission,
+                "reason": reason,  # AI-provided trade rationale
             })
 
             logger.info(

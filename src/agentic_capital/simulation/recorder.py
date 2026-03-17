@@ -149,12 +149,12 @@ class SimulationRecorder:
                 simulation_id=self._simulation_id,
                 decision_type=decision_type,
                 action=f"{decision.action} {decision.symbol} x{decision.quantity}",
-                reasoning=decision.reason,
+                reasoning=decision.reason,   # AI-provided trade rationale
                 confidence=decision.confidence,
                 personality_snapshot=p_snap,
                 emotion_snapshot=e_snap,
                 context_snapshot=context_snapshot or {},
-                outcome=outcome or {"status": status, "price": price},
+                outcome=outcome or {"status": status, "price": price, "reason": decision.reason},
             )
             self._session.add(decision_record)
 
@@ -291,6 +291,47 @@ class SimulationRecorder:
             target=str(hr_event.target_agent_id),
             decided_by=str(hr_event.decided_by),
         )
+
+    async def record_agent_cycle(
+        self,
+        agent_id: uuid.UUID,
+        agent_name: str,
+        cycle_number: int,
+        *,
+        tool_sequence: list[dict],
+        llm_reasoning: str,
+        emotion_snapshot: dict,
+        started_at: "datetime",
+        completed_at: "datetime",
+        decisions_count: int = 0,
+        errors_count: int = 0,
+        next_cycle_seconds: float = 0,
+    ) -> None:
+        """Record full LLM cycle: tool call chain + final reasoning + timing.
+
+        tool_sequence: compact list [{t: tool_name, in: args_str, out: result_str}]
+        llm_reasoning: last AIMessage content (agent's conclusion text)
+        """
+        from agentic_capital.infra.models.cycle import AgentCycleModel
+        duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        record = AgentCycleModel(
+            simulation_id=self._simulation_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            cycle_number=cycle_number,
+            tool_sequence=tool_sequence,
+            llm_reasoning=llm_reasoning,
+            emotion_snapshot=emotion_snapshot,
+            started_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            tool_calls_count=len(tool_sequence),
+            decisions_count=decisions_count,
+            errors_count=errors_count,
+            next_cycle_seconds=next_cycle_seconds,
+        )
+        self._session.add(record)
+        await self._session.flush()
 
     async def record_agent_message(self, message: AgentMessage) -> None:
         """Record LACP protocol message to PostgreSQL for permanent storage."""
