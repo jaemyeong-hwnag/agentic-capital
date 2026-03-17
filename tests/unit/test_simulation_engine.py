@@ -382,3 +382,32 @@ class TestSimulationEngine:
             await engine._init_recorder()
 
         assert engine._recorder is None
+
+    @pytest.mark.asyncio
+    async def test_hire_duplicate_name_gets_uuid_suffix(self):
+        """Hiring an agent with a name that already exists renames with UUID suffix."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        engine._trading = MagicMock()
+        engine._market_data = MagicMock()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        existing = AnalystAgent(profile=_make_profile("RiskManager-Rho"), personality=create_random_personality(99), llm=llm)
+        engine._agents = [ceo, existing]
+
+        result = {
+            "decisions": [{"type": "hire", "target": "RiskManager-Rho", "detail": "analyst", "reason": "retry"}],
+        }
+
+        with patch("agentic_capital.simulation.engine.create_agent") as mock_create:
+            new_agent = AnalystAgent(profile=_make_profile("RiskManager-Rho-abcd1234"), personality=create_random_personality(77), llm=llm)
+            mock_create.return_value = new_agent
+            await engine._process_org_actions(ceo, result)
+
+        assert len(engine._agents) == 3
+        # create_agent should be called with renamed name (UUID suffix)
+        call_kwargs = mock_create.call_args[1]
+        hired_name = call_kwargs.get("name", mock_create.call_args[0][0] if mock_create.call_args[0] else "")
+        assert hired_name != "RiskManager-Rho"
+        assert "RiskManager-Rho-" in hired_name

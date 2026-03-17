@@ -278,9 +278,17 @@ class SimulationEngine:
     async def _handle_hire(self, ceo: BaseAgent, decision: dict) -> None:
         """Execute a hire decision — create new agent."""
         role = decision.get("detail", decision.get("role", "trader")).lower()
-        name = decision.get("target", f"Agent-{len(self._agents) + 1}")
+        base_name = decision.get("target", f"Agent-{len(self._agents) + 1}")
         capital = float(decision.get("capital", 0))
         personality_spec = decision.get("personality", {})
+
+        # Deduplicate by name — append UUID suffix if name already taken
+        existing_names = {a.name for a in self._agents}
+        if base_name in existing_names:
+            name = f"{base_name}-{str(uuid.uuid4())[:8]}"
+            logger.info("agent_hire_name_conflict_renamed", original=base_name, renamed=name)
+        else:
+            name = base_name
 
         try:
             # Use personality spec from CEO if provided, else random
