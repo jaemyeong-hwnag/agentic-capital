@@ -43,13 +43,7 @@ MANDATE_CEO_HR = (
     " create_role(role_name,description)"
 )
 
-# Shown to ALL agents — any role can set/read position policy
-MANDATE_RISK = (
-    "|RISK=any_agent_with_authority_may_call:"
-    " set_position_policy(max_per_trade_pct,max_per_symbol_pct)"
-    " → enforced on ALL orders immediately."
-    " get_position_policy() → read current limits."
-)
+MANDATE_RISK = ""  # reserved — position policy is AI-controlled, not system-enforced
 
 # Message type abbreviations (MetaGPT: explicit type tags reduce parse errors 60%)
 MSG_TYPES = "SIG|INSTR|RPT|QRY|ACK|ERR"
