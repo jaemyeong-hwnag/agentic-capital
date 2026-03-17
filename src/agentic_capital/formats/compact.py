@@ -33,7 +33,7 @@ LEGEND = (
 )
 
 # Universal mandate — same for all agents, short and unambiguous
-MANDATE = "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done"
+MANDATE = "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done|OP_COST=10000KRW/day"
 
 # CEO-specific HR mandate — appended after MANDATE for CEO role
 MANDATE_CEO_HR = (
@@ -103,12 +103,15 @@ def psych(personality, emotion) -> str:
     return f"<P>{p_str}</P>\n<E>{e_str}</E>"
 
 
+_DAILY_OP_COST = 10_000  # fixed daily AI operating cost (KRW)
+
+
 def bal(total: float, available: float, currency: str,
         daily_pnl: float = 0.0, daily_fee: float = 0.0) -> str:
-    """Compact balance with daily P&L visibility."""
+    """Compact balance with daily P&L and operating cost visibility."""
     base = f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
-    if daily_pnl != 0.0 or daily_fee != 0.0:
-        base += f",pnl_today:{daily_pnl:.0f},fee_today:{daily_fee:.0f}"
+    net = daily_pnl - _DAILY_OP_COST
+    base += f",pnl_today:{daily_pnl:.0f},fee_today:{daily_fee:.0f},op_cost:{_DAILY_OP_COST},net_today:{net:.0f}"
     return base
 
 
