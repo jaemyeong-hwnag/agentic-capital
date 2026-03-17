@@ -60,6 +60,7 @@ async def record_cycle(
                         reason=d.get("reason", ""),
                         confidence=float(d.get("confidence", 0.5)),
                     )
+                    commission = float(d.get("commission") or 0.0)
                     await recorder.record_decision(
                         agent_id=agent_id,
                         decision=decision,
@@ -68,6 +69,7 @@ async def record_cycle(
                         status=d.get("status", "executed"),
                         price=float(d.get("price") or 0.0),
                         market=d.get("market", "kr_stock"),
+                        outcome={"commission": commission, "pnl_impact": -commission},
                     )
                 except Exception:
                     logger.warning("trade_decision_record_failed", decision=d)

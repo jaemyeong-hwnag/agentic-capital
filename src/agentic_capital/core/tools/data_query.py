@@ -306,6 +306,7 @@ def build_agent_tools(
             return "@fills[0](oid,sym,sd,qty,px,st)"
         try:
             from agentic_capital.formats.compact import fills as _fills
+            from agentic_capital.simulation.recorder import _estimate_commission
             fill_list = await trading.get_fills(start_date=start_date, end_date=end_date, symbol=symbol)
             return _fills([
                 {
@@ -315,6 +316,10 @@ def build_agent_tools(
                     "quantity": f.quantity,
                     "filled_price": f.filled_price,
                     "status": f.status,
+                    "commission": _estimate_commission(
+                        getattr(f, "market", "kr_stock"),
+                        (f.filled_price or 0) * (f.quantity or 0),
+                    ),
                 }
                 for f in fill_list
             ])
@@ -410,6 +415,7 @@ def build_agent_tools(
                 "exchange": exchange,
                 "order_id": result.order_id,
                 "status": result.status,
+                "commission": commission,  # recorded as P&L cost (loss)
             })
 
             logger.info(

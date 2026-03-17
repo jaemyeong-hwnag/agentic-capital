@@ -153,7 +153,19 @@ class KISTradingAdapter(TradingPort):
             # dnca_tot_amt = 예수금총금액 (미결제 포함 총합, 주문가능 != 예수금)
             available = float(info.get("ord_psbl_cash_amt") or info.get("dnca_tot_amt", 0))
 
-            logger.debug("kis_balance_fetched", total=total, available=available)
+            logger.debug(
+                "kis_balance_fetched",
+                total=total,
+                available=available,
+                dnca_tot=info.get("dnca_tot_amt"),
+                ord_psbl=info.get("ord_psbl_cash_amt"),
+                thdt_buy=info.get("thdt_buy_amt"),
+                nxdy_excc=info.get("nxdy_excc_amt"),
+                prvs_rcdl=info.get("prvs_rcdl_excc_amt"),
+                evlu_smtl=info.get("evlu_amt_smtl_amt"),
+                nass=info.get("nass_amt"),
+                all_keys=list(info.keys()) if info else [],
+            )
             return Balance(total=total, available=available, currency="KRW")
         except Exception:
             logger.exception("kis_get_balance_failed")
@@ -354,7 +366,16 @@ class KISTradingAdapter(TradingPort):
             data = r.json()
 
             if data.get("rt_cd") != "0":
-                logger.warning("kis_order_rejected", symbol=order.symbol, msg=data.get("msg1", ""))
+                logger.warning(
+                    "kis_order_rejected",
+                    symbol=order.symbol,
+                    msg=data.get("msg1", ""),
+                    msg_cd=data.get("msg_cd", ""),
+                    rt_cd=data.get("rt_cd", ""),
+                    price=order.price,
+                    quantity=order.quantity,
+                    ord_dvsn=body["ORD_DVSN"],
+                )
                 return OrderResult(
                     order_id="", symbol=order.symbol, side=order.side,
                     quantity=0.0, filled_price=0.0, status="rejected", market=order.market,

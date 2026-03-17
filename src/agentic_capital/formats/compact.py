@@ -135,9 +135,9 @@ def pos(positions: list[dict]) -> str:
 
 
 def fills(fills_list: list[dict]) -> str:
-    """Encode fills as TOON table."""
+    """Encode fills as TOON table. fee column shows commission as negative P&L."""
     if not fills_list:
-        return "@fills[0](oid,sym,sd,qty,px,st)"
+        return "@fills[0](oid,sym,sd,qty,px,st,fee)"
     rows = [
         [
             f.get("order_id", ""),
@@ -146,10 +146,11 @@ def fills(fills_list: list[dict]) -> str:
             str(int(f.get("quantity", 0))),
             str(int(f.get("filled_price", 0))),
             f.get("status", ""),
+            f"-{f.get('commission', 0):.0f}",  # negative = cost/loss
         ]
         for f in fills_list
     ]
-    return to_toon("fills", ["oid", "sym", "sd", "qty", "px", "st"], rows)
+    return to_toon("fills", ["oid", "sym", "sd", "qty", "px", "st", "fee"], rows)
 
 
 def order(result: dict) -> str:
