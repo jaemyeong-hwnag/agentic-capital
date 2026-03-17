@@ -59,6 +59,9 @@ class TestBuildAgentTools:
         assert "get_ohlcv" in names
         assert "get_market_status" in names
         assert "create_tool" in names
+        assert "hire_agent" in names
+        assert "fire_agent" in names
+        assert "create_role" in names
 
     @pytest.mark.asyncio
     async def test_get_balance_tool(self):
@@ -261,3 +264,45 @@ class TestBuildAgentTools:
             symbol="005930", side="sell", quantity=10, price=70000.0, market="kr_stock"
         )
         assert not result.startswith("ERR:insufficient_capital")
+
+    @pytest.mark.asyncio
+    async def test_hire_agent_tool_records_decision(self):
+        tools, decisions, _, _ = build_agent_tools(agent_name="CEO-Alpha")
+        tool = next(t for t in tools if t.name == "hire_agent")
+        result = await tool.coroutine(
+            role="trader", name="Trader-Delta", capital=2_000_000,
+            philosophy="Aggressive momentum strategy"
+        )
+        assert "hire_queued" in result
+        assert "Trader-Delta" in result
+        assert len(decisions) == 1
+        assert decisions[0]["type"] == "hire"
+        assert decisions[0]["target"] == "Trader-Delta"
+        assert decisions[0]["role"] == "trader"
+        assert decisions[0]["capital"] == 2_000_000
+
+    @pytest.mark.asyncio
+    async def test_fire_agent_tool_records_decision(self):
+        tools, decisions, _, _ = build_agent_tools(agent_name="CEO-Alpha")
+        tool = next(t for t in tools if t.name == "fire_agent")
+        result = await tool.coroutine(target_name="Analyst-Beta", reason="Underperforming")
+        assert "fire_queued" in result
+        assert "Analyst-Beta" in result
+        assert len(decisions) == 1
+        assert decisions[0]["type"] == "fire"
+        assert decisions[0]["target"] == "Analyst-Beta"
+
+    @pytest.mark.asyncio
+    async def test_create_role_tool_records_decision(self):
+        tools, decisions, _, _ = build_agent_tools(agent_name="CEO-Alpha")
+        tool = next(t for t in tools if t.name == "create_role")
+        result = await tool.coroutine(
+            role_name="risk_manager",
+            description="Manages portfolio risk and drawdown limits",
+            permissions=["analyze", "send_message"],
+        )
+        assert "role_queued" in result
+        assert "risk_manager" in result
+        assert len(decisions) == 1
+        assert decisions[0]["type"] == "create_role"
+        assert decisions[0]["detail"] == "risk_manager"

@@ -190,3 +190,40 @@ class TestPreloadedTools:
         tools, _, _, _ = build_agent_tools(preloaded_tools=[None, None])
         # Should not crash, just skip None entries
         assert isinstance(tools, list)
+
+
+class TestDynamicToolSafeExecution:
+    """Dynamic tool runtime errors must not propagate — must return ERR: string."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_returns_err_string(self):
+        """Tool that raises at runtime should return ERR: not propagate exception."""
+        spec = {
+            "name": "fail_tool",
+            "description": "Always fails at runtime",
+            "code": (
+                "async def fail_tool(x: int = 1) -> str:\n"
+                "    raise ValueError('intentional failure')\n"
+                "    return 'never'"
+            ),
+        }
+        tool = _build_dynamic_tool(spec, trading=None, market_data=None, recorder=None)
+        assert tool is not None
+        result = await tool.coroutine(x=1)
+        assert result.startswith("ERR:tool_exec:")
+        assert "fail_tool" in result
+        assert "intentional failure" in result
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_does_not_raise(self):
+        """Calling a failing dynamic tool must not raise any exception to caller."""
+        spec = {
+            "name": "crash_tool",
+            "description": "Crashes",
+            "code": "async def crash_tool() -> str:\n    raise RuntimeError('boom')",
+        }
+        tool = _build_dynamic_tool(spec, trading=None, market_data=None, recorder=None)
+        # This must not raise — previously would propagate through LangGraph
+        result = await tool.coroutine()
+        assert isinstance(result, str)
+        assert "ERR:" in result

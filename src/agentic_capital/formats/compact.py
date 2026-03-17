@@ -35,6 +35,14 @@ LEGEND = (
 # Universal mandate — same for all agents, short and unambiguous
 MANDATE = "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done"
 
+# CEO-specific HR mandate — appended after MANDATE for CEO role
+MANDATE_CEO_HR = (
+    "|HR=autonomous — hire/fire/create_role anytime via tools:"
+    " hire_agent(role,name,capital,philosophy,personality?),"
+    " fire_agent(target_name,reason),"
+    " create_role(role_name,description)"
+)
+
 # Message type abbreviations (MetaGPT: explicit type tags reduce parse errors 60%)
 MSG_TYPES = "SIG|INSTR|RPT|QRY|ACK|ERR"
 

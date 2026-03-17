@@ -83,6 +83,15 @@ def _build_dynamic_tool(
         logger.warning("dynamic_tool_fn_not_found", name=name)
         return None
 
+    # Wrap in try/except so dynamic tool failures return ERR: string
+    # instead of raising — prevents LangGraph tool node from crashing the cycle
+    async def _safe_fn(**kwargs):
+        try:
+            return await fn(**kwargs)
+        except Exception as exc:
+            logger.warning("dynamic_tool_exec_error", name=name, error=str(exc))
+            return f"ERR:tool_exec:{name}:{exc}"
+
     # Auto-build Pydantic schema from function signature
     sig = inspect.signature(fn)
     fields: dict = {}
@@ -95,7 +104,7 @@ def _build_dynamic_tool(
 
     try:
         return StructuredTool.from_function(
-            coroutine=fn,
+            coroutine=_safe_fn,
             name=name,
             description=description,
             args_schema=schema,
@@ -160,6 +169,25 @@ class GetOHLCVInput(BaseModel):
     symbol: str = Field(description="Symbol. KR: 6-digit code. US: ticker.")
     timeframe: str = Field(default="1d", description="Candle size: 1m|5m|15m|60m|1d|1w|1mo|3mo")
     limit: int = Field(default=20, description="Number of candles to return (max 100)")
+
+
+class HireAgentInput(BaseModel):
+    role: str = Field(description="Agent role: trader | analyst | ceo | risk_manager | quant | researcher (or any custom role)")
+    name: str = Field(description="Agent name, e.g. 'Trader-Delta' or 'Quant-Epsilon'")
+    capital: float = Field(default=0.0, description="Allocated capital for this agent (0=none)")
+    philosophy: str = Field(default="", description="Investment philosophy for this agent")
+    personality: dict | None = Field(default=None, description="Optional Big5+PT personality vector: {openness, conscientiousness, extraversion, agreeableness, neuroticism, ...}")
+
+
+class FireAgentInput(BaseModel):
+    target_name: str = Field(description="Name of the agent to fire (exact match)")
+    reason: str = Field(description="Reason for termination")
+
+
+class CreateRoleInput(BaseModel):
+    role_name: str = Field(description="New role name in snake_case, e.g. risk_manager")
+    description: str = Field(description="What this role does")
+    permissions: list[str] = Field(default_factory=list, description="Permissions: trade|analyze|hire|fire|create_role")
 
 
 class CreateToolInput(BaseModel):
@@ -492,6 +520,52 @@ def build_agent_tools(
                 results.append(f"{market}:ERR@{local_time}")
         return "|".join(results)
 
+    # ---- HR tools (CEO-accessible) ---------------------------------------
+
+    async def hire_agent(
+        role: str,
+        name: str,
+        capital: float = 0.0,
+        philosophy: str = "",
+        personality: dict | None = None,
+    ) -> str:
+        """Hire a new agent. CEO decides role, name, capital allocation, philosophy."""
+        decision = {
+            "type": "hire",
+            "role": role,
+            "target": name,
+            "capital": capital,
+            "reason": philosophy,
+            "personality": personality or {},
+        }
+        decisions_sink.append(decision)
+        logger.info("hr_hire_requested", by=agent_name, role=role, name=name, capital=capital)
+        return f"hire_queued:name={name},role={role},capital={capital:.0f}"
+
+    async def fire_agent(target_name: str, reason: str) -> str:
+        """Fire an existing agent by name. CEO decides who and why."""
+        decision = {
+            "type": "fire",
+            "target": target_name,
+            "reason": reason,
+        }
+        decisions_sink.append(decision)
+        logger.info("hr_fire_requested", by=agent_name, target=target_name)
+        return f"fire_queued:target={target_name}"
+
+    async def create_role(role_name: str, description: str, permissions: list[str] | None = None) -> str:
+        """Create a new organizational role with defined permissions."""
+        decision = {
+            "type": "create_role",
+            "detail": role_name,
+            "target": role_name,
+            "reason": description,
+            "permissions": permissions or [],
+        }
+        decisions_sink.append(decision)
+        logger.info("hr_create_role_requested", by=agent_name, role=role_name)
+        return f"role_queued:{role_name}"
+
     # ---- Dynamic tool creation -------------------------------------------
 
     async def create_tool(name: str, description: str, code: str) -> str:
@@ -639,6 +713,34 @@ def build_agent_tools(
                 "Tools persist across simulations and compound over time."
             ),
             args_schema=CreateToolInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=hire_agent,
+            name="hire_agent",
+            description=(
+                "Hire a new agent. You decide: role (trader/analyst/quant/risk_manager/researcher/any), "
+                "name, capital allocation, philosophy, and optional personality vector. "
+                "Agent is created immediately and runs in the next cycle."
+            ),
+            args_schema=HireAgentInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=fire_agent,
+            name="fire_agent",
+            description=(
+                "Fire (terminate) an agent by name. You decide who and why. "
+                "Agent is removed from the roster immediately after this cycle."
+            ),
+            args_schema=FireAgentInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=create_role,
+            name="create_role",
+            description=(
+                "Define a new organizational role with a name and permissions. "
+                "Use this to structure the organization before hiring into that role."
+            ),
+            args_schema=CreateRoleInput,
         ),
     ]
 
