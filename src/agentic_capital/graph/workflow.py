@@ -45,7 +45,7 @@ def _build_system_prompt(agent: BaseAgent) -> str:
 
     No workflow prescribed — agent decides everything.
     """
-    from agentic_capital.formats.compact import LEGEND, MANDATE, MANDATE_CEO_HR, psych
+    from agentic_capital.formats.compact import LEGEND, MANDATE, MANDATE_CEO_HR, MANDATE_RISK, psych
 
     agent_class = type(agent).__name__
     if "CEO" in agent_class:
@@ -55,7 +55,7 @@ def _build_system_prompt(agent: BaseAgent) -> str:
     else:
         role = "trader"
 
-    mandate = MANDATE + (MANDATE_CEO_HR if role == "CEO" else "")
+    mandate = MANDATE + (MANDATE_CEO_HR if role == "CEO" else "") + MANDATE_RISK
 
     return (
         f"{LEGEND}\n"

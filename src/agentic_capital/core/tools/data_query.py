@@ -38,6 +38,17 @@ _FORBIDDEN_TOKENS = [
     "__import__", "open(", "exec(", "eval(",
 ]
 
+# ---------------------------------------------------------------------------
+# Shared position policy — set by CEO/risk_manager, enforced in submit_order
+# Persists for the duration of the simulation run (reset on restart)
+# ---------------------------------------------------------------------------
+_POSITION_POLICY: dict = {
+    "max_per_trade_pct": None,   # e.g. 0.30 = max 30% of available per single order
+    "max_per_symbol_pct": None,  # e.g. 0.50 = max 50% of total capital in one symbol
+    "set_by": None,
+    "set_at": None,
+}
+
 
 def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
     """Restricted execution namespace exposed to AI-created tools."""
@@ -327,17 +338,32 @@ def build_agent_tools(
             from agentic_capital.formats.compact import order as _order
             from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
-            # Guard: BUY orders must not exceed available capital
+            # Guard: BUY orders must not exceed available capital or position policy
             if side.lower() == "buy" and price and price > 0:
                 order_value = price * quantity
                 b = await trading.get_balance()
                 effective_available = min(b.available, capital_limit) if capital_limit else b.available
+
+                # Capital hard limit
                 if order_value > effective_available:
                     return (
                         f"ERR:insufficient_capital|"
                         f"need:{order_value:.0f}|avl:{effective_available:.0f}|"
                         f"max_qty:{int(effective_available // price)}"
                     )
+
+                # Position policy soft limit (set by CEO/risk_manager)
+                max_pct = _POSITION_POLICY.get("max_per_trade_pct")
+                if max_pct:
+                    max_allowed = effective_available * max_pct
+                    if order_value > max_allowed:
+                        set_by = _POSITION_POLICY.get("set_by", "policy")
+                        return (
+                            f"ERR:position_policy|"
+                            f"need:{order_value:.0f}|max_allowed:{max_allowed:.0f}|"
+                            f"max_qty:{int(max_allowed // price)}|"
+                            f"limit:{max_pct:.0%}_per_trade|set_by:{set_by}"
+                        )
 
             o = Order(
                 symbol=symbol,
@@ -519,6 +545,47 @@ def build_agent_tools(
             except Exception as e:
                 results.append(f"{market}:ERR@{local_time}")
         return "|".join(results)
+
+    # ---- Position policy tools (CEO/risk_manager) ------------------------
+
+    async def set_position_policy(
+        max_per_trade_pct: float,
+        max_per_symbol_pct: float = 1.0,
+    ) -> str:
+        """Set position sizing policy. Applies to ALL agents immediately.
+
+        max_per_trade_pct: max fraction of available capital per single order (e.g. 0.3 = 30%)
+        max_per_symbol_pct: max fraction of total capital in one symbol (e.g. 0.5 = 50%)
+
+        Example: set_position_policy(0.2, 0.4) → each trade ≤20% of cash, each symbol ≤40% total
+        """
+        import time
+        max_per_trade_pct = max(0.01, min(1.0, max_per_trade_pct))
+        max_per_symbol_pct = max(0.01, min(1.0, max_per_symbol_pct))
+        _POSITION_POLICY["max_per_trade_pct"] = max_per_trade_pct
+        _POSITION_POLICY["max_per_symbol_pct"] = max_per_symbol_pct
+        _POSITION_POLICY["set_by"] = agent_name
+        _POSITION_POLICY["set_at"] = time.strftime("%H:%M")
+        logger.info(
+            "position_policy_set",
+            by=agent_name,
+            max_per_trade_pct=max_per_trade_pct,
+            max_per_symbol_pct=max_per_symbol_pct,
+        )
+        return (
+            f"policy_set|max_per_trade:{max_per_trade_pct:.0%}|"
+            f"max_per_symbol:{max_per_symbol_pct:.0%}|"
+            f"effective:immediately|applies_to:all_agents"
+        )
+
+    async def get_position_policy() -> str:
+        """Get current position sizing policy set by CEO/risk_manager."""
+        pct = _POSITION_POLICY.get("max_per_trade_pct")
+        sym = _POSITION_POLICY.get("max_per_symbol_pct")
+        by = _POSITION_POLICY.get("set_by", "none")
+        if pct is None:
+            return "policy:none|no_limit_set|set_by:none"
+        return f"max_per_trade:{pct:.0%}|max_per_symbol:{sym:.0%}|set_by:{by}"
 
     # ---- HR tools (CEO-accessible) ---------------------------------------
 
@@ -713,6 +780,21 @@ def build_agent_tools(
                 "Tools persist across simulations and compound over time."
             ),
             args_schema=CreateToolInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=set_position_policy,
+            name="set_position_policy",
+            description=(
+                "Set position sizing policy for ALL agents. Enforced automatically in every order. "
+                "CEO or risk_manager should call this to prevent over-concentration. "
+                "Example: set_position_policy(0.2) → each trade ≤20% of available cash. "
+                "Call get_position_policy to check current limits."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=get_position_policy,
+            name="get_position_policy",
+            description="Get current position sizing policy (max % per trade, set by whom).",
         ),
         StructuredTool.from_function(
             coroutine=hire_agent,

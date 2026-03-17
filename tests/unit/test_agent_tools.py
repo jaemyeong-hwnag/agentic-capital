@@ -266,6 +266,61 @@ class TestBuildAgentTools:
         assert not result.startswith("ERR:insufficient_capital")
 
     @pytest.mark.asyncio
+    async def test_set_position_policy_tool(self):
+        tools, _, _, _ = build_agent_tools(agent_name="Risk-Alpha")
+        set_tool = next(t for t in tools if t.name == "set_position_policy")
+        get_tool = next(t for t in tools if t.name == "get_position_policy")
+
+        result = await set_tool.coroutine(max_per_trade_pct=0.25, max_per_symbol_pct=0.5)
+        assert "max_per_trade:25%" in result
+        assert "max_per_symbol:50%" in result
+        assert "effective:immediately" in result
+
+        policy = await get_tool.coroutine()
+        assert "max_per_trade:25%" in policy
+        assert "Risk-Alpha" in policy
+
+    @pytest.mark.asyncio
+    async def test_position_policy_blocks_oversized_order(self):
+        from agentic_capital.core.tools import data_query as dq
+        # Reset policy first
+        dq._POSITION_POLICY["max_per_trade_pct"] = 0.20
+        dq._POSITION_POLICY["set_by"] = "Risk-Alpha"
+
+        trading = _make_trading()  # available=8_000_000
+        tools, _, _, _ = build_agent_tools(trading=trading, agent_name="Trader-X")
+        set_tool = next(t for t in tools if t.name == "set_position_policy")
+        await set_tool.coroutine(max_per_trade_pct=0.20)
+
+        submit_tool = next(t for t in tools if t.name == "submit_order")
+        # 8_000_000 * 20% = 1_600_000 max. 100 × 70000 = 7_000_000 → blocked
+        result = await submit_tool.coroutine(
+            symbol="005930", side="buy", quantity=100, price=70000.0, market="kr_stock"
+        )
+        assert result.startswith("ERR:position_policy")
+        assert "20%" in result
+
+        # Reset policy
+        dq._POSITION_POLICY["max_per_trade_pct"] = None
+
+    @pytest.mark.asyncio
+    async def test_position_policy_allows_sized_order(self):
+        from agentic_capital.core.tools import data_query as dq
+        trading = _make_trading()  # available=8_000_000
+        tools, _, _, _ = build_agent_tools(trading=trading, agent_name="Trader-X")
+        set_tool = next(t for t in tools if t.name == "set_position_policy")
+        await set_tool.coroutine(max_per_trade_pct=0.20)  # max 1_600_000
+
+        submit_tool = next(t for t in tools if t.name == "submit_order")
+        # 10 × 70000 = 700_000 < 1_600_000 → allowed
+        result = await submit_tool.coroutine(
+            symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
+        )
+        assert "submitted" in result
+        # Reset
+        dq._POSITION_POLICY["max_per_trade_pct"] = None
+
+    @pytest.mark.asyncio
     async def test_hire_agent_tool_records_decision(self):
         tools, decisions, _, _ = build_agent_tools(agent_name="CEO-Alpha")
         tool = next(t for t in tools if t.name == "hire_agent")
