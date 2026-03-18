@@ -282,7 +282,7 @@ class KISTradingAdapter(TradingPort):
     # ── Positions ─────────────────────────────────────────────────────────────
 
     async def get_positions(self) -> list[Position]:
-        """Get all open positions — domestic + overseas combined."""
+        """Get all open positions — domestic + overseas + futures combined."""
         domestic = await self._get_domestic_positions()
         if not self._session.is_paper:
             try:
@@ -290,9 +290,15 @@ class KISTradingAdapter(TradingPort):
             except Exception:
                 logger.warning("kis_overseas_positions_failed_fallback_domestic_only")
                 overseas = []
+            try:
+                futures = await self._get_futures_positions()
+            except Exception:
+                logger.warning("kis_futures_positions_failed_skipping")
+                futures = []
         else:
             overseas = []
-        return domestic + overseas
+            futures = []
+        return domestic + overseas + futures
 
     async def _get_domestic_positions(self) -> list[Position]:
         """국내주식 보유 포지션 조회."""
@@ -394,6 +400,83 @@ class KISTradingAdapter(TradingPort):
         except Exception:
             logger.exception("kis_get_overseas_positions_failed")
             raise
+
+    async def _get_futures_positions(self) -> list[Position]:
+        """국내선물 보유 포지션 조회 (CTFO6118R)."""
+        await self._session.ensure_token()
+        try:
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/inquire-balance",
+                headers=self._session.headers(_FUT_TR["balance"][self._mode()]),
+                params={
+                    "CANO": self._session.cano,
+                    "ACNT_PRDT_CD": self._session.prdt_cd,
+                    "MGNA_DVSN": "01",
+                    "EXCC_STAT_CD": "1",
+                    "CTX_AREA_FK200": "",
+                    "CTX_AREA_NK200": "",
+                },
+            )
+            data = r.json()
+            if data.get("rt_cd") != "0":
+                logger.debug("kis_futures_positions_empty", msg=data.get("msg1", ""))
+                return []
+
+            from agentic_capital.ports.trading import FuturesPosition
+            positions = []
+            for item in data.get("output1", []):
+                qty = float(item.get("hldg_qty", 0))
+                if qty == 0:
+                    continue
+                net_side = "long" if qty > 0 else "short"
+                positions.append(FuturesPosition(
+                    symbol=item.get("pdno", ""),
+                    quantity=abs(qty),
+                    avg_price=float(item.get("pchs_avg_pric", 0)),
+                    current_price=float(item.get("prpr", 0)),
+                    unrealized_pnl=float(item.get("evlu_pfls_amt", 0)),
+                    unrealized_pnl_pct=float(item.get("evlu_pfls_rt", 0)),
+                    market=Market.KR_FUTURES,
+                    currency="KRW",
+                    multiplier=250_000,
+                    margin_required=float(item.get("mgna_amt", 0)),
+                    expiry=item.get("expr_dt", "")[:6] or None,
+                    net_side=net_side,
+                    pnl_per_contract=float(item.get("evlu_pfls_amt", 0)),
+                ))
+
+            logger.debug("kis_futures_positions_fetched", count=len(positions))
+            return positions
+        except Exception:
+            logger.exception("kis_get_futures_positions_failed")
+            return []
+
+    async def get_futures_quote(self, symbol: str) -> dict:
+        """선물 현재가 조회 (FHKIF03010100)."""
+        await self._session.ensure_token()
+        try:
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-futureoption/v1/quotations/inquire-price",
+                headers=self._session.headers("FHKIF03010100"),
+                params={"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": symbol},
+            )
+            data = r.json()
+            if data.get("rt_cd") != "0":
+                return {}
+            output = data.get("output", {})
+            return {
+                "symbol": symbol,
+                "price": float(output.get("stck_prpr", 0)),
+                "open": float(output.get("stck_oprc", 0)),
+                "high": float(output.get("stck_hgpr", 0)),
+                "low": float(output.get("stck_lwpr", 0)),
+                "volume": int(output.get("acml_vol", 0)),
+                "change": float(output.get("prdy_vrss", 0)),
+                "change_pct": float(output.get("prdy_ctrt", 0)),
+            }
+        except Exception:
+            logger.exception("kis_get_futures_quote_failed", symbol=symbol)
+            return {}
 
     # ── Order submission ──────────────────────────────────────────────────────
 
@@ -530,7 +613,8 @@ class KISTradingAdapter(TradingPort):
                 "ORD_DVSN": "01" if not order.price else "00",  # 01=시장가, 00=지정가
                 "ORD_QTY": str(int(order.quantity)),
                 "ORD_UNPR": str(order.price or 0),
-                "CBLC_DVSN": "01" if order.side == OrderSide.BUY else "02",  # 01=신규, 02=청산
+                # 01=신규(open), 02=청산(close) — must be explicit, not inferred from side
+                "CBLC_DVSN": "02" if order.position_effect == "close" else "01",
             }
             r = await self._session.post(
                 f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/order",
