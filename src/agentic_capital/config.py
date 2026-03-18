@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     initial_capital: int = 1_000_000
     log_level: str = "INFO"
 
+    # Futures risk management
+    futures_max_contracts: int = 3          # hard cap per open order
+    futures_daily_loss_pct: float = 0.05    # halt trading if daily loss >= 5% of capital
+
     # LangSmith
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""

@@ -38,6 +38,8 @@ class FuturesEngine:
         self._running = False
         self._cycle_count = 0
         self._capital_limit: float = float(settings.initial_capital)
+        self._max_contracts: int = settings.futures_max_contracts
+        self._max_daily_loss: float = self._capital_limit * settings.futures_daily_loss_pct
 
     def _init_adapters(self) -> None:
         setup_tracing()
@@ -47,7 +49,12 @@ class FuturesEngine:
 
         kis_session = KISSession()
         raw_trading = KISTradingAdapter(session=kis_session)
-        self._trading = FuturesSessionGuard(raw_trading, capital_limit=self._capital_limit)
+        self._trading = FuturesSessionGuard(
+            raw_trading,
+            capital_limit=self._capital_limit,
+            max_contracts=self._max_contracts,
+            max_daily_loss=self._max_daily_loss,
+        )
 
     async def _init_recorder(self) -> uuid.UUID:
         """Initialize recorder and return simulation_id. Falls back to random UUID on error."""
@@ -98,6 +105,55 @@ class FuturesEngine:
 
         self._agent = _ScalperAgent(profile=profile, personality=personality)
 
+    def _minutes_until_session_end(self) -> float:
+        """Minutes until the current KR futures session closes. Returns 9999 if mid-session far from end."""
+        from datetime import datetime, timezone, timedelta, time as dtime
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        t = now.time()
+
+        # KRX day session: 09:00–15:45 KST
+        if dtime(9, 0) <= t < dtime(15, 45):
+            end = now.replace(hour=15, minute=45, second=0, microsecond=0)
+            return (end - now).total_seconds() / 60
+
+        # KRX night session: 18:00–05:00 KST (spans midnight)
+        if t >= dtime(18, 0):
+            end = (now + timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)
+            return (end - now).total_seconds() / 60
+        if t < dtime(5, 0):
+            end = now.replace(hour=5, minute=0, second=0, microsecond=0)
+            return (end - now).total_seconds() / 60
+
+        return 9999.0  # between sessions
+
+    async def _close_all_now(self, reason: str = "") -> None:
+        """Force-close all open futures positions (market order)."""
+        from agentic_capital.ports.trading import FuturesPosition, Market, Order, OrderSide, OrderType
+        try:
+            positions = await self._trading.get_positions()
+            for p in positions:
+                if p.market not in (Market.KR_FUTURES, Market.KR_OPTIONS):
+                    continue
+                close_side = (
+                    OrderSide.SELL
+                    if (not isinstance(p, FuturesPosition) or p.net_side == "long")
+                    else OrderSide.BUY
+                )
+                order = Order(
+                    symbol=p.symbol,
+                    side=close_side,
+                    order_type=OrderType.MARKET,
+                    quantity=p.quantity,
+                    market=p.market,
+                    position_effect="close",
+                    multiplier=p.multiplier if isinstance(p, FuturesPosition) else None,
+                )
+                await self._trading.submit_order(order)
+                logger.info("futures_engine_pre_close", symbol=p.symbol, reason=reason)
+        except Exception:
+            logger.warning("futures_engine_pre_close_failed", reason=reason)
+
     async def _run_cycle(self) -> float:
         """Run one agent cycle. Returns next wakeup seconds.
 
@@ -134,6 +190,17 @@ class FuturesEngine:
                 sleeping=f"{sleep_secs}s",
             )
             return float(sleep_secs)
+
+        # Session-end auto-close: liquidate all positions 10 min before close
+        mins_left = self._minutes_until_session_end()
+        if mins_left <= 10 and getattr(self._trading, "active_symbol", None):
+            logger.warning(
+                "futures_pre_close_session_end",
+                minutes_left=round(mins_left, 1),
+            )
+            await self._close_all_now(reason="session_end")
+            # Sleep past session end + 5 min buffer
+            return float(max(int(mins_left * 60) + 300, 300))
 
         # Sync guard state from live positions on each cycle
         if hasattr(self._trading, "sync_state"):

@@ -262,6 +262,146 @@ class TestFuturesSessionGuard:
         result = await guard.get_futures_quote("101W6")
         assert result["price"] == 380.0
 
+    # ── Max contracts ──────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_max_contracts_caps_quantity(self):
+        """Open order exceeding max_contracts is silently capped, not rejected."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_contracts=3)
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=10.0,  # exceeds cap
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        result = await guard.submit_order(order)
+        assert result.status == "filled"
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity == 3.0  # capped
+
+    @pytest.mark.asyncio
+    async def test_max_contracts_close_not_capped(self):
+        """Close orders are never subject to max_contracts cap."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_contracts=3)
+        guard._active_symbol = "101W6"
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=10.0,  # large close — must not be capped
+            market=Market.KR_FUTURES,
+            position_effect="close",
+        )
+        result = await guard.submit_order(order)
+        assert result.status == "filled"
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity == 10.0  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_max_contracts_within_limit_unchanged(self):
+        """Orders within max_contracts are passed through unchanged."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_contracts=3)
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=2.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        await guard.submit_order(order)
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity == 2.0
+
+    # ── Daily loss limit ───────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_daily_loss_limit_blocks_open_when_breached(self):
+        """Open order rejected when daily P&L < -max_daily_loss."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=1_000_000, available=900_000, currency="KRW",
+            daily_pnl=-60_000.0,  # exceeds 5% of 1M = 50K
+            daily_fee=0.0,
+        ))
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        result = await guard.submit_order(_futures_order("101W6", "open"))
+        assert result.status == "rejected"
+        assert "daily_loss_limit" in result.metadata["error"]
+
+    @pytest.mark.asyncio
+    async def test_daily_loss_sets_halt_date(self):
+        """Breaching daily loss sets _halt_date to today."""
+        from datetime import date
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=1_000_000, available=900_000, currency="KRW",
+            daily_pnl=-60_000.0, daily_fee=0.0,
+        ))
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        await guard.submit_order(_futures_order("101W6", "open"))
+        assert guard._halt_date == date.today().isoformat()
+
+    @pytest.mark.asyncio
+    async def test_daily_halt_flag_blocks_subsequent_opens(self):
+        """Once halted, subsequent open orders are blocked without calling balance."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        from datetime import date
+        guard._halt_date = date.today().isoformat()  # pre-set halt
+
+        result = await guard.submit_order(_futures_order("101W6", "open"))
+        assert result.status == "rejected"
+        assert "daily_loss_limit" in result.metadata["error"]
+        inner.get_balance.assert_not_called()  # fast-path, no balance call
+
+    @pytest.mark.asyncio
+    async def test_daily_halt_allows_close_orders(self):
+        """Close orders bypass the daily halt — allow liquidation even when halted."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        from datetime import date
+        guard._halt_date = date.today().isoformat()
+        guard._active_symbol = "101W6"
+
+        close_order = Order(
+            symbol="101W6",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            market=Market.KR_FUTURES,
+            position_effect="close",
+        )
+        result = await guard.submit_order(close_order)
+        assert result.status == "filled"  # close always allowed
+
+    @pytest.mark.asyncio
+    async def test_daily_halt_resets_on_new_day_via_sync_state(self):
+        """sync_state() resets the halt flag if it was set on a prior day."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        guard._halt_date = "2000-01-01"  # old date
+        await guard.sync_state()
+        assert guard._halt_date is None
+
+    @pytest.mark.asyncio
+    async def test_daily_loss_within_limit_allows_open(self):
+        """No halt when daily P&L is within limit."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=1_000_000, available=900_000, currency="KRW",
+            daily_pnl=-10_000.0,  # within 50K limit
+            daily_fee=0.0,
+        ))
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        result = await guard.submit_order(_futures_order("101W6", "open"))
+        assert result.status == "filled"
+
 
 # ── futures_tools ─────────────────────────────────────────────────────────────
 
@@ -815,6 +955,44 @@ class TestFuturesEngine:
             await engine.start()
 
         assert call_count == 2  # first raised, second stopped the loop
+
+    @pytest.mark.asyncio
+    async def test_session_end_auto_close_skips_ai(self):
+        """When within 10 min of session end and position open, AI is skipped and positions closed."""
+        engine = self._make_engine_with_mocks()
+        engine._recorder = None
+        engine._trading.active_symbol = "101W6"
+
+        with patch("agentic_capital.simulation.futures_engine.get_open_markets",
+                   return_value=["KRX"]), \
+             patch.object(engine, "_minutes_until_session_end", return_value=5.0), \
+             patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
+             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+            next_secs = await engine._run_cycle()
+            mock_close.assert_called_once_with(reason="session_end")
+            mock_llm.assert_not_called()
+            assert next_secs >= 300
+
+    @pytest.mark.asyncio
+    async def test_session_end_no_close_when_flat(self):
+        """Session-end auto-close skipped when no active position."""
+        engine = self._make_engine_with_mocks()
+        engine._recorder = None
+        engine._trading.active_symbol = None  # flat
+
+        with patch("agentic_capital.simulation.futures_engine.get_open_markets",
+                   return_value=["KRX"]), \
+             patch.object(engine, "_minutes_until_session_end", return_value=5.0), \
+             patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
+             patch("agentic_capital.core.tools.futures_tools.build_futures_tools",
+                   return_value=([], [], [60])), \
+             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
+            mock_react = MagicMock()
+            mock_react.ainvoke = AsyncMock(return_value={"messages": []})
+            mock_create_agent.return_value = mock_react
+            await engine._run_cycle()
+            mock_close.assert_not_called()  # no position to close
 
     @pytest.mark.asyncio
     async def test_run_cycle_records_to_db(self):

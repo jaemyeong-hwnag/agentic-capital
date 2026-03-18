@@ -32,19 +32,41 @@ class FuturesSessionGuard(TradingPort):
     - Single-symbol lock: cross-symbol orders rejected until close_all
     - Capital limit: open orders rejected when unrealized loss >= capital_limit;
       enforce_capital_limit() force-closes all positions if limit is breached
+    - Max contracts: open orders capped at max_contracts per order
+    - Daily loss limit: trading halted for the day if daily_pnl < -max_daily_loss
     """
 
-    def __init__(self, inner: TradingPort, capital_limit: float | None = None) -> None:
+    def __init__(
+        self,
+        inner: TradingPort,
+        capital_limit: float | None = None,
+        max_contracts: int | None = None,
+        max_daily_loss: float | None = None,
+    ) -> None:
         self._inner = inner
         self._active_symbol: str | None = None
         self._capital_limit = capital_limit
+        self._max_contracts = max_contracts
+        self._max_daily_loss = max_daily_loss
+        self._halt_date: str | None = None  # YYYY-MM-DD when daily loss halted
 
     @property
     def active_symbol(self) -> str | None:
         return self._active_symbol
 
     async def sync_state(self) -> None:
-        """Re-sync active symbol from live positions (call on engine startup)."""
+        """Re-sync active symbol from live positions (call on engine startup).
+
+        Also resets daily halt if it's a new calendar day.
+        """
+        # Reset daily halt on new day
+        if self._halt_date:
+            from datetime import date
+            today = date.today().isoformat()
+            if self._halt_date != today:
+                self._halt_date = None
+                logger.info("futures_guard_daily_halt_reset")
+
         try:
             positions = await self._inner.get_positions()
             fut_pos = [p for p in positions if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS)]
@@ -62,6 +84,24 @@ class FuturesSessionGuard(TradingPort):
         # Pass-through for non-futures markets
         if order.market not in (Market.KR_FUTURES, Market.KR_OPTIONS):
             return await self._inner.submit_order(order)
+
+        # Daily loss halt: block ALL new opens if today's loss limit was breached
+        if self._halt_date and order.position_effect == "open":
+            logger.warning(
+                "futures_guard_daily_halt_active",
+                halt_date=self._halt_date,
+                symbol=order.symbol,
+            )
+            return OrderResult(
+                order_id="",
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                filled_price=0.0,
+                status="rejected",
+                market=order.market,
+                metadata={"error": f"daily_loss_limit:trading_halted:{self._halt_date}"},
+            )
 
         # Long-only: reject sell/open (short entry) — sell/close is allowed
         if order.side.value == "sell" and order.position_effect != "close":
@@ -82,6 +122,20 @@ class FuturesSessionGuard(TradingPort):
                 metadata={"error": "long_only:short_positions_not_allowed"},
             )
 
+        # Daily loss limit: block new opens if today's realized+unrealized P&L < -limit
+        if order.position_effect == "open" and self._max_daily_loss is not None:
+            if not await self._daily_loss_safe():
+                return OrderResult(
+                    order_id="",
+                    symbol=order.symbol,
+                    side=order.side,
+                    quantity=0.0,
+                    filled_price=0.0,
+                    status="rejected",
+                    market=order.market,
+                    metadata={"error": f"daily_loss_limit:trading_halted:{self._halt_date}"},
+                )
+
         # Capital limit: block new opens if unrealized loss already >= limit
         if order.position_effect == "open" and self._capital_limit is not None:
             if not await self._capital_safe():
@@ -98,6 +152,26 @@ class FuturesSessionGuard(TradingPort):
                     status="rejected",
                     market=order.market,
                     metadata={"error": "capital_limit_exceeded:close_positions_first"},
+                )
+
+        # Max contracts hard cap: absolute limit regardless of capital
+        if order.position_effect == "open" and self._max_contracts is not None:
+            if order.quantity > self._max_contracts:
+                logger.warning(
+                    "futures_guard_contracts_capped",
+                    symbol=order.symbol,
+                    requested=order.quantity,
+                    capped=self._max_contracts,
+                )
+                order = Order(
+                    symbol=order.symbol,
+                    side=order.side,
+                    order_type=order.order_type,
+                    quantity=float(self._max_contracts),
+                    price=order.price,
+                    market=order.market,
+                    position_effect=order.position_effect,
+                    multiplier=order.multiplier,
                 )
 
         # Max quantity guard: cap contracts so worst-case 10% drop <= capital_limit
@@ -221,6 +295,24 @@ class FuturesSessionGuard(TradingPort):
             await self._inner.submit_order(close_order)
         except Exception:
             logger.warning("futures_guard_post_fill_validation_failed", symbol=symbol)
+
+    async def _daily_loss_safe(self) -> bool:
+        """Return False if today's P&L has exceeded max_daily_loss (halts trading for the day)."""
+        try:
+            balance = await self._inner.get_balance()
+            if balance.daily_pnl < -self._max_daily_loss:
+                from datetime import date
+                self._halt_date = date.today().isoformat()
+                logger.warning(
+                    "futures_guard_daily_loss_limit_breached",
+                    daily_pnl=balance.daily_pnl,
+                    max_daily_loss=self._max_daily_loss,
+                    halt_date=self._halt_date,
+                )
+                return False
+            return True
+        except Exception:
+            return True  # fail-open: allow if balance check fails
 
     async def _capital_safe(self) -> bool:
         """Return False if total unrealized loss >= capital_limit."""
