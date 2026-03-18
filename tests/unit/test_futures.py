@@ -570,15 +570,12 @@ class TestFuturesEngine:
         engine = FuturesEngine()
         sim_id = uuid.uuid4()
         with patch("agentic_capital.simulation.futures_engine.create_random_personality") as mock_p, \
-             patch("agentic_capital.simulation.futures_engine.create_agent") as mock_create:
+             patch("agentic_capital.simulation.futures_engine.create_agent_profile") as mock_profile:
             mock_p.return_value = MagicMock()
-            mock_agent = MagicMock()
-            mock_agent.name = "Scalper-Alpha"
-            mock_create.return_value = mock_agent
+            mock_profile.return_value = MagicMock()
             engine._create_agent(sim_id)
             assert engine._agent is not None
-            assert mock_create.call_args[1]["name"] == "Scalper-Alpha"
-            assert mock_create.call_args[1]["role"] == "trader"
+            assert mock_profile.call_args[1]["name"] == "Scalper-Alpha"
 
     @pytest.mark.asyncio
     async def test_engine_start_runs_one_cycle_then_stops(self):
