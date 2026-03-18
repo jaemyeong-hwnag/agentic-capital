@@ -28,6 +28,45 @@
 
 ---
 
+## 실행 모드
+
+| 모드 | 실행 명령 | 에이전트 구성 | 시장 | 전략 |
+|------|----------|--------------|------|------|
+| **stocks (기본)** | `python -m agentic_capital.main` | CEO + Analyst + Trader (멀티) | KRX + NASDAQ/NYSE | 1시간 단위 자율 |
+| **futures** | `python -m agentic_capital.main --futures` | Scalper-Alpha (단일) | KOSPI200 선물 | 단타 스캘핑 |
+
+### 선물 모드 (FuturesEngine)
+
+- **FuturesSessionGuard**: Port 데코레이터로 단일 종목 락 물리적 강제
+  - 다른 종목 주문 시 `rejected` 반환 (`symbol_lock:종목코드:close_all_first`)
+  - `close_all_positions()` 후 락 해제
+- **AI 도구**: `get_futures_balance`, `get_futures_positions`, `get_futures_quote`, `submit_futures_order`, `close_all_positions`, `request_wakeup`
+- **KOSPI200 계약 스펙**: 1pt = 250,000 KRW, 틱 0.05pt = 12,500 KRW
+- **세션**: 주간 09:00-15:15 KST (15:10 필수 청산) + 야간 18:00-05:00 KST
+
+### 수익성 가시화 (모든 모드 공통)
+
+매 잔고 조회마다 AI가 실질 수익을 직접 인지:
+```
+tot:10000000,avl:8000000,ccy:KRW,
+pnl_today:15000,fee_today:500,op_cost:10000,net_today:4500
+```
+- `op_cost`: AI API 고정 운영비 10,000 KRW/일
+- `net_today`: `pnl_today − op_cost` — 운영비 제외 실질 수익
+- 해외 포지션 손익은 KRW 환산 (`tot_evlu_pfls_amt`) 포함
+
+### 시장 운용 시간 (KST 기준)
+
+| 시장 | 시간 | 비고 |
+|------|------|------|
+| KRX (국내 주식) | 09:00–15:30 | |
+| KOSPI200 선물 주간 | 09:00–15:15 | 15:10까지 청산 필수 |
+| KOSPI200 선물 야간 | 18:00–05:00 | |
+| NASDAQ/NYSE 프리마켓 | 17:00–22:30 | |
+| NASDAQ/NYSE 정규장 | 22:30–05:00 | |
+
+---
+
 ## 아키텍처 총괄
 
 ```
@@ -58,9 +97,10 @@
 ├──────────────────────── Port ────────────────────────────┤
 │                                                          │
 │  ADAPTERS (플러그인 — 교체 가능)                          │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐          │
-│  │  KIS   │ │Binance │ │ Alpaca │ │ Upbit  │  ...     │
-│  └────────┘ └────────┘ └────────┘ └────────┘          │
+│  ┌─────────────────────────┐ ┌────────┐ ┌────────┐   │
+│  │  KIS (1차 — 구현 완료)   │ │Binance │ │ Alpaca │..│
+│  │  주식 + 선물 + 해외 잔고  │ │(Phase2)│ │(Phase2)│  │
+│  └─────────────────────────┘ └────────┘ └────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -75,7 +115,7 @@
 | 언어 | Python 3.12+ | AI 생태계 표준 |
 | 에이전트 프레임워크 | LangGraph v1.0 | FinCon (NeurIPS 2024), TradingAgents |
 | 에이전트 메모리 | A-MEM (Zettelkasten) | A-MEM (NeurIPS 2025) |
-| LLM | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
+| LLM | Gemini 2.5 Flash | 주식/선물 모든 에이전트 공통 사용 |
 
 ### Data
 
@@ -98,12 +138,13 @@
 
 ### Adapter (교체 가능)
 
-| 시장 | API | 패키지 |
-|------|-----|--------|
-| 국내 주식 | 한국투자증권 Open API | `python-kis` |
-| 암호화폐 | Binance, Upbit | `ccxt` |
-| 미국 주식 | Alpaca | `alpaca-py` |
-| 시장 데이터 | Yahoo Finance | `yfinance` |
+| 시장 | API | 패키지 | 상태 |
+|------|-----|--------|------|
+| 국내 주식 + 선물 | 한국투자증권 Open API | `python-kis` | ✅ 1차 구현 완료 |
+| 미국 주식 (해외 잔고 KRW 환산) | KIS 해외주식 | `python-kis` | ✅ 잔고 조회 완료 |
+| 암호화폐 | Binance, Upbit | `ccxt` | ⬚ Phase 2 |
+| 미국 주식 직접 | Alpaca | `alpaca-py` | ⬚ Phase 2 |
+| 시장 데이터 | Yahoo Finance | `yfinance` | ✅ |
 
 ---
 

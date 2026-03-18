@@ -173,18 +173,36 @@
 | emotion_snapshot | JSONB | 거래 시점 감정 스냅샷 |
 | executed_at | TIMESTAMPTZ | 체결 시점 |
 
-### positions 테이블
+### positions 테이블 (Port 모델: Position)
 
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | agent_id | UUID | FK → agents |
 | symbol | VARCHAR | 종목 |
-| market | VARCHAR | 시장 |
+| market | VARCHAR | kr_stock, us_stock, kr_futures, kr_options |
 | quantity | DECIMAL | 보유 수량 |
 | avg_price | DECIMAL | 평균 매수가 |
+| current_price | DECIMAL | 현재가 |
+| unrealized_pnl | DECIMAL | 미실현 손익 (절대값) |
 | unrealized_pnl_pct | FLOAT | 미실현 손익률 (%) |
+| currency | VARCHAR | KRW, USD |
 | thesis_id | UUID | 투자 근거 메모리 ID |
 | opened_at | TIMESTAMPTZ | 최초 매수 시점 |
+
+### futures_positions (Port 모델: FuturesPosition — Position 확장)
+
+선물 포지션은 `Position`을 상속하며 추가 필드를 가진다:
+
+| 추가 필드 | 타입 | 설명 |
+|----------|------|------|
+| multiplier | FLOAT | 계약 승수 (KOSPI200: 250,000 KRW/pt) |
+| margin_required | DECIMAL | 필요 증거금 |
+| expiry | VARCHAR | 만기월 (e.g. "2025-06") |
+| net_side | VARCHAR | long / short (매수개시 or 매도개시) |
+| pnl_per_contract | DECIMAL | 계약당 손익 = (cur−avg) × multiplier |
+
+> **FuturesSessionGuard**: `position_effect=open`으로 최초 주문 시 종목 락 → `close_all_positions()` 후 해제.
+> 다른 종목 주문 시 시스템이 `rejected` 반환 — AI 가이드라인이 아니라 물리적 차단.
 
 ---
 

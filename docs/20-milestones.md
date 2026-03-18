@@ -5,11 +5,17 @@
 > **사용자 설정은 `.env` + 자산/자본만.** 나머지(전략, 종목, 조직, 인사, 리서치)는 전부 AI 자율 운영.
 
 ```
-실행 흐름:
-1. .env 설정 (API 키, DB 접속)
-2. initial_capital 설정
-3. `agentic-capital` 실행
-4. AI가 자율적으로 조직 구성 → 전략 수립 → 투자 시작
+실행 흐름 — 주식 모드 (기본):
+1. .env 설정 (GEMINI_API_KEY, DATABASE_URL, REDIS_URL, KIS_*)
+2. INITIAL_CAPITAL 설정 (KRW)
+3. `python -m agentic_capital.main` 실행
+4. AI가 자율적으로 조직 구성 → 전략 수립 → KRX + NASDAQ/NYSE 투자 시작
+
+실행 흐름 — 선물 단타 모드:
+1. .env 설정 (동일)
+2. `python -m agentic_capital.main --futures` 실행
+3. Scalper-Alpha가 KOSPI200 선물 단타 시작
+   (1종목 락, 종목 전환 전 강제 청산, AI 비용 10,000 KRW/일 인지)
 ```
 
 ---
@@ -29,10 +35,11 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | M1 프로젝트 기반 | ✅ 완료 | 100% |
 | M2 Core 엔진 | ✅ 완료 | 100% |
 | M3 에이전트 시스템 | ✅ 완료 | 100% (13/13) |
-| M4 통신 + 어댑터 | ⬚ 부분 구현 | 85% (11/13, Phase1 100%) |
+| M4 통신 + 어댑터 | ✅ 완료 (Phase 1) | KIS 완료, Binance/Alpaca Phase 2 |
 | M5 시뮬레이션 | ✅ 완료 | 100% (12/12) |
-| M6 Paper Trading | ⬚ 부분 구현 | 56% (5/9) |
-| M7 실거래 | ⬚ 미착수 | 0% |
+| M5.5 선물 단타 모드 | ✅ 완료 | FuturesEngine + FuturesSessionGuard + `--futures` 플래그 |
+| M6 Paper Trading | ⬚ 부분 구현 | 67% (6/9) |
+| M7 실거래 | ⬚ 진행 가능 | KIS_IS_PAPER=false 설정으로 실전 전환 가능 |
 
 ---
 
@@ -261,10 +268,14 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 6.8 | 데이터 내보내기 (Parquet) | 논문용 데이터셋 | ✅ |
 | 6.9 | 1주일 연속 운영 테스트 | 안정성 검증 | ⬚ |
 
-### 구현 현황 (v0.9.0)
+### 구현 현황 (v0.17.0)
 
 **구현 완료:**
-- KIS 모의투자 E2E 동작 확인 (토큰 → 시세 → LLM 판단 → 주문 전송)
+- KIS 모의투자/실전 E2E 동작 확인 (토큰 → 시세 → LLM 판단 → 주문 전송)
+- KIS 선물 거래 (KOSPI200): TTTO0311U/TTTO0312U, 포지션 조회 CTFO6118R, 시세 FHKIF03010100
+- 일일 P&L + 수수료 + AI 운영비(10,000 KRW) 전체 가시화 (`net_today`)
+- 해외 포지션 손익 KRW 환산 (`tot_evlu_pfls_amt`) 포함
+- 전 시장 운용 시간 에이전트 인지 (KRX + NASDAQ/NYSE 프리+정규 KST 기준)
 - LangSmith 트레이싱: 설정 기반 자동 활성화
 - 백테스팅: DuckDB 기반 과거 데이터 리플레이, Sharpe/MDD 계산
 - 데이터 내보내기: Parquet/CSV 포맷, 논문용 데이터셋
@@ -320,13 +331,19 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ✅ ──→ M5 ✅ ──→ M6 ──→
 
 ---
 
-## 현재 진행: M6 Paper Trading
+## 현재 진행: M6 Paper Trading / M7 실거래 준비
 
-**v0.9.0 — M1~M5 완료, M6 진행 중**
+**v0.17.0 — M1~M5.5 완료, M6 진행 중 / M7 KIS 실전 전환 가능**
+
+### 완료된 작업 (v0.15.0 → v0.17.0)
+- ✅ **선물 단타 모드** (`--futures`): FuturesEngine + FuturesSessionGuard + 7개 AI 도구
+- ✅ **일일 수익성 가시화**: `net_today = pnl_today − 10,000 KRW(op_cost)`
+- ✅ **해외 P&L KRW 환산**: KIS `tot_evlu_pfls_amt` 기반
+- ✅ **전 시장 시간 명시**: KRX + NASDAQ/NYSE 프리+정규 KST 시간 에이전트 인지
+- ✅ **CBLC_DVSN 정정**: `position_effect` 기반 (`open`=01, `close`=02)
 
 ### 다음 작업
 1. **M6.3 실시간 시장 데이터** — WebSocket 시세 수신
-2. **M6.4 에이전트 10명 스케일 테스트** — 성능/안정성 검증
-3. **M6.6 LangSmith 트레이싱** — LLM 호출 디버깅/모니터링
-4. **M6.7 백테스팅 파이프라인** — DuckDB 기반 과거 데이터 시뮬레이션
-5. **M6.8 데이터 내보내기** — Parquet 포맷 논문용 데이터셋
+2. **M6.5 모니터링 대시보드** — 수익률/에이전트 상태 실시간 확인
+3. **M6.9 1주일 연속 운영** — 안정성 검증
+4. **M7.1 실전 전환** — `KIS_IS_PAPER=false` 설정
