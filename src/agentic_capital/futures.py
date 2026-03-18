@@ -1,11 +1,7 @@
-"""Entrypoint for multi-agent stock trading.
+"""Standalone entrypoint for futures scalping mode.
 
 Usage:
-  agentic-capital                   # installed script
-  python -m agentic_capital.main    # direct module run
-
-For futures scalping:
-  agentic-capital-futures           # installed script
+  agentic-capital-futures          # installed script
   python -m agentic_capital.futures
 """
 
@@ -34,18 +30,17 @@ async def _run() -> None:
 
     logger.info(
         "starting_simulation",
-        mode="stocks",
+        mode="futures_scalping",
         initial_capital=settings.initial_capital,
-        seed=settings.simulation_seed,
         kis_paper=settings.kis_is_paper,
     )
-    from agentic_capital.simulation.engine import SimulationEngine
-    engine = SimulationEngine()
+    from agentic_capital.simulation.futures_engine import FuturesEngine
+    engine = FuturesEngine()
     await engine.start()
 
 
 def main() -> None:
-    """CLI entrypoint for multi-agent stock trading."""
+    """CLI entrypoint for futures scalping."""
     try:
         asyncio.run(_run())
     except KeyboardInterrupt:
