@@ -699,12 +699,10 @@ class TestFuturesEngine:
 
         with patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=[]), \
-             patch("agentic_capital.simulation.clock.seconds_until_market_open",
-                   return_value=3600), \
              patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
             next_secs = await engine._run_cycle()
-            # Should sleep (capped at 3600), never call LLM
-            assert next_secs == 3600.0
+            # Should sleep (60 <= secs <= 3600), never call LLM
+            assert 60.0 <= next_secs <= 3600.0
             mock_llm.assert_not_called()
 
     @pytest.mark.asyncio

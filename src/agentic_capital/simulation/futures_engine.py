@@ -117,13 +117,20 @@ class FuturesEngine:
         )
 
         if not futures_open:
-            from agentic_capital.simulation.clock import seconds_until_market_open
-            wait = seconds_until_market_open()
-            # Cap at 1h — recheck in case of early open or data change
-            sleep_secs = min(wait, 3600) if wait > 0 else 300
+            from agentic_capital.simulation.clock import _is_night_session_open, _NIGHT_SESSIONS
+            from datetime import datetime, timezone, timedelta
+            # Compute seconds until KRX NIGHT session (18:00 KST)
+            KST = timezone(timedelta(hours=9))
+            now = datetime.now(KST)
+            night_open = now.replace(hour=18, minute=0, second=0, microsecond=0)
+            if now.time().hour >= 18:
+                night_open += timedelta(days=1)
+            wait = int((night_open - now).total_seconds())
+            # Cap at 1h so we recheck frequently near session open
+            sleep_secs = min(max(wait, 60), 3600)
             logger.info(
                 "futures_market_closed_sleeping",
-                next_open_in=f"{wait}s",
+                night_session_in=f"{wait}s",
                 sleeping=f"{sleep_secs}s",
             )
             return float(sleep_secs)
