@@ -152,6 +152,11 @@ class FuturesSessionGuard(TradingPort):
 
         result = await self._inner.submit_order(order)
 
+        # Post-fill: validate actual position size using real multiplier from broker
+        # Catches any symbol the AI chooses — no hardcoding needed
+        if result.status not in ("rejected", "cancelled") and order.position_effect == "open":
+            await self._enforce_qty_by_position(order.symbol)
+
         # Update lock state after successful order
         if result.status not in ("rejected", "cancelled"):
             if order.position_effect == "close":
@@ -170,6 +175,52 @@ class FuturesSessionGuard(TradingPort):
                 self._active_symbol = order.symbol
 
         return result
+
+    async def _enforce_qty_by_position(self, symbol: str) -> None:
+        """Post-fill: read actual multiplier from broker position and close excess contracts.
+
+        Works for any futures symbol — multiplier comes from the broker, not hardcoded.
+        """
+        if self._capital_limit is None:
+            return
+        try:
+            from agentic_capital.ports.trading import FuturesPosition
+            positions = await self._inner.get_positions()
+            fut = [p for p in positions
+                   if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS)
+                   and p.symbol == symbol
+                   and isinstance(p, FuturesPosition)]
+            if not fut:
+                return
+            p = fut[0]
+            worst_per_contract = p.current_price * 0.10 * p.multiplier
+            if worst_per_contract <= 0:
+                return
+            safe_qty = max(1, int(self._capital_limit / worst_per_contract))
+            excess = int(p.quantity) - safe_qty
+            if excess <= 0:
+                return
+            logger.warning(
+                "futures_guard_post_fill_qty_reduced",
+                symbol=symbol,
+                held=int(p.quantity),
+                safe=safe_qty,
+                excess=excess,
+                multiplier=p.multiplier,
+                capital_limit=self._capital_limit,
+            )
+            close_order = Order(
+                symbol=symbol,
+                side=OrderSide.SELL,
+                order_type=OrderType.MARKET,
+                quantity=float(excess),
+                market=p.market,
+                position_effect="close",
+                multiplier=p.multiplier,
+            )
+            await self._inner.submit_order(close_order)
+        except Exception:
+            logger.warning("futures_guard_post_fill_validation_failed", symbol=symbol)
 
     async def _capital_safe(self) -> bool:
         """Return False if total unrealized loss >= capital_limit."""
