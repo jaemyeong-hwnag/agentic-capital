@@ -99,7 +99,11 @@ class FuturesEngine:
         self._agent = _ScalperAgent(profile=profile, personality=personality)
 
     async def _run_cycle(self) -> float:
-        """Run one agent cycle. Returns next wakeup seconds."""
+        """Run one agent cycle. Returns next wakeup seconds.
+
+        If no futures market is open, skip AI call entirely and sleep until
+        the next session — avoids wasting LLM tokens when nothing can trade.
+        """
         self._cycle_count += 1
         open_markets = get_open_markets()
         futures_open = "KRX" in open_markets or "NIGHT" in open_markets
@@ -111,6 +115,18 @@ class FuturesEngine:
             open_markets=open_markets,
             active_symbol=getattr(self._trading, "active_symbol", None),
         )
+
+        if not futures_open:
+            from agentic_capital.simulation.clock import seconds_until_market_open
+            wait = seconds_until_market_open()
+            # Cap at 1h — recheck in case of early open or data change
+            sleep_secs = min(wait, 3600) if wait > 0 else 300
+            logger.info(
+                "futures_market_closed_sleeping",
+                next_open_in=f"{wait}s",
+                sleeping=f"{sleep_secs}s",
+            )
+            return float(sleep_secs)
 
         # Sync guard state from live positions on each cycle
         if hasattr(self._trading, "sync_state"):

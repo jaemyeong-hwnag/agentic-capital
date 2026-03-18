@@ -29,14 +29,45 @@ MARKETS = {
     "NYSE_AFTER": (time(16, 0), time(20, 0), ET),         # NYSE 애프터마켓
 }
 
+# Overnight sessions that span midnight — handled separately
+# KRX 야간선물: 평일 18:00 ~ 익일 05:00 KST
+_NIGHT_SESSIONS = {
+    "NIGHT": (time(18, 0), time(5, 0), KST),  # 18:00 ~ 익일 05:00 KST
+}
+
 
 def now_kst() -> datetime:
     """Get current time in KST."""
     return datetime.now(KST)
 
 
+def _is_night_session_open(market: str, dt: datetime | None = None) -> bool:
+    """Check overnight sessions that span midnight (e.g. 18:00~05:00)."""
+    if market not in _NIGHT_SESSIONS:
+        return False
+    open_time, close_time, tz = _NIGHT_SESSIONS[market]
+    if dt is None:
+        dt = datetime.now(tz)
+    else:
+        dt = dt.astimezone(tz)
+    # Night session: weekday required at open side (Mon-Fri 18:00~)
+    # or any weekday for the early-morning tail (00:00~05:00)
+    t = dt.time()
+    if t >= open_time:
+        # 18:00~23:59 — must be a trading day
+        return dt.weekday() in _TRADING_DAYS
+    elif t < close_time:
+        # 00:00~05:00 — previous day must have been a trading day
+        prev_weekday = (dt.weekday() - 1) % 7
+        return prev_weekday in _TRADING_DAYS
+    return False
+
+
 def is_market_open_for(market: str, dt: datetime | None = None) -> bool:
     """Check if a specific market is open."""
+    if market in _NIGHT_SESSIONS:
+        return _is_night_session_open(market, dt)
+
     if market not in MARKETS:
         return False
 
@@ -54,16 +85,18 @@ def is_market_open_for(market: str, dt: datetime | None = None) -> bool:
 
 
 def is_market_open(dt: datetime | None = None) -> bool:
-    """Check if ANY supported market is currently open.
+    """Check if ANY supported market is currently open (including night sessions).
 
     Returns True if at least one market is trading.
     """
-    return any(is_market_open_for(m, dt) for m in MARKETS)
+    return bool(get_open_markets(dt))
 
 
 def get_open_markets(dt: datetime | None = None) -> list[str]:
-    """Return list of currently open markets."""
-    return [m for m in MARKETS if is_market_open_for(m, dt)]
+    """Return list of currently open markets (including night sessions)."""
+    regular = [m for m in MARKETS if is_market_open_for(m, dt)]
+    night = [m for m in _NIGHT_SESSIONS if _is_night_session_open(m, dt)]
+    return regular + night
 
 
 def seconds_until_market_open(dt: datetime | None = None) -> int:
@@ -78,7 +111,8 @@ def seconds_until_market_open(dt: datetime | None = None) -> int:
 
     min_wait = float("inf")
 
-    for _market, (open_time, _close_time, tz) in MARKETS.items():
+    all_sessions = list(MARKETS.items()) + [(k, v) for k, v in _NIGHT_SESSIONS.items()]
+    for _market, (open_time, _close_time, tz) in all_sessions:
         local_dt = dt.astimezone(tz)
         target = local_dt.replace(hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0)
 

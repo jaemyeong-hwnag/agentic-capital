@@ -670,6 +670,7 @@ class TestFuturesEngine:
 
     @pytest.mark.asyncio
     async def test_run_cycle_default_wakeup_on_empty_sink(self):
+        """When market open but agent doesn't call request_wakeup, use default 60s."""
         engine = self._make_engine_with_mocks()
         engine._recorder = None
 
@@ -680,7 +681,7 @@ class TestFuturesEngine:
         with patch("agentic_capital.core.tools.futures_tools.build_futures_tools",
                    return_value=(mock_tools, decisions_sink, wakeup_sink)), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
-                   return_value=[]), \
+                   return_value=["KRX"]), \
              patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = MagicMock()
@@ -689,6 +690,22 @@ class TestFuturesEngine:
 
             next_secs = await engine._run_cycle()
             assert next_secs == 60.0  # _DEFAULT_CYCLE_SECONDS
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_skips_ai_when_market_closed(self):
+        """When futures market is closed, skip AI entirely and return sleep time."""
+        engine = self._make_engine_with_mocks()
+        engine._recorder = None
+
+        with patch("agentic_capital.simulation.futures_engine.get_open_markets",
+                   return_value=[]), \
+             patch("agentic_capital.simulation.clock.seconds_until_market_open",
+                   return_value=3600), \
+             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+            next_secs = await engine._run_cycle()
+            # Should sleep (capped at 3600), never call LLM
+            assert next_secs == 3600.0
+            mock_llm.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_run_cycle_handles_exception(self):
