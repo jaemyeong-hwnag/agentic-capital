@@ -15,6 +15,8 @@ from agentic_capital.ports.trading import (
     Market,
     Order,
     OrderResult,
+    OrderSide,
+    OrderType,
     Position,
     TradingPort,
 )
@@ -23,18 +25,19 @@ logger = structlog.get_logger()
 
 
 class FuturesSessionGuard(TradingPort):
-    """Decorator around TradingPort that enforces single-symbol futures trading.
+    """Decorator around TradingPort that enforces futures trading rules.
 
-    Rules:
-    - Only one futures symbol allowed at a time (_active_symbol lock)
-    - Cross-symbol orders are rejected: must close all first
-    - Non-futures orders pass through unchanged
-    - Call sync_state() on startup to restore lock from live positions
+    System-enforced rules (NOT AI guidelines — physically blocked):
+    - Long-only: sell/open (short entry) always rejected
+    - Single-symbol lock: cross-symbol orders rejected until close_all
+    - Capital limit: open orders rejected when unrealized loss >= capital_limit;
+      enforce_capital_limit() force-closes all positions if limit is breached
     """
 
-    def __init__(self, inner: TradingPort) -> None:
+    def __init__(self, inner: TradingPort, capital_limit: float | None = None) -> None:
         self._inner = inner
         self._active_symbol: str | None = None
+        self._capital_limit = capital_limit
 
     @property
     def active_symbol(self) -> str | None:
@@ -79,6 +82,49 @@ class FuturesSessionGuard(TradingPort):
                 metadata={"error": "long_only:short_positions_not_allowed"},
             )
 
+        # Capital limit: block new opens if unrealized loss already >= limit
+        if order.position_effect == "open" and self._capital_limit is not None:
+            if not await self._capital_safe():
+                logger.warning(
+                    "futures_guard_capital_limit_blocked",
+                    capital_limit=self._capital_limit,
+                )
+                return OrderResult(
+                    order_id="",
+                    symbol=order.symbol,
+                    side=order.side,
+                    quantity=0.0,
+                    filled_price=0.0,
+                    status="rejected",
+                    market=order.market,
+                    metadata={"error": "capital_limit_exceeded:close_positions_first"},
+                )
+
+        # Max quantity guard: cap contracts so worst-case loss <= capital_limit
+        # Uses 10% price drop as rough worst-case per contract
+        if order.position_effect == "open" and self._capital_limit is not None and order.price:
+            from agentic_capital.ports.trading import FuturesPosition
+            multiplier = 250_000  # default KOSPI200; overridden if known
+            worst_loss_per_contract = order.price * 0.10 * multiplier
+            if worst_loss_per_contract > 0:
+                max_qty = max(1, int(self._capital_limit / worst_loss_per_contract))
+                if order.quantity > max_qty:
+                    logger.warning(
+                        "futures_guard_qty_capped",
+                        requested=order.quantity,
+                        capped=max_qty,
+                        capital_limit=self._capital_limit,
+                    )
+                    order = Order(
+                        symbol=order.symbol,
+                        side=order.side,
+                        order_type=order.order_type,
+                        quantity=float(max_qty),
+                        price=order.price,
+                        market=order.market,
+                        position_effect=order.position_effect,
+                    )
+
         # Enforce single-symbol lock
         if self._active_symbol and self._active_symbol != order.symbol:
             logger.warning(
@@ -117,6 +163,53 @@ class FuturesSessionGuard(TradingPort):
                 self._active_symbol = order.symbol
 
         return result
+
+    async def _capital_safe(self) -> bool:
+        """Return False if total unrealized loss >= capital_limit."""
+        try:
+            positions = await self._inner.get_positions()
+            fut = [p for p in positions if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS)]
+            total_loss = sum(p.unrealized_pnl for p in fut if p.unrealized_pnl < 0)
+            return abs(total_loss) < self._capital_limit
+        except Exception:
+            return True  # fail-open: allow if check fails
+
+    async def enforce_capital_limit(self) -> bool:
+        """Force-close all futures positions if unrealized loss >= capital_limit.
+
+        Called by engine at start of each cycle. Returns True if positions were closed.
+        """
+        if self._capital_limit is None:
+            return False
+        try:
+            positions = await self._inner.get_positions()
+            fut = [p for p in positions if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS)]
+            if not fut:
+                return False
+            total_loss = sum(p.unrealized_pnl for p in fut if p.unrealized_pnl < 0)
+            if abs(total_loss) < self._capital_limit:
+                return False
+
+            logger.warning(
+                "futures_capital_limit_breached_force_closing",
+                total_loss=total_loss,
+                capital_limit=self._capital_limit,
+            )
+            for p in fut:
+                order = Order(
+                    symbol=p.symbol,
+                    side=OrderSide.SELL,  # long-only → always sell to close
+                    order_type=OrderType.MARKET,
+                    quantity=p.quantity,
+                    market=p.market,
+                    position_effect="close",
+                )
+                await self._inner.submit_order(order)  # bypass guard, direct to inner
+            self._active_symbol = None
+            return True
+        except Exception:
+            logger.warning("futures_capital_limit_enforce_failed")
+            return False
 
     # ── Delegate all other methods ────────────────────────────────────────────
 

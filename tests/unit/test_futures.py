@@ -650,6 +650,7 @@ class TestFuturesEngine:
         trading = MagicMock()
         trading.active_symbol = None
         trading.sync_state = AsyncMock()
+        trading.enforce_capital_limit = AsyncMock(return_value=False)
         engine._trading = trading
 
         # Mock recorder

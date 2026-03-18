@@ -47,7 +47,7 @@ class FuturesEngine:
 
         kis_session = KISSession()
         raw_trading = KISTradingAdapter(session=kis_session)
-        self._trading = FuturesSessionGuard(raw_trading)
+        self._trading = FuturesSessionGuard(raw_trading, capital_limit=self._capital_limit)
 
     async def _init_recorder(self) -> uuid.UUID:
         """Initialize recorder and return simulation_id. Falls back to random UUID on error."""
@@ -138,6 +138,16 @@ class FuturesEngine:
         # Sync guard state from live positions on each cycle
         if hasattr(self._trading, "sync_state"):
             await self._trading.sync_state()
+
+        # Capital safety: force-close if unrealized loss >= capital_limit
+        if hasattr(self._trading, "enforce_capital_limit"):
+            closed = await self._trading.enforce_capital_limit()
+            if closed:
+                logger.warning(
+                    "futures_capital_limit_enforced",
+                    cycle=self._cycle_count,
+                    capital_limit=self._capital_limit,
+                )
 
         from agentic_capital.core.tools.futures_tools import build_futures_tools
         tools, decisions_sink, wakeup_sink = build_futures_tools(
