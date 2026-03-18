@@ -29,7 +29,7 @@ _KOSPI200_TICK = 0.05
 
 class SubmitFuturesOrderInput(BaseModel):
     symbol: str = Field(description="Futures symbol (AI chooses autonomously)")
-    side: str = Field(description="'buy' or 'sell'")
+    side: str = Field(description="'buy' (매수) only for open. 'sell' allowed only for close(청산).")
     quantity: int = Field(description="Number of contracts (최소 1계약)")
     position_effect: str = Field(description="'open' = 신규진입 | 'close' = 청산. Must be explicit.")
     price: float | None = Field(default=None, description="Limit price (None = market order)")

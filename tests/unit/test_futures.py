@@ -102,6 +102,38 @@ class TestFuturesSessionGuard:
         assert "101W6" in result.metadata["error"]
 
     @pytest.mark.asyncio
+    async def test_short_open_rejected(self):
+        """sell/open (short entry) must always be rejected — long-only."""
+        guard = FuturesSessionGuard(_mock_inner())
+        short_order = Order(
+            symbol="101W6",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        result = await guard.submit_order(short_order)
+        assert result.status == "rejected"
+        assert "long_only" in result.metadata["error"]
+
+    @pytest.mark.asyncio
+    async def test_sell_close_allowed(self):
+        """sell/close (청산) must be allowed — only closing a long."""
+        guard = FuturesSessionGuard(_mock_inner())
+        guard._active_symbol = "101W6"
+        close_order = Order(
+            symbol="101W6",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            market=Market.KR_FUTURES,
+            position_effect="close",
+        )
+        result = await guard.submit_order(close_order)
+        assert result.status == "filled"
+
+    @pytest.mark.asyncio
     async def test_close_order_releases_lock_when_flat(self):
         inner = _mock_inner()
         inner.get_positions = AsyncMock(return_value=[])  # flat after close

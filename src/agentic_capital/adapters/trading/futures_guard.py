@@ -1,8 +1,9 @@
-"""FuturesSessionGuard — single-symbol lock for futures trading.
+"""FuturesSessionGuard — single-symbol lock + long-only enforcement.
 
-System-enforced rule: only ONE futures symbol active at a time.
-Before switching symbols, ALL positions must be closed.
-This is NOT an AI guideline — the system physically blocks cross-symbol orders.
+System-enforced rules (NOT AI guidelines — physically blocked):
+- Only ONE futures symbol active at a time
+- LONG-ONLY: sell/open (short) orders are always rejected
+- Sell orders with position_effect='close' are allowed (closing a long)
 """
 
 from __future__ import annotations
@@ -58,6 +59,25 @@ class FuturesSessionGuard(TradingPort):
         # Pass-through for non-futures markets
         if order.market not in (Market.KR_FUTURES, Market.KR_OPTIONS):
             return await self._inner.submit_order(order)
+
+        # Long-only: reject sell/open (short entry) — sell/close is allowed
+        if order.side.value == "sell" and order.position_effect != "close":
+            logger.warning(
+                "futures_guard_short_blocked",
+                symbol=order.symbol,
+                side=order.side.value,
+                position_effect=order.position_effect,
+            )
+            return OrderResult(
+                order_id="",
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                filled_price=0.0,
+                status="rejected",
+                market=order.market,
+                metadata={"error": "long_only:short_positions_not_allowed"},
+            )
 
         # Enforce single-symbol lock
         if self._active_symbol and self._active_symbol != order.symbol:

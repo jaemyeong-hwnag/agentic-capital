@@ -56,6 +56,7 @@ MANDATE_FUTURES = (
     "|SYMBOL=1_at_a_time — SYSTEM_ENFORCED: different symbol BLOCKED until close_all_positions()"
     "|SWITCH_RULE=반드시_close_all_positions()_먼저_호출_후_종목전환 — NO_ROLLOVER"
     "|position_effect=open(신규)|close(청산) — ALWAYS_EXPLICIT_in_submit_futures_order"
+    "|LONG_ONLY=SYSTEM_ENFORCED — sell/open(공매도) BLOCKED. only buy/open allowed. sell/close OK."
 )
 
 # Message type abbreviations (MetaGPT: explicit type tags reduce parse errors 60%)
