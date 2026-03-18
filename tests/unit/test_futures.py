@@ -553,12 +553,16 @@ class TestFuturesEngine:
     async def test_engine_init_recorder(self):
         from agentic_capital.simulation.futures_engine import FuturesEngine
         engine = FuturesEngine()
-        sim_id = uuid.uuid4()
+        expected_id = uuid.uuid4()
+        mock_recorder_instance = MagicMock()
+        mock_recorder_instance.start_simulation = AsyncMock(return_value=expected_id)
+        mock_recorder_instance.commit = AsyncMock()
         with patch("agentic_capital.infra.database.async_session", return_value=MagicMock()), \
-             patch("agentic_capital.simulation.recorder.SimulationRecorder") as mock_recorder:
-            mock_recorder.return_value = MagicMock()
-            engine._init_recorder(sim_id)
+             patch("agentic_capital.simulation.recorder.SimulationRecorder",
+                   return_value=mock_recorder_instance):
+            result = await engine._init_recorder()
             assert engine._recorder is not None
+            assert result == expected_id
 
     @pytest.mark.asyncio
     async def test_engine_create_agent(self):
