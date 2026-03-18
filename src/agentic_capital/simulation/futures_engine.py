@@ -14,8 +14,7 @@ import uuid
 import structlog
 
 from agentic_capital.config import settings
-from agentic_capital.core.agents.factory import create_agent, create_random_personality
-from agentic_capital.core.personality.models import EmotionState
+from agentic_capital.core.agents.factory import create_agent_profile, create_random_personality
 from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.infra.tracing import setup_tracing
 from agentic_capital.simulation.clock import get_open_markets, is_market_open
@@ -50,29 +49,54 @@ class FuturesEngine:
         raw_trading = KISTradingAdapter(session=kis_session)
         self._trading = FuturesSessionGuard(raw_trading)
 
-    def _init_recorder(self, simulation_id: uuid.UUID) -> None:
-        from agentic_capital.infra.database import async_session
-        from agentic_capital.simulation.recorder import SimulationRecorder
-        self._recorder = SimulationRecorder(
-            session=async_session(),
-            simulation_id=simulation_id,
-        )
+    async def _init_recorder(self) -> uuid.UUID:
+        """Initialize recorder and return simulation_id. Falls back to random UUID on error."""
+        try:
+            from agentic_capital.infra.database import async_session
+            from agentic_capital.simulation.recorder import SimulationRecorder
+            from agentic_capital.config import settings
+            self._recorder = SimulationRecorder(session=async_session())
+            sim_id = await self._recorder.start_simulation(
+                seed=settings.simulation_seed,
+                initial_capital=self._capital_limit,
+                config={"mode": "futures_scalping"},
+            )
+            await self._recorder.commit()
+            return sim_id
+        except Exception:
+            logger.warning("futures_recorder_init_failed_running_without_db")
+            self._recorder = None
+            return uuid.uuid4()
 
     def _create_agent(self, simulation_id: uuid.UUID) -> None:
-        """Create single futures scalping trader agent."""
+        """Create single futures scalping trader agent.
+
+        FuturesEngine uses the agent purely as a state container (profile,
+        personality, emotion, agent_id). Actual LLM reasoning happens via the
+        LangGraph ReAct loop in _run_cycle — no LLMPort needed here.
+        """
+        from agentic_capital.core.agents.base import BaseAgent
+        from agentic_capital.core.personality.models import EmotionState
+
         personality = create_random_personality()
-        emotion = EmotionState()
-        self._agent = create_agent(
-            role="trader",
+        profile = create_agent_profile(
             name="Scalper-Alpha",
-            simulation_id=simulation_id,
-            personality=personality,
-            emotion=emotion,
-            initial_capital=self._capital_limit,
-            philosophy="Scalp KR futures for consistent intraday profit. "
-                        "Choose symbols autonomously. Enter on momentum/reversal signals. Exit quickly. "
-                        "Close ALL before switching symbols. No overnight positions.",
+            philosophy=(
+                "Scalp KR futures for consistent intraday profit. "
+                "Choose symbols autonomously. Enter on momentum/reversal signals. Exit quickly. "
+                "Close ALL before switching symbols. No overnight positions."
+            ),
+            allocated_capital=self._capital_limit,
         )
+
+        class _ScalperAgent(BaseAgent):
+            async def think(self, context):
+                return {}
+
+            async def reflect(self, outcome):
+                pass
+
+        self._agent = _ScalperAgent(profile=profile, personality=personality)
 
     async def _run_cycle(self) -> float:
         """Run one agent cycle. Returns next wakeup seconds."""
@@ -191,8 +215,7 @@ class FuturesEngine:
         self._running = True
         self._init_adapters()
 
-        simulation_id = uuid.uuid4()
-        self._init_recorder(simulation_id)
+        simulation_id = await self._init_recorder()
         self._create_agent(simulation_id)
 
         # Sync guard from live positions
