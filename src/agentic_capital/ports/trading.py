@@ -39,6 +39,7 @@ class Order(BaseModel):
     market: Market = Market.KR_STOCK    # Which market to trade
     exchange: str | None = None         # Exchange code for overseas: "NASD", "NYSE", "AMEX", "SEHK", etc.
     position_effect: str | None = None  # Futures only: "open" (신규) | "close" (청산)
+    multiplier: float | None = None     # Futures: KRW per point (e.g. 250000 for KOSPI200, 50000 for mini). None = unknown.
 
 
 class OrderResult(BaseModel):
@@ -81,7 +82,7 @@ class Position(BaseModel):
 class FuturesPosition(Position):
     """A futures/options position with margin and contract info."""
 
-    multiplier: float = 250_000    # KRW per point (KOSPI200: 250,000)
+    multiplier: float = 250_000    # KRW per point — must be set per contract (KOSPI200=250000, mini=50000, etc.)
     margin_required: float = 0.0   # initial margin in KRW
     expiry: str | None = None      # contract expiry YYYYMM
     net_side: str = "long"         # "long" | "short"

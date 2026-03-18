@@ -22,9 +22,8 @@ from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
 logger = structlog.get_logger()
 
-# KOSPI 200 futures: multiplier 250,000 KRW per point, tick 0.05pt = 12,500 KRW
-_KOSPI200_MULTIPLIER = 250_000
-_KOSPI200_TICK = 0.05
+# Default multiplier when broker doesn't return it for a position
+_DEFAULT_FUTURES_MULTIPLIER = 250_000
 
 
 class SubmitFuturesOrderInput(BaseModel):
@@ -33,6 +32,7 @@ class SubmitFuturesOrderInput(BaseModel):
     quantity: int = Field(description="Number of contracts (최소 1계약)")
     position_effect: str = Field(description="'open' = 신규진입 | 'close' = 청산. Must be explicit.")
     price: float | None = Field(default=None, description="Limit price (None = market order)")
+    multiplier: float | None = Field(default=None, description="KRW per point for this contract (e.g. 250000 for KOSPI200 standard, 50000 for mini). Set if known — enables capital protection.")
     reason: str = Field(default="", description="Trade rationale for record")
 
 
@@ -108,7 +108,7 @@ def build_futures_tools(
             from agentic_capital.ports.trading import FuturesPosition
             rows = []
             for p in fut:
-                mult = p.multiplier if isinstance(p, FuturesPosition) else _KOSPI200_MULTIPLIER
+                mult = p.multiplier if isinstance(p, FuturesPosition) else _DEFAULT_FUTURES_MULTIPLIER
                 margin = p.margin_required if isinstance(p, FuturesPosition) else 0.0
                 exp = p.expiry if isinstance(p, FuturesPosition) else ""
                 net_side = p.net_side if isinstance(p, FuturesPosition) else "long"
@@ -169,6 +169,7 @@ def build_futures_tools(
         quantity: int,
         position_effect: str,
         price: float | None = None,
+        multiplier: float | None = None,
         reason: str = "",
     ) -> str:
         """Submit a futures order.
@@ -191,6 +192,7 @@ def build_futures_tools(
                 price=price,
                 market=Market.KR_FUTURES,
                 position_effect=position_effect,
+                multiplier=multiplier,
             )
             result = await trading.submit_order(order)
 
@@ -258,6 +260,7 @@ def build_futures_tools(
                     quantity=p.quantity,
                     market=Market.KR_FUTURES,
                     position_effect="close",
+                    multiplier=p.multiplier if isinstance(p, FuturesPosition) else None,
                 )
                 result = await trading.submit_order(order)
                 results.append(f"{p.symbol}:{result.status}")

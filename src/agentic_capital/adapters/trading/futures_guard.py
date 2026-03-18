@@ -100,19 +100,25 @@ class FuturesSessionGuard(TradingPort):
                     metadata={"error": "capital_limit_exceeded:close_positions_first"},
                 )
 
-        # Max quantity guard: cap contracts so worst-case loss <= capital_limit
-        # Uses 10% price drop as rough worst-case per contract
-        if order.position_effect == "open" and self._capital_limit is not None and order.price:
-            from agentic_capital.ports.trading import FuturesPosition
-            multiplier = 250_000  # default KOSPI200; overridden if known
-            worst_loss_per_contract = order.price * 0.10 * multiplier
+        # Max quantity guard: cap contracts so worst-case 10% drop <= capital_limit
+        # Only applies when both price and multiplier are known on the order.
+        # If multiplier is unknown, skip cap and rely on PnL-based checks instead.
+        if (
+            order.position_effect == "open"
+            and self._capital_limit is not None
+            and order.price
+            and order.multiplier
+        ):
+            worst_loss_per_contract = order.price * 0.10 * order.multiplier
             if worst_loss_per_contract > 0:
                 max_qty = max(1, int(self._capital_limit / worst_loss_per_contract))
                 if order.quantity > max_qty:
                     logger.warning(
                         "futures_guard_qty_capped",
+                        symbol=order.symbol,
                         requested=order.quantity,
                         capped=max_qty,
+                        multiplier=order.multiplier,
                         capital_limit=self._capital_limit,
                     )
                     order = Order(
@@ -123,6 +129,7 @@ class FuturesSessionGuard(TradingPort):
                         price=order.price,
                         market=order.market,
                         position_effect=order.position_effect,
+                        multiplier=order.multiplier,
                     )
 
         # Enforce single-symbol lock
