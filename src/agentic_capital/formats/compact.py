@@ -52,11 +52,9 @@ MANDATE_RISK = ""  # reserved — position policy is AI-controlled, not system-e
 # Futures scalping mandate — replaces MANDATE for futures agent
 MANDATE_FUTURES = (
     "GOAL=profit|HORIZON=scalp|LIMIT=margin|METHOD=any|OP_COST=10000KRW/day"
-    "|MARKET=KOSPI200_futures(코스피200선물)"
-    "|HOURS=daytime:09:00-15:15KST(close_by_15:10!)+night:18:00-05:00KST"
+    "|MARKET=KR_futures — AI_CHOOSES_symbol autonomously"
     "|SYMBOL=1_at_a_time — SYSTEM_ENFORCED: different symbol BLOCKED until close_all_positions()"
     "|SWITCH_RULE=반드시_close_all_positions()_먼저_호출_후_종목전환 — NO_ROLLOVER"
-    "|CONTRACT=KOSPI200:mult=250000KRW/pt,tick=0.05pt=12500KRW,min_qty=1"
     "|position_effect=open(신규)|close(청산) — ALWAYS_EXPLICIT_in_submit_futures_order"
 )
 

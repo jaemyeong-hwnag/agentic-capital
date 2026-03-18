@@ -69,8 +69,8 @@ class FuturesEngine:
             personality=personality,
             emotion=emotion,
             initial_capital=self._capital_limit,
-            philosophy="Scalp KOSPI200 futures for consistent intraday profit. "
-                        "Enter on momentum/reversal signals. Exit quickly. "
+            philosophy="Scalp KR futures for consistent intraday profit. "
+                        "Choose symbols autonomously. Enter on momentum/reversal signals. Exit quickly. "
                         "Close ALL before switching symbols. No overnight positions.",
         )
 

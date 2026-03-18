@@ -28,7 +28,7 @@ _KOSPI200_TICK = 0.05
 
 
 class SubmitFuturesOrderInput(BaseModel):
-    symbol: str = Field(description="Futures symbol e.g. '101W6' (KOSPI200 nearest month)")
+    symbol: str = Field(description="Futures symbol (AI chooses autonomously)")
     side: str = Field(description="'buy' or 'sell'")
     quantity: int = Field(description="Number of contracts (최소 1계약)")
     position_effect: str = Field(description="'open' = 신규진입 | 'close' = 청산. Must be explicit.")
@@ -125,10 +125,9 @@ def build_futures_tools(
     # ── Quote ─────────────────────────────────────────────────────────────────
 
     async def get_futures_quote(symbol: str) -> str:
-        """Get real-time futures price (KOSPI200 futures: symbol like '101W6').
+        """Get real-time futures price.
 
         Returns: sym,px,open,high,low,vol,chg,chg_pct
-        Tick size: 0.05pt = 12,500 KRW per tick per contract.
         """
         if not trading:
             return "ERR:no_trading"
@@ -180,9 +179,6 @@ def build_futures_tools(
 
         Single-symbol rule: if a different symbol is locked, this will be rejected.
         Use close_all_positions() first, then open new symbol.
-
-        KOSPI200 example: symbol='101W6', side='buy', quantity=1, position_effect='open'
-        P&L per 1pt move = 250,000 KRW × quantity contracts
         """
         if not trading:
             return "ERR:no_trading"
@@ -283,9 +279,6 @@ def build_futures_tools(
     async def request_wakeup(seconds: int) -> str:
         """Schedule next wakeup and END this cycle.
 
-        KOSPI200 futures hours: 09:00-15:15 KST (mandatory close by 15:10!)
-        Night session (미니): 18:00-05:00 KST
-
         seconds=60: active scalping
         seconds=300: watching
         seconds=1800: low activity
@@ -316,7 +309,7 @@ def build_futures_tools(
         StructuredTool.from_function(
             coroutine=get_futures_quote,
             name="get_futures_quote",
-            description="Real-time futures price. symbol e.g. '101W6' for KOSPI200 nearest month.",
+            description="Real-time futures price for any KR futures symbol.",
             args_schema=type("FuturesQuoteInput", (BaseModel,), {
                 "symbol": Field(str, description="Futures symbol"),
                 "__annotations__": {"symbol": str},
@@ -344,7 +337,7 @@ def build_futures_tools(
         StructuredTool.from_function(
             coroutine=request_wakeup,
             name="request_wakeup",
-            description="End cycle and schedule next wakeup. KOSPI200: close all by 15:10 KST.",
+            description="End cycle and schedule next wakeup.",
             args_schema=RequestWakeupInput,
         ),
     ]
