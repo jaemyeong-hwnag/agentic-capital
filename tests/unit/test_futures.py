@@ -429,6 +429,334 @@ class TestFuturesSessionGuard:
         result = await guard.submit_order(_futures_order("101W6", "open"))
         assert result.status == "filled"  # not halted by stock loss
 
+    # ── Stop-loss tests ─────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_check_stop_losses_returns_empty_when_not_configured(self):
+        """check_stop_losses returns [] when stop_loss_pct is None."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner)  # no stop_loss_pct
+        result = await guard.check_stop_losses()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_check_stop_losses_triggers_on_excess_loss(self):
+        """check_stop_losses force-closes positions exceeding stop-loss threshold."""
+        inner = _mock_inner()
+        # Position with 3% loss (threshold is 2%)
+        losing_pos = FuturesPosition(
+            symbol="101W6",
+            quantity=2.0,
+            avg_price=380.0,
+            current_price=368.6,  # ~3% loss
+            unrealized_pnl=-570_000.0,
+            unrealized_pnl_pct=-3.0,  # negative = loss
+            market=Market.KR_FUTURES,
+            currency="KRW",
+        )
+        inner.get_positions = AsyncMock(return_value=[losing_pos])
+        guard = FuturesSessionGuard(inner, stop_loss_pct=0.02)  # 2% threshold
+        guard._active_symbol = "101W6"
+
+        closed = await guard.check_stop_losses()
+        assert "101W6" in closed
+        assert guard._active_symbol is None  # lock released
+        inner.submit_order.assert_called_once()
+        call_args = inner.submit_order.call_args[0][0]
+        assert call_args.position_effect == "close"
+        assert call_args.quantity == 2.0
+
+    @pytest.mark.asyncio
+    async def test_check_stop_losses_skips_profitable_positions(self):
+        """Positions with positive P&L are not force-closed."""
+        inner = _mock_inner()
+        profitable_pos = FuturesPosition(
+            symbol="101W6",
+            quantity=1.0,
+            avg_price=380.0,
+            current_price=385.0,
+            unrealized_pnl=1_250_000.0,
+            unrealized_pnl_pct=1.32,  # positive = profit
+            market=Market.KR_FUTURES,
+            currency="KRW",
+        )
+        inner.get_positions = AsyncMock(return_value=[profitable_pos])
+        guard = FuturesSessionGuard(inner, stop_loss_pct=0.02)
+
+        closed = await guard.check_stop_losses()
+        assert closed == []
+        inner.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_check_stop_losses_exception_returns_empty(self):
+        """Exception during stop-loss check is caught — returns []."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(side_effect=Exception("network_error"))
+        guard = FuturesSessionGuard(inner, stop_loss_pct=0.02)
+
+        closed = await guard.check_stop_losses()
+        assert closed == []
+
+    # ── Position sizing tests ───────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_position_sizing_caps_large_order(self):
+        """Order notional > 5% of capital is reduced to fit sizing limit."""
+        inner = _mock_inner()
+        # Capital=10M, 5%=500k, price=380, mult=250000, notional_per_contract=95M
+        # Safe qty = floor(500k / (380*250000)) = 0 → clamped to 1
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=10_000_000, available=8_000_000, currency="KRW",
+            daily_pnl=0.0, daily_fee=0.0,
+        ))
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=10.0,  # requests 10 contracts — way over budget
+            price=380.0,
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, position_size_pct=0.05)
+        await guard.submit_order(order)
+        # Should submit with reduced qty (1 contract max at this capital)
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity < 10.0
+
+    @pytest.mark.asyncio
+    async def test_position_sizing_allows_within_limit(self):
+        """Order within position sizing limit passes unchanged."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=200_000_000, available=150_000_000, currency="KRW",
+            daily_pnl=0.0, daily_fee=0.0,
+        ))
+        order = Order(
+            symbol="105W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=380.0,
+            multiplier=50_000.0,  # notional=19M, 5% of 200M=10M → 19M > 10M → capped to 1
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, position_size_pct=0.20)  # 20% → 40M limit → OK
+        result = await guard.submit_order(order)
+        assert result.status == "filled"
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity == 1.0  # unchanged
+
+    # ── Leverage cap tests ──────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_leverage_cap_reduces_excess_qty(self):
+        """Order that would exceed max_leverage is reduced in qty."""
+        inner = _mock_inner()
+        # available=500k, max_leverage=5x → max_notional=2.5M
+        # price=380, mult=250k → notional_per=95M, requesting 5 → 475M >> 2.5M
+        # safe_qty = floor(2.5M / 95M) = 0 → clamped to 1
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=2_000_000, available=500_000, currency="KRW",
+            daily_pnl=0.0, daily_fee=0.0,
+        ))
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=5.0,
+            price=380.0,
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, max_leverage=5.0)
+        await guard.submit_order(order)
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity < 5.0
+
+    @pytest.mark.asyncio
+    async def test_leverage_cap_skips_when_no_price(self):
+        """Leverage cap is skipped when order has no price (market order without price)."""
+        inner = _mock_inner()
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=5.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+            # No price or multiplier — guard cannot compute leverage
+        )
+        guard = FuturesSessionGuard(inner, max_leverage=5.0)
+        result = await guard.submit_order(order)
+        # Should pass through (fail-open) since price/multiplier unavailable
+        assert result.status == "filled"
+
+    @pytest.mark.asyncio
+    async def test_capital_limit_blocks_open_on_excess_loss(self):
+        """Open is rejected when unrealized loss >= capital_limit."""
+        inner = _mock_inner()
+        losing_pos = _futures_position()
+        losing_pos = FuturesPosition(
+            symbol="101W6",
+            quantity=1.0,
+            avg_price=380.0,
+            current_price=380.0,
+            unrealized_pnl=-200_000.0,  # 200k loss
+            unrealized_pnl_pct=-52.6,
+            market=Market.KR_FUTURES,
+            currency="KRW",
+        )
+        inner.get_positions = AsyncMock(return_value=[losing_pos])
+        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        result = await guard.submit_order(_futures_order("101W6", "open"))
+        assert result.status == "rejected"
+        assert "capital_limit_exceeded" in result.metadata["error"]
+
+    @pytest.mark.asyncio
+    async def test_max_qty_guard_with_price_and_multiplier(self):
+        """Max qty guard caps contracts when price+multiplier are specified on order."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=10.0,
+            price=380.0,
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        # capital_limit=100k, worst_per=9.5M → max_qty=1
+        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        await guard.submit_order(order)
+        submitted = inner.submit_order.call_args[0][0]
+        assert submitted.quantity == 1.0
+
+    @pytest.mark.asyncio
+    async def test_enforce_qty_by_position_closes_excess(self):
+        """_enforce_qty_by_position closes excess contracts after a fill."""
+        inner = _mock_inner()
+        # 10 contracts held, capital=100k allows only 1 → excess=9
+        large_pos = FuturesPosition(
+            symbol="101W6",
+            quantity=10.0,
+            avg_price=380.0,
+            current_price=380.0,
+            unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0,
+            market=Market.KR_FUTURES,
+            currency="KRW",
+            multiplier=250_000.0,
+        )
+        inner.get_positions = AsyncMock(return_value=[large_pos])
+        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        await guard._enforce_qty_by_position("101W6")
+        # Should have submitted a close order for 9 excess contracts
+        inner.submit_order.assert_called_once()
+        close_order = inner.submit_order.call_args[0][0]
+        assert close_order.position_effect == "close"
+        assert close_order.quantity == 9.0
+
+    @pytest.mark.asyncio
+    async def test_enforce_qty_by_position_no_excess(self):
+        """_enforce_qty_by_position does nothing when contracts are within safe limit."""
+        inner = _mock_inner()
+        pos = FuturesPosition(
+            symbol="101W6",
+            quantity=1.0,
+            avg_price=380.0,
+            current_price=380.0,
+            unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0,
+            market=Market.KR_FUTURES,
+            currency="KRW",
+            multiplier=50_000.0,  # mini → worst=1.9M per contract, 10M capital allows 5
+        )
+        inner.get_positions = AsyncMock(return_value=[pos])
+        guard = FuturesSessionGuard(inner, capital_limit=10_000_000.0)
+        await guard._enforce_qty_by_position("101W6")
+        inner.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enforce_capital_limit_force_closes_when_breached(self):
+        """enforce_capital_limit closes all positions when loss >= capital_limit."""
+        inner = _mock_inner()
+        losing_pos = FuturesPosition(
+            symbol="101W6",
+            quantity=3.0,
+            avg_price=380.0,
+            current_price=380.0,
+            unrealized_pnl=-500_000.0,
+            unrealized_pnl_pct=-26.3,
+            market=Market.KR_FUTURES,
+            currency="KRW",
+        )
+        inner.get_positions = AsyncMock(return_value=[losing_pos])
+        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        guard._active_symbol = "101W6"
+        closed = await guard.enforce_capital_limit()
+        assert closed is True
+        assert guard._active_symbol is None
+        inner.submit_order.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_enforce_capital_limit_no_positions(self):
+        """enforce_capital_limit returns False when no futures positions held."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        closed = await guard.enforce_capital_limit()
+        assert closed is False
+
+    @pytest.mark.asyncio
+    async def test_delegate_get_order_status(self):
+        """get_order_status delegates to inner adapter."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner)
+        await guard.get_order_status("OID1")
+        inner.get_order_status.assert_called_once_with("OID1")
+
+    @pytest.mark.asyncio
+    async def test_delegate_cancel_order(self):
+        """cancel_order delegates to inner adapter."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner)
+        await guard.cancel_order("OID1")
+        inner.cancel_order.assert_called_once_with("OID1")
+
+    @pytest.mark.asyncio
+    async def test_delegate_get_fills(self):
+        """get_fills delegates to inner adapter."""
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(inner)
+        await guard.get_fills()
+        inner.get_fills.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_position_sizing_exception_fails_open(self):
+        """Position sizing balance check exception fails open — order is allowed."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(side_effect=Exception("balance_error"))
+        order = Order(
+            symbol="101W6",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=10.0,
+            price=380.0,
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, position_size_pct=0.05)
+        result = await guard.submit_order(order)
+        # fail-open: allowed even though sizing check failed
+        assert result.status == "filled"
+
 
 # ── futures_tools ─────────────────────────────────────────────────────────────
 
@@ -825,6 +1153,7 @@ class TestFuturesEngine:
         trading.active_symbol = None
         trading.sync_state = AsyncMock()
         trading.enforce_capital_limit = AsyncMock(return_value=False)
+        trading.check_stop_losses = AsyncMock(return_value=[])
         engine._trading = trading
 
         # Mock recorder
@@ -1050,6 +1379,133 @@ class TestFuturesEngine:
             await engine._run_cycle()
             engine._recorder.record_agent_cycle.assert_called_once()
             engine._recorder.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_deadman_switch_triggers_after_max_errors(self):
+        """After deadman_max_errors consecutive failures, all positions are closed and cooldown starts."""
+        from agentic_capital.simulation.futures_engine import FuturesEngine
+        engine = FuturesEngine()
+        engine._deadman_max_errors = 3
+        engine._deadman_cooldown_secs = 1
+        engine._consecutive_errors = 0
+
+        call_count = 0
+
+        async def fake_run_cycle():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise RuntimeError("api_error")
+            engine._running = False
+            return 0.0
+
+        engine._trading = MagicMock()
+        engine._trading.sync_state = AsyncMock()
+        engine._recorder = None
+        engine._agent = MagicMock()
+        engine._agent.name = "Scalper-Alpha"
+        engine._agent.agent_id = uuid.uuid4()
+
+        close_all_calls = []
+
+        async def fake_close_all(reason=""):
+            close_all_calls.append(reason)
+
+        with patch.object(engine, "_init_adapters"), \
+             patch.object(engine, "_init_recorder"), \
+             patch.object(engine, "_create_agent"), \
+             patch.object(engine, "_run_cycle", side_effect=fake_run_cycle), \
+             patch.object(engine, "_close_all_now", side_effect=fake_close_all), \
+             patch("agentic_capital.simulation.futures_engine.asyncio.sleep", new_callable=AsyncMock), \
+             patch("agentic_capital.simulation.futures_engine.uuid") as mock_uuid:
+            mock_uuid.uuid4.return_value = uuid.uuid4()
+            await engine.start()
+
+        # Deadman should have triggered once (3 errors → trigger), then 4th call stopped loop
+        assert "deadman_switch" in close_all_calls
+
+    @pytest.mark.asyncio
+    async def test_deadman_resets_counter_after_trigger(self):
+        """consecutive_errors is reset to 0 after deadman triggers."""
+        from agentic_capital.simulation.futures_engine import FuturesEngine
+        engine = FuturesEngine()
+        engine._deadman_max_errors = 2
+        engine._deadman_cooldown_secs = 0
+        engine._consecutive_errors = 0
+
+        call_count = 0
+
+        async def fake_run_cycle():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise RuntimeError("api_error")
+            engine._running = False
+            return 0.0
+
+        engine._trading = MagicMock()
+        engine._trading.sync_state = AsyncMock()
+        engine._recorder = None
+        engine._agent = MagicMock()
+        engine._agent.agent_id = uuid.uuid4()
+
+        with patch.object(engine, "_init_adapters"), \
+             patch.object(engine, "_init_recorder"), \
+             patch.object(engine, "_create_agent"), \
+             patch.object(engine, "_run_cycle", side_effect=fake_run_cycle), \
+             patch.object(engine, "_close_all_now", new_callable=AsyncMock), \
+             patch("agentic_capital.simulation.futures_engine.asyncio.sleep", new_callable=AsyncMock), \
+             patch("agentic_capital.simulation.futures_engine.uuid") as mock_uuid:
+            mock_uuid.uuid4.return_value = uuid.uuid4()
+            await engine.start()
+
+        assert engine._consecutive_errors == 0  # reset after deadman triggered
+
+    @pytest.mark.asyncio
+    async def test_volatility_filter_skips_cycle_on_high_volatility(self):
+        """_run_cycle returns early and closes positions when KOSPI200 moves > threshold."""
+        engine = self._make_engine_with_mocks()
+        engine._recorder = None
+        engine._volatility_threshold_pct = 1.5
+        engine._trading.active_symbol = "101W6"
+
+        volatile_data = {"price": 390.0, "open": 380.0, "change_pct": 2.6}
+
+        with patch("agentic_capital.simulation.futures_engine.get_open_markets",
+                   return_value=["KRX"]), \
+             patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value=volatile_data)), \
+             patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
+             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+            next_secs = await engine._run_cycle()
+            mock_close.assert_called_once_with(reason="volatility_filter")
+            mock_llm.assert_not_called()
+            assert next_secs == 120.0  # 2x default (60*2)
+
+    @pytest.mark.asyncio
+    async def test_volatility_filter_proceeds_when_calm(self):
+        """When volatility is below threshold, AI cycle proceeds normally."""
+        engine = self._make_engine_with_mocks()
+        engine._recorder = None
+        engine._volatility_threshold_pct = 2.0
+
+        calm_data = {"price": 381.0, "open": 380.0, "change_pct": 0.26}
+
+        with patch("agentic_capital.simulation.futures_engine.get_open_markets",
+                   return_value=["KRX"]), \
+             patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value=calm_data)), \
+             patch("agentic_capital.core.tools.futures_tools.build_futures_tools",
+                   return_value=([], [], [60])), \
+             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
+            mock_react = MagicMock()
+            mock_react.ainvoke = AsyncMock(return_value={"messages": []})
+            mock_create_agent.return_value = mock_react
+            next_secs = await engine._run_cycle()
+            # AI was invoked — normal cycle
+            mock_create_agent.assert_called_once()
+            assert next_secs == 60.0
 
 
 # ── FuturesVirtualAdapter tests ───────────────────────────────────────────────

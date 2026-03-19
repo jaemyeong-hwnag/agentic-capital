@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # Futures risk management
     futures_max_contracts: int = 3          # hard cap per open order
     futures_daily_loss_pct: float = 0.05    # halt trading if daily loss >= 5% of capital
+    futures_stop_loss_pct: float = 0.02     # auto-close position at 2% loss (isolated stop-loss)
+    futures_max_leverage: float = 5.0       # max leverage: notional / available_capital
+    futures_position_size_pct: float = 0.05 # max 5% of total capital per open trade
+    futures_volatility_threshold_pct: float = 2.0  # skip cycle if KOSPI200 moves >2% from open
+    futures_deadman_max_errors: int = 5     # consecutive errors before deadman triggers
+    futures_deadman_cooldown_secs: int = 300  # cooldown seconds after deadman trigger
 
     # LangSmith
     langchain_tracing_v2: bool = False

@@ -40,6 +40,14 @@ class FuturesEngine:
         self._capital_limit: float = float(settings.initial_capital)
         self._max_contracts: int = settings.futures_max_contracts
         self._max_daily_loss: float = self._capital_limit * settings.futures_daily_loss_pct
+        # Risk management parameters
+        self._stop_loss_pct: float = settings.futures_stop_loss_pct
+        self._max_leverage: float = settings.futures_max_leverage
+        self._position_size_pct: float = settings.futures_position_size_pct
+        self._volatility_threshold_pct: float = settings.futures_volatility_threshold_pct
+        self._deadman_max_errors: int = settings.futures_deadman_max_errors
+        self._deadman_cooldown_secs: int = settings.futures_deadman_cooldown_secs
+        self._consecutive_errors: int = 0
 
     def _init_adapters(self) -> None:
         setup_tracing()
@@ -65,6 +73,9 @@ class FuturesEngine:
             capital_limit=self._capital_limit,
             max_contracts=self._max_contracts,
             max_daily_loss=self._max_daily_loss,
+            stop_loss_pct=self._stop_loss_pct,
+            max_leverage=self._max_leverage,
+            position_size_pct=self._position_size_pct,
         )
 
     async def _init_recorder(self) -> uuid.UUID:
@@ -227,6 +238,35 @@ class FuturesEngine:
                     capital_limit=self._capital_limit,
                 )
 
+        # Stop-loss enforcement: runs BEFORE AI decision — forced system action
+        if hasattr(self._trading, "check_stop_losses"):
+            sl_closed = await self._trading.check_stop_losses()
+            if sl_closed:
+                logger.warning(
+                    "futures_stop_loss_auto_closed",
+                    cycle=self._cycle_count,
+                    symbols=sl_closed,
+                )
+
+        # Volatility filter: skip AI cycle if KOSPI200 moves abnormally
+        try:
+            from agentic_capital.adapters.trading.kis import _fetch_yfinance_kospi200
+            kdata = await _fetch_yfinance_kospi200()
+            change_pct = abs(kdata.get("change_pct", 0.0))
+            if change_pct >= self._volatility_threshold_pct:
+                logger.warning(
+                    "futures_volatility_filter_triggered",
+                    change_pct=round(change_pct, 2),
+                    threshold=self._volatility_threshold_pct,
+                    cycle=self._cycle_count,
+                )
+                # Close all open positions when volatility is extreme
+                if getattr(self._trading, "active_symbol", None):
+                    await self._close_all_now(reason="volatility_filter")
+                return float(_DEFAULT_CYCLE_SECONDS * 2)  # wait 2x before retrying
+        except Exception:
+            pass  # fail-open: proceed to AI if volatility check fails
+
         from agentic_capital.core.tools.futures_tools import build_futures_tools
         tools, decisions_sink, wakeup_sink = build_futures_tools(
             trading=self._trading,
@@ -344,6 +384,7 @@ class FuturesEngine:
         while self._running:
             try:
                 next_delay = await self._run_cycle()
+                self._consecutive_errors = 0  # reset on successful cycle
                 logger.info("futures_sleeping", next_cycle_in=f"{next_delay}s")
                 await asyncio.sleep(next_delay)
             except KeyboardInterrupt:
@@ -351,4 +392,19 @@ class FuturesEngine:
                 self._running = False
             except Exception:
                 logger.exception("futures_engine_cycle_error")
-                await asyncio.sleep(30)
+                self._consecutive_errors += 1
+                # Deadman switch: close all and enter safe-mode cooldown
+                if self._consecutive_errors >= self._deadman_max_errors:
+                    logger.warning(
+                        "futures_deadman_switch_triggered",
+                        consecutive_errors=self._consecutive_errors,
+                        cooldown_secs=self._deadman_cooldown_secs,
+                    )
+                    try:
+                        await self._close_all_now(reason="deadman_switch")
+                    except Exception:
+                        logger.exception("futures_deadman_close_all_failed")
+                    self._consecutive_errors = 0
+                    await asyncio.sleep(self._deadman_cooldown_secs)
+                else:
+                    await asyncio.sleep(30)
