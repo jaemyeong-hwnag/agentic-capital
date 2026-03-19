@@ -27,11 +27,28 @@ class Settings(BaseSettings):
     alpaca_secret_key: str = ""
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
 
-    # Exchange — KR Stock
+    # Exchange — KR Stock (실전투자)
     kis_app_key: str = ""
     kis_app_secret: str = ""
     kis_account_no: str = ""
     kis_is_paper: bool = True
+
+    # Exchange — KR Stock (모의투자 전용 — is_paper=True 시 자동 사용)
+    kis_paper_app_key: str = ""
+    kis_paper_app_secret: str = ""
+    kis_paper_account_no: str = ""
+
+    @property
+    def effective_kis_app_key(self) -> str:
+        return self.kis_paper_app_key if self.kis_is_paper and self.kis_paper_app_key else self.kis_app_key
+
+    @property
+    def effective_kis_app_secret(self) -> str:
+        return self.kis_paper_app_secret if self.kis_is_paper and self.kis_paper_app_secret else self.kis_app_secret
+
+    @property
+    def effective_kis_account_no(self) -> str:
+        return self.kis_paper_account_no if self.kis_is_paper and self.kis_paper_account_no else self.kis_account_no
 
     # Simulation
     simulation_seed: int = 42

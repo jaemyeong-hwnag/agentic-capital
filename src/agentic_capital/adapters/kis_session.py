@@ -75,10 +75,10 @@ class KISSession:
         account_no: str = "",
         is_paper: bool | None = None,
     ) -> None:
-        self.app_key = app_key or settings.kis_app_key
-        self.app_secret = app_secret or settings.kis_app_secret
-        self.account_no = account_no or settings.kis_account_no
         self.is_paper = is_paper if is_paper is not None else settings.kis_is_paper
+        self.app_key = app_key or settings.effective_kis_app_key
+        self.app_secret = app_secret or settings.effective_kis_app_secret
+        self.account_no = account_no or settings.effective_kis_account_no
         if not all([self.app_key, self.app_secret, self.account_no]):
             raise ValueError("KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO are required")
 

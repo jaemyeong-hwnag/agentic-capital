@@ -19,6 +19,12 @@ def _make_session(*, is_paper: bool = True) -> KISSession:
         mock_s.kis_app_secret = "test-secret"
         mock_s.kis_account_no = "5017463701"
         mock_s.kis_is_paper = is_paper
+        mock_s.kis_paper_app_key = ""
+        mock_s.kis_paper_app_secret = ""
+        mock_s.kis_paper_account_no = ""
+        mock_s.effective_kis_app_key = "test-key"
+        mock_s.effective_kis_app_secret = "test-secret"
+        mock_s.effective_kis_account_no = "5017463701"
         return KISSession()
 
 
@@ -93,6 +99,12 @@ class TestKISTradingAdapter:
             mock_s.kis_app_secret = ""
             mock_s.kis_account_no = ""
             mock_s.kis_is_paper = True
+            mock_s.kis_paper_app_key = ""
+            mock_s.kis_paper_app_secret = ""
+            mock_s.kis_paper_account_no = ""
+            mock_s.effective_kis_app_key = ""
+            mock_s.effective_kis_app_secret = ""
+            mock_s.effective_kis_account_no = ""
             with pytest.raises(ValueError, match="KIS_APP_KEY"):
                 KISSession()
 
