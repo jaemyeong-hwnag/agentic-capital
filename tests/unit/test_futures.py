@@ -1522,6 +1522,7 @@ class TestFuturesEngine:
              patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
                    new=AsyncMock(return_value=volatile_data)), \
              patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
+             patch.object(engine, "_minutes_until_session_end", return_value=999.0), \
              patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
             next_secs = await engine._run_cycle()
             mock_close.assert_called_once_with(reason="volatility_filter")
