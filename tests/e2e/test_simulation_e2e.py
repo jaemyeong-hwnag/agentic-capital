@@ -262,14 +262,21 @@ class TestFullSimulationCycle:
     @pytest.mark.asyncio
     async def test_llm_failure_graceful(self):
         """Agent handles LLM failure gracefully — no crash, empty decisions."""
-        llm = _make_llm("completely invalid json {{{")
+        from unittest.mock import patch, AsyncMock
+        llm = _make_llm()
         ceo = CEOAgent(
             profile=_make_profile("CEO"),
             personality=create_random_personality(42),
             llm=llm,
         )
 
-        result = await run_agent_cycle(ceo, cycle_number=1)
+        # Patch react_agent.ainvoke to simulate LLM failure
+        with patch("agentic_capital.graph.workflow.create_react_agent") as mock_create:
+            mock_agent = MagicMock()
+            mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("LLM timeout"))
+            mock_create.return_value = mock_agent
+
+            result = await run_agent_cycle(ceo, cycle_number=1)
 
         assert result["agent_name"] == "CEO"
         assert result.get("decisions", []) == []
