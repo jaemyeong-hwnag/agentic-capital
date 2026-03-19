@@ -54,19 +54,11 @@ class FuturesEngine:
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
         from agentic_capital.adapters.trading.futures_guard import FuturesSessionGuard
-        from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
         from agentic_capital.config import settings
 
         kis_session = KISSession()
         raw_trading = KISTradingAdapter(session=kis_session)
-
-        # KIS paper trading requires separate 선물옵션 모의투자 registration.
-        # If not available (is_paper=True), wrap with virtual adapter that
-        # simulates futures orders locally using Yahoo Finance prices.
-        if settings.kis_is_paper:
-            wrapped = FuturesVirtualAdapter(raw_trading, initial_capital=self._capital_limit)
-        else:
-            wrapped = raw_trading
+        wrapped = raw_trading
 
         self._trading = FuturesSessionGuard(
             wrapped,
