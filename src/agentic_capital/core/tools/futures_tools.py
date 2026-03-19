@@ -151,6 +151,44 @@ def build_futures_tools(
         except Exception as e:
             return f"ERR:{e}"
 
+    # ── Symbol discovery ──────────────────────────────────────────────────────
+
+    async def get_futures_symbols() -> str:
+        """Discover currently active KR futures contracts with live prices.
+
+        ALWAYS call this first if you don't know the correct symbol.
+        Returns TOON table: sym, px, vol, chg_pct, exp(YYYYMM), mult(KRW/pt)
+
+        Standard KOSPI200 (mult=250000) and mini (mult=50000) contracts included.
+        Use sym from this result when calling get_futures_quote or submit_futures_order.
+        """
+        if not trading:
+            return "ERR:no_trading"
+        try:
+            if hasattr(trading, "get_active_futures_contracts"):
+                contracts = await trading.get_active_futures_contracts()
+            elif hasattr(trading, "_inner") and hasattr(trading._inner, "get_active_futures_contracts"):
+                contracts = await trading._inner.get_active_futures_contracts()
+            else:
+                return "ERR:symbol_search_not_supported"
+            if not contracts:
+                return "ERR:no_active_contracts_found"
+            from agentic_capital.formats.toon import to_toon
+            rows = [
+                [
+                    c["symbol"],
+                    f"{c['price']:.2f}",
+                    str(c["volume"]),
+                    f"{c['change_pct']:.2f}",
+                    c.get("expiry", ""),
+                    str(int(c.get("multiplier", 0))),
+                ]
+                for c in contracts
+            ]
+            return to_toon("symbols", ["sym", "px", "vol", "chg_pct", "exp", "mult"], rows)
+        except Exception as e:
+            return f"ERR:{e}"
+
     # ── Active symbol lock ────────────────────────────────────────────────────
 
     async def get_active_symbol() -> str:
@@ -302,6 +340,15 @@ def build_futures_tools(
     # ── Register tools ────────────────────────────────────────────────────────
 
     tools = [
+        StructuredTool.from_function(
+            coroutine=get_futures_symbols,
+            name="get_futures_symbols",
+            description=(
+                "Discover active KR futures contracts (KOSPI200 standard + mini). "
+                "Call this FIRST if you don't know the symbol. "
+                "Returns sym/px/vol/chg_pct/exp/mult — use sym for quote and orders."
+            ),
+        ),
         StructuredTool.from_function(
             coroutine=get_futures_balance,
             name="get_futures_balance",

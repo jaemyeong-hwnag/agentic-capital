@@ -478,6 +478,61 @@ class KISTradingAdapter(TradingPort):
             logger.exception("kis_get_futures_quote_failed", symbol=symbol)
             return {}
 
+    async def get_active_futures_contracts(self) -> list[dict]:
+        """활성 KR 선물 계약 목록 조회.
+
+        KIS는 선물 심볼 목록 전용 API가 없으므로 표준 종목코드 체계로 후보를
+        계산하고 get_futures_quote 로 유효성을 검증한다.
+
+        종목코드 체계:
+          - KOSPI200 표준: 101 + 월코드 + 연도 마지막 자리  (승수 250,000)
+          - KOSPI200 미니: 105 + 월코드 + 연도 마지막 자리  (승수 50,000)
+          - 분기월: 3월(C) / 6월(F) / 9월(I) / 12월(L)
+          - 만기일: 각 분기 두 번째 목요일
+
+        Returns list[{symbol, price, volume, change_pct, expiry, multiplier}]
+        """
+        from datetime import date, timedelta
+
+        MONTH_CODES = {3: "C", 6: "F", 9: "I", 12: "L"}
+        QUARTERLY = [3, 6, 9, 12]
+        today = date.today()
+
+        def _nth_thursday(year: int, month: int, n: int) -> date:
+            d = date(year, month, 1)
+            days_to_thu = (3 - d.weekday()) % 7  # 3 = Thursday
+            return d + timedelta(days=days_to_thu) + timedelta(weeks=n - 1)
+
+        # Enumerate candidates: 2 standard + 2 mini nearest quarterly contracts
+        candidates: list[tuple[str, date, int]] = []  # (symbol, expiry, multiplier)
+        for y in (today.year, today.year + 1):
+            for qm in QUARTERLY:
+                expiry = _nth_thursday(y, qm, 2)
+                if expiry < today:
+                    continue
+                code = MONTH_CODES[qm]
+                ydigit = str(y)[-1]
+                candidates.append((f"101{code}{ydigit}", expiry, 250_000))
+                candidates.append((f"105{code}{ydigit}", expiry, 50_000))
+            if len(candidates) >= 6:
+                break
+
+        results = []
+        for sym, exp, mult in candidates[:6]:
+            q = await self.get_futures_quote(sym)
+            if q and q.get("price", 0) > 0:
+                results.append({
+                    "symbol": sym,
+                    "price": q["price"],
+                    "volume": q.get("volume", 0),
+                    "change_pct": q.get("change_pct", 0),
+                    "expiry": exp.strftime("%Y%m"),
+                    "multiplier": mult,
+                })
+
+        logger.debug("kis_active_futures_contracts", count=len(results))
+        return results
+
     # ── Order submission ──────────────────────────────────────────────────────
 
     async def submit_order(self, order: Order) -> OrderResult:

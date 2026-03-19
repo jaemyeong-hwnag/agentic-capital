@@ -484,3 +484,125 @@ class TestKISTradingAdapterOrderStatus:
         adapter = self._make_adapter(is_paper=True)
         with pytest.raises(NotImplementedError, match="paper"):
             await adapter.get_overseas_fills()
+
+
+class TestGetActiveFuturesContracts:
+    """Tests for KISTradingAdapter.get_active_futures_contracts()."""
+
+    def _make_adapter(self) -> KISTradingAdapter:
+        session = _make_session(is_paper=True)
+        session.ensure_token = AsyncMock()
+        return KISTradingAdapter(session=session)
+
+    def _mock_quote_response(self, price: float = 380.0) -> MagicMock:
+        resp = MagicMock()
+        resp.json.return_value = {
+            "rt_cd": "0",
+            "output": {
+                "stck_prpr": str(price),
+                "stck_oprc": str(price - 1),
+                "stck_hgpr": str(price + 2),
+                "stck_lwpr": str(price - 2),
+                "acml_vol": "50000",
+                "prdy_vrss": "1.0",
+                "prdy_ctrt": "0.26",
+            },
+        }
+        return resp
+
+    @pytest.mark.asyncio
+    async def test_returns_active_contracts_with_valid_prices(self):
+        adapter = self._make_adapter()
+        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
+        contracts = await adapter.get_active_futures_contracts()
+        assert len(contracts) > 0
+        for c in contracts:
+            assert "symbol" in c
+            assert c["price"] > 0
+            assert "multiplier" in c
+            assert "expiry" in c
+
+    @pytest.mark.asyncio
+    async def test_standard_contract_has_250k_multiplier(self):
+        adapter = self._make_adapter()
+        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
+        contracts = await adapter.get_active_futures_contracts()
+        standard = [c for c in contracts if c["symbol"].startswith("101")]
+        assert all(c["multiplier"] == 250_000 for c in standard)
+
+    @pytest.mark.asyncio
+    async def test_mini_contract_has_50k_multiplier(self):
+        adapter = self._make_adapter()
+        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
+        contracts = await adapter.get_active_futures_contracts()
+        mini = [c for c in contracts if c["symbol"].startswith("105")]
+        assert all(c["multiplier"] == 50_000 for c in mini)
+
+    @pytest.mark.asyncio
+    async def test_no_contracts_when_all_quotes_fail(self):
+        adapter = self._make_adapter()
+        failed = MagicMock()
+        failed.json.return_value = {"rt_cd": "1", "msg1": "no data"}
+        adapter._session.get = AsyncMock(return_value=failed)
+        contracts = await adapter.get_active_futures_contracts()
+        assert contracts == []
+
+    @pytest.mark.asyncio
+    async def test_contracts_are_not_expired(self):
+        """All returned contracts must have expiry >= today."""
+        from datetime import date
+        adapter = self._make_adapter()
+        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
+        contracts = await adapter.get_active_futures_contracts()
+        today_str = date.today().strftime("%Y%m")
+        for c in contracts:
+            # expiry YYYYMM must be >= current YYYYMM
+            assert c["expiry"] >= today_str, f"Expired contract in results: {c}"
+
+
+class TestGetFuturesSymbolsTool:
+    """Tests for get_futures_symbols tool in futures_tools."""
+
+    def _make_trading(self) -> MagicMock:
+        trading = MagicMock()
+        trading.get_active_futures_contracts = AsyncMock(return_value=[
+            {"symbol": "101F6", "price": 380.0, "volume": 50000,
+             "change_pct": 0.26, "expiry": "202606", "multiplier": 250_000},
+            {"symbol": "105F6", "price": 380.0, "volume": 10000,
+             "change_pct": 0.26, "expiry": "202606", "multiplier": 50_000},
+        ])
+        return trading
+
+    @pytest.mark.asyncio
+    async def test_returns_toon_table_with_symbols(self):
+        from agentic_capital.core.tools.futures_tools import build_futures_tools
+        tools, _, _ = build_futures_tools(trading=self._make_trading())
+        tool = next(t for t in tools if t.name == "get_futures_symbols")
+        result = await tool.ainvoke({})
+        assert "101F6" in result
+        assert "105F6" in result
+        assert "250000" in result
+        assert "50000" in result
+
+    @pytest.mark.asyncio
+    async def test_no_trading_returns_error(self):
+        from agentic_capital.core.tools.futures_tools import build_futures_tools
+        tools, _, _ = build_futures_tools(trading=None)
+        tool = next(t for t in tools if t.name == "get_futures_symbols")
+        result = await tool.ainvoke({})
+        assert "ERR" in result
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_inner_attribute(self):
+        from agentic_capital.core.tools.futures_tools import build_futures_tools
+        trading = MagicMock(spec=[])  # no get_active_futures_contracts
+        inner = MagicMock()
+        inner.get_active_futures_contracts = AsyncMock(return_value=[
+            {"symbol": "101F6", "price": 380.0, "volume": 50000,
+             "change_pct": 0.26, "expiry": "202606", "multiplier": 250_000},
+        ])
+        trading._inner = inner
+        tools, _, _ = build_futures_tools(trading=trading)
+        tool = next(t for t in tools if t.name == "get_futures_symbols")
+        result = await tool.ainvoke({})
+        assert "101F6" in result
