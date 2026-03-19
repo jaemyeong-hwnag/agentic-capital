@@ -501,8 +501,9 @@ class TestKISTradingAdapterOrderStatus:
 class TestGetActiveFuturesContracts:
     """Tests for KISTradingAdapter.get_active_futures_contracts().
 
-    KIS 실제 종목코드 체계: A01{ydigit}{mm:02d}
-    예) A01606 = KOSPI200 F 2026년 6월물 (승수 250,000)
+    KIS 실제 종목코드 체계:
+      A01{ydigit}{mm:02d} = 표준선물 (승수 250,000)
+      A30{ydigit}{mm:02d} = 미니선물 (승수  50,000)
     """
 
     def _make_adapter(self) -> KISTradingAdapter:
@@ -520,8 +521,8 @@ class TestGetActiveFuturesContracts:
         return resp
 
     @pytest.mark.asyncio
-    async def test_returns_active_contracts_with_valid_prices(self):
-        """유효한 KOSPI200 지수 가격이 있으면 계약 반환."""
+    async def test_returns_standard_and_mini_contracts(self):
+        """표준(A01) + 미니(A30) 계약 모두 반환."""
         adapter = self._make_adapter()
         adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(100))
         yf_data = {"price": 860.0, "open": 858.0, "high": 862.0, "low": 856.0,
@@ -530,11 +531,12 @@ class TestGetActiveFuturesContracts:
                    new=AsyncMock(return_value=yf_data)):
             contracts = await adapter.get_active_futures_contracts()
         assert len(contracts) > 0
+        symbols = [c["symbol"] for c in contracts]
+        assert any(s.startswith("A01") for s in symbols), "표준선물 없음"
+        assert any(s.startswith("A30") for s in symbols), "미니선물 없음"
         for c in contracts:
-            assert "symbol" in c
-            assert c["symbol"].startswith("A01")
-            assert c["multiplier"] == 250_000
             assert "expiry" in c
+            assert c["multiplier"] in (250_000, 50_000)
 
     @pytest.mark.asyncio
     async def test_standard_contract_has_250k_multiplier(self):
@@ -546,12 +548,36 @@ class TestGetActiveFuturesContracts:
         with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
                    new=AsyncMock(return_value=yf_data)):
             contracts = await adapter.get_active_futures_contracts()
-        assert len(contracts) > 0
-        assert all(c["multiplier"] == 250_000 for c in contracts)
+        std = [c for c in contracts if c["symbol"].startswith("A01")]
+        mini = [c for c in contracts if c["symbol"].startswith("A30")]
+        assert all(c["multiplier"] == 250_000 for c in std)
+        assert all(c["multiplier"] == 50_000 for c in mini)
 
     @pytest.mark.asyncio
-    async def test_symbol_format_is_a01_prefix(self):
-        """실제 KIS 종목코드는 A01{ydigit}{mm:02d} 형식."""
+    async def test_mini_contract_excluded_when_orderable_zero(self):
+        """미니선물(A30)은 orderable_qty=0이면 제외, 표준(A01)은 포함 유지."""
+        adapter = self._make_adapter()
+
+        def _side_effect(*args, **kwargs):
+            params = kwargs.get("params", {})
+            sym = params.get("PDNO", "")
+            if sym.startswith("A30"):
+                resp = MagicMock()
+                resp.json.return_value = {"rt_cd": "0", "output": {"ord_psbl_qty": "0"}}
+                return resp
+            return self._mock_order_check_response(100)
+
+        adapter._session.get = AsyncMock(side_effect=_side_effect)
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value={"price": 860.0, "change_pct": 0.0})):
+            contracts = await adapter.get_active_futures_contracts()
+        symbols = [c["symbol"] for c in contracts]
+        assert any(s.startswith("A01") for s in symbols), "표준선물은 포함되어야 함"
+        assert not any(s.startswith("A30") for s in symbols), "미니선물은 orderable=0이면 제외"
+
+    @pytest.mark.asyncio
+    async def test_symbol_format_is_a01_or_a30_prefix(self):
+        """실제 KIS 종목코드는 A01{ydigit}{mm:02d} 또는 A30{ydigit}{mm:02d} 형식."""
         import re
         adapter = self._make_adapter()
         adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(50))
@@ -559,7 +585,7 @@ class TestGetActiveFuturesContracts:
                    new=AsyncMock(return_value={"price": 860.0, "change_pct": 0.0})):
             contracts = await adapter.get_active_futures_contracts()
         for c in contracts:
-            assert re.match(r"A01\d{3}", c["symbol"]), f"Bad symbol format: {c['symbol']}"
+            assert re.match(r"A(01|30)\d{3}", c["symbol"]), f"Bad symbol format: {c['symbol']}"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_yfinance_when_primary_fails(self):
@@ -768,3 +794,60 @@ class TestFuturesAccountPositions:
 
         positions = await adapter.get_positions()
         assert positions == []
+
+    @pytest.mark.asyncio
+    async def test_standard_futures_position_has_250k_multiplier(self):
+        """A01xxx 심볼 포지션의 multiplier = 250,000."""
+        from agentic_capital.ports.trading import FuturesPosition
+        adapter = self._make_futures_adapter()
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{"shtn_pdno": "A01606", "cblc_qty": "1",
+                          "ccld_avg_unpr1": "860.00", "idx_clpr": "865.00",
+                          "evlu_pfls_amt": "1250000", "mgna_amt": "18000000"}],
+            "output2": {},
+        }
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+        positions = await adapter.get_positions()
+        assert len(positions) == 1
+        assert isinstance(positions[0], FuturesPosition)
+        assert positions[0].multiplier == 250_000
+
+    @pytest.mark.asyncio
+    async def test_mini_futures_position_has_50k_multiplier(self):
+        """A30xxx 심볼 포지션의 multiplier = 50,000."""
+        from agentic_capital.ports.trading import FuturesPosition
+        adapter = self._make_futures_adapter()
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{"shtn_pdno": "A30606", "cblc_qty": "1",
+                          "ccld_avg_unpr1": "860.00", "idx_clpr": "865.00",
+                          "evlu_pfls_amt": "250000", "mgna_amt": "3500000"}],
+            "output2": {},
+        }
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+        positions = await adapter.get_positions()
+        assert len(positions) == 1
+        assert isinstance(positions[0], FuturesPosition)
+        assert positions[0].multiplier == 50_000
+
+
+class TestSymbolMultiplier:
+    """Tests for _symbol_multiplier helper."""
+
+    def test_standard_symbol_returns_250k(self):
+        from agentic_capital.adapters.trading.kis import _symbol_multiplier
+        assert _symbol_multiplier("A01606") == 250_000
+        assert _symbol_multiplier("A01909") == 250_000
+
+    def test_mini_symbol_returns_50k(self):
+        from agentic_capital.adapters.trading.kis import _symbol_multiplier
+        assert _symbol_multiplier("A30606") == 50_000
+        assert _symbol_multiplier("A30909") == 50_000
+
+    def test_unknown_symbol_defaults_to_standard(self):
+        from agentic_capital.adapters.trading.kis import _symbol_multiplier
+        assert _symbol_multiplier("UNKNOWN") == 250_000
+        assert _symbol_multiplier("") == 250_000

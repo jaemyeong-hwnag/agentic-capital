@@ -1558,6 +1558,49 @@ class TestFuturesEngine:
 # ── FuturesVirtualAdapter tests ───────────────────────────────────────────────
 
 
+class TestMinutesUntilSessionEnd:
+    """Tests for FuturesEngine._minutes_until_session_end()."""
+
+    def _make_engine(self):
+        from agentic_capital.simulation.futures_engine import FuturesEngine
+        return FuturesEngine()
+
+    def test_day_session_returns_minutes_to_1545(self):
+        """During day session (09:00–15:45 KST), returns minutes until 15:45."""
+        from datetime import datetime, timezone, timedelta
+        engine = self._make_engine()
+        KST = timezone(timedelta(hours=9))
+        # Simulate 10:00 KST — 345 minutes until 15:45
+        fake_now = datetime(2026, 3, 19, 10, 0, 0, tzinfo=KST)
+        with patch("datetime.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mins = engine._minutes_until_session_end()
+        assert 340 < mins < 350  # roughly 345 min
+
+    def test_night_session_returns_minutes_to_0500_next_day(self):
+        """During night session (18:00+), returns minutes until 05:00 next day."""
+        from datetime import datetime, timezone, timedelta
+        engine = self._make_engine()
+        KST = timezone(timedelta(hours=9))
+        # Simulate 20:00 KST — 9 hours until 05:00 next day = 540 min
+        fake_now = datetime(2026, 3, 19, 20, 0, 0, tzinfo=KST)
+        with patch("datetime.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mins = engine._minutes_until_session_end()
+        assert 535 < mins < 545  # roughly 540 min
+
+    def test_between_sessions_returns_9999(self):
+        """Between 05:00 and 09:00 KST (between sessions), returns 9999."""
+        from datetime import datetime, timezone, timedelta
+        engine = self._make_engine()
+        KST = timezone(timedelta(hours=9))
+        fake_now = datetime(2026, 3, 19, 7, 0, 0, tzinfo=KST)
+        with patch("datetime.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mins = engine._minutes_until_session_end()
+        assert mins == 9999.0
+
+
 class TestFuturesVirtualAdapter:
     """Tests for FuturesVirtualAdapter (local futures simulation)."""
 
