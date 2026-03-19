@@ -322,13 +322,18 @@ class TestFuturesSessionGuard:
 
     @pytest.mark.asyncio
     async def test_daily_loss_limit_blocks_open_when_breached(self):
-        """Open order rejected when daily P&L < -max_daily_loss."""
+        """Open order rejected when futures unrealized P&L < -max_daily_loss."""
         inner = _mock_inner()
-        inner.get_balance = AsyncMock(return_value=Balance(
-            total=1_000_000, available=900_000, currency="KRW",
-            daily_pnl=-60_000.0,  # exceeds 5% of 1M = 50K
-            daily_fee=0.0,
-        ))
+        # Futures position with large unrealized loss
+        inner.get_positions = AsyncMock(return_value=[
+            FuturesPosition(
+                symbol="101W6", quantity=1.0, avg_price=380.0,
+                current_price=355.0,  # large drop
+                unrealized_pnl=-60_000.0,  # exceeds 50K limit
+                unrealized_pnl_pct=-6.0,
+                market=Market.KR_FUTURES, currency="KRW",
+            )
+        ])
         guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
         result = await guard.submit_order(_futures_order("101W6", "open"))
         assert result.status == "rejected"
@@ -339,10 +344,14 @@ class TestFuturesSessionGuard:
         """Breaching daily loss sets _halt_date to today."""
         from datetime import date
         inner = _mock_inner()
-        inner.get_balance = AsyncMock(return_value=Balance(
-            total=1_000_000, available=900_000, currency="KRW",
-            daily_pnl=-60_000.0, daily_fee=0.0,
-        ))
+        inner.get_positions = AsyncMock(return_value=[
+            FuturesPosition(
+                symbol="101W6", quantity=1.0, avg_price=380.0,
+                current_price=355.0, unrealized_pnl=-60_000.0,
+                unrealized_pnl_pct=-6.0,
+                market=Market.KR_FUTURES, currency="KRW",
+            )
+        ])
         guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
         await guard.submit_order(_futures_order("101W6", "open"))
         assert guard._halt_date == date.today().isoformat()
@@ -391,16 +400,34 @@ class TestFuturesSessionGuard:
 
     @pytest.mark.asyncio
     async def test_daily_loss_within_limit_allows_open(self):
-        """No halt when daily P&L is within limit."""
+        """No halt when futures unrealized P&L is within limit."""
         inner = _mock_inner()
-        inner.get_balance = AsyncMock(return_value=Balance(
-            total=1_000_000, available=900_000, currency="KRW",
-            daily_pnl=-10_000.0,  # within 50K limit
-            daily_fee=0.0,
-        ))
+        inner.get_positions = AsyncMock(return_value=[
+            FuturesPosition(
+                symbol="101W6", quantity=1.0, avg_price=380.0,
+                current_price=378.0, unrealized_pnl=-10_000.0,
+                unrealized_pnl_pct=-0.5,
+                market=Market.KR_FUTURES, currency="KRW",
+            )
+        ])
         guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
         result = await guard.submit_order(_futures_order("101W6", "open"))
         assert result.status == "filled"
+
+    @pytest.mark.asyncio
+    async def test_daily_loss_ignores_stock_account_pnl(self):
+        """Daily loss check uses futures positions only, not total account daily_pnl."""
+        inner = _mock_inner()
+        # Stock account shows huge loss (other simulation), but no futures positions
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=10_000_000, available=8_000_000, currency="KRW",
+            daily_pnl=-1_000_000.0,  # massive stock loss, should be ignored
+            daily_fee=0.0,
+        ))
+        inner.get_positions = AsyncMock(return_value=[])  # no futures positions
+        guard = FuturesSessionGuard(inner, max_daily_loss=50_000.0)
+        result = await guard.submit_order(_futures_order("101W6", "open"))
+        assert result.status == "filled"  # not halted by stock loss
 
 
 # ── futures_tools ─────────────────────────────────────────────────────────────

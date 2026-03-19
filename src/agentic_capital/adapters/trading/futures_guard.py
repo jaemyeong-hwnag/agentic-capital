@@ -297,22 +297,28 @@ class FuturesSessionGuard(TradingPort):
             logger.warning("futures_guard_post_fill_validation_failed", symbol=symbol)
 
     async def _daily_loss_safe(self) -> bool:
-        """Return False if today's P&L has exceeded max_daily_loss (halts trading for the day)."""
+        """Return False if futures-only unrealized loss today >= max_daily_loss.
+
+        Uses futures positions only — NOT total account daily_pnl, which would
+        include stock positions from other simulations on the same account.
+        """
         try:
-            balance = await self._inner.get_balance()
-            if balance.daily_pnl < -self._max_daily_loss:
+            positions = await self._inner.get_positions()
+            fut = [p for p in positions if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS)]
+            total_pnl = sum(p.unrealized_pnl for p in fut)
+            if total_pnl < -self._max_daily_loss:
                 from datetime import date
                 self._halt_date = date.today().isoformat()
                 logger.warning(
                     "futures_guard_daily_loss_limit_breached",
-                    daily_pnl=balance.daily_pnl,
+                    futures_unrealized_pnl=total_pnl,
                     max_daily_loss=self._max_daily_loss,
                     halt_date=self._halt_date,
                 )
                 return False
             return True
         except Exception:
-            return True  # fail-open: allow if balance check fails
+            return True  # fail-open: allow if check fails
 
     async def _capital_safe(self) -> bool:
         """Return False if total unrealized loss >= capital_limit."""
