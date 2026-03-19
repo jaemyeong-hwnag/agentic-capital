@@ -709,17 +709,24 @@ class TestFuturesTools:
         assert "ERR:no_trading" in result
 
     @pytest.mark.asyncio
-    async def test_get_futures_balance_with_overseas_pnl(self):
+    async def test_get_futures_balance_shows_futures_pnl_only(self):
+        """pnl_today must reflect futures positions only, not total account daily_pnl."""
         from agentic_capital.core.tools.futures_tools import build_futures_tools
         trading = self._build_trading()
-        ovs_balance = MagicMock()
-        ovs_balance.daily_pnl = 3000.0
-        trading.get_overseas_balance = AsyncMock(return_value=ovs_balance)
+        # Stock account shows large loss — should be ignored
+        trading.get_balance = AsyncMock(return_value=Balance(
+            total=10_000_000, available=8_000_000, currency="KRW",
+            daily_pnl=-1_000_000.0,  # stock loss, must not appear
+            daily_fee=0.0,
+        ))
+        # Futures position with small unrealized gain
+        trading.get_positions = AsyncMock(return_value=[_futures_position("101W6")])
         tools, _, _ = build_futures_tools(trading=trading, capital_limit=10_000_000)
         tool = next(t for t in tools if t.name == "get_futures_balance")
         result = await tool.ainvoke({})
-        # daily_pnl = 5000 (KR) + 3000 (ovs) = 8000
-        assert "pnl_today:8000" in result
+        # pnl_today should be futures unrealized_pnl=250000, not stock -1000000
+        assert "pnl_today:250000" in result
+        assert "-1000000" not in result
 
 
 # ── FuturesEngine (smoke tests) ───────────────────────────────────────────────

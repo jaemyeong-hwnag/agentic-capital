@@ -60,8 +60,11 @@ def build_futures_tools(
     async def get_futures_balance() -> str:
         """Get margin account balance.
 
-        Returns: tot(total equity), avl(available margin), margin_used,
-                 pnl_today, fee_today, op_cost(10000/day), net_today.
+        Returns: tot(total equity capped to capital_limit), avl(available margin),
+                 pnl_today(futures unrealized P&L only), op_cost(10000/day), net_today.
+
+        Note: pnl_today reflects futures positions only — not total account daily_pnl,
+        which may include other asset classes on the same brokerage account.
         """
         if not trading:
             return "ERR:no_trading"
@@ -70,20 +73,20 @@ def build_futures_tools(
             total = min(b.total, capital_limit) if capital_limit else b.total
             available = min(b.available, capital_limit) if capital_limit else b.available
 
-            # Overseas KRW P&L
-            ovs_pnl = 0.0
-            if hasattr(trading, "get_overseas_balance"):
-                try:
-                    ob = await trading.get_overseas_balance("USD")
-                    ovs_pnl = ob.daily_pnl
-                except Exception:
-                    pass
+            # Futures-only P&L: sum unrealized P&L from futures positions
+            futures_pnl = 0.0
+            try:
+                positions = await trading.get_positions()
+                for p in positions:
+                    if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS):
+                        futures_pnl += p.unrealized_pnl
+            except Exception:
+                pass
 
-            total_pnl = b.daily_pnl + ovs_pnl
-            net = total_pnl - 10_000  # op_cost
+            net = futures_pnl - 10_000  # op_cost
             return (
                 f"tot:{total:.0f},avl:{available:.0f},ccy:{b.currency}"
-                f",pnl_today:{total_pnl:.0f},fee_today:{b.daily_fee:.0f}"
+                f",pnl_today:{futures_pnl:.0f},fee_today:{b.daily_fee:.0f}"
                 f",op_cost:10000,net_today:{net:.0f}"
             )
         except Exception as e:
