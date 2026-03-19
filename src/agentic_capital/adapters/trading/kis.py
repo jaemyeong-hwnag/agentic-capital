@@ -375,22 +375,39 @@ class KISTradingAdapter(TradingPort):
     # ── Positions ─────────────────────────────────────────────────────────────
 
     async def get_positions(self) -> list[Position]:
-        """Get all open positions — domestic + overseas + futures combined."""
-        domestic = await self._get_domestic_positions()
-        if not self._session.is_paper:
-            try:
-                overseas = await self._get_overseas_positions()
-            except Exception:
-                logger.warning("kis_overseas_positions_failed_fallback_domestic_only")
-                overseas = []
+        """Get all open positions — domestic + overseas + futures combined.
+
+        For futures accounts (prdt_cd=03), the domestic stock API returns
+        INVALID_CHECK_ACNO — skip it and use the futures balance API instead.
+        """
+        is_futures_account = self._session.prdt_cd == "03"
+
+        # Futures account: domestic stock API rejects with INVALID_CHECK_ACNO
+        if not is_futures_account:
+            domestic = await self._get_domestic_positions()
+        else:
+            domestic = []
+
+        # Futures positions: paper mode supports VTFO6118R, real mode CTFO6118R
+        if is_futures_account:
             try:
                 futures = await self._get_futures_positions()
             except Exception:
                 logger.warning("kis_futures_positions_failed_skipping")
                 futures = []
         else:
-            overseas = []
             futures = []
+
+        # Overseas positions: real account only
+        if not self._session.is_paper and not is_futures_account:
+            try:
+                overseas = await self._get_overseas_positions()
+            except Exception:
+                logger.warning("kis_overseas_positions_failed_fallback_domestic_only")
+                overseas = []
+        else:
+            overseas = []
+
         return domestic + overseas + futures
 
     async def _get_domestic_positions(self) -> list[Position]:
@@ -515,27 +532,52 @@ class KISTradingAdapter(TradingPort):
                 logger.debug("kis_futures_positions_empty", msg=data.get("msg1", ""))
                 return []
 
+            # Log raw output1 fields on first item for field-name discovery
+            raw_items = data.get("output1", [])
+            if raw_items:
+                logger.debug("kis_futures_position_raw_fields", fields=list(raw_items[0].keys()),
+                             sample=raw_items[0])
+
             from agentic_capital.ports.trading import FuturesPosition
             positions = []
-            for item in data.get("output1", []):
-                qty = float(item.get("hldg_qty", 0))
+            for item in raw_items:
+                # VTFO6118R output1: qty field varies — try cblc_qty (잔고수량) then hldg_qty
+                raw_qty = item.get("cblc_qty") or item.get("hldg_qty") or 0
+                qty = float(raw_qty) if raw_qty not in (None, "", "0", 0) else 0.0
                 if qty == 0:
                     continue
                 net_side = "long" if qty > 0 else "short"
+                # VTFO6118R uses ISIN in pdno (KR4A01660005); shtn_pdno has the short code (A01606)
+                symbol = (
+                    item.get("shtn_pdno")
+                    or item.get("pdno", "")
+                )
+                # VTFO6118R output1 field map (confirmed from live API):
+                # ccld_avg_unpr1 = 매입평균단가, idx_clpr = 지수현재가, evlu_pfls_amt = 평가손익
+                avg_price = float(
+                    item.get("ccld_avg_unpr1") or item.get("pchs_avg_pric") or 0
+                )
+                current_price = float(
+                    item.get("idx_clpr") or item.get("prpr") or 0
+                )
+                unrealized_pnl = float(item.get("evlu_pfls_amt") or 0)
+                # lqd_psbl_qty = 청산가능수량 (use as position qty if cblc_qty is missing)
+                if qty == 0:
+                    qty = float(item.get("lqd_psbl_qty") or 0)
                 positions.append(FuturesPosition(
-                    symbol=item.get("pdno", ""),
+                    symbol=symbol,
                     quantity=abs(qty),
-                    avg_price=float(item.get("pchs_avg_pric", 0)),
-                    current_price=float(item.get("prpr", 0)),
-                    unrealized_pnl=float(item.get("evlu_pfls_amt", 0)),
-                    unrealized_pnl_pct=float(item.get("evlu_pfls_rt", 0)),
+                    avg_price=avg_price,
+                    current_price=current_price,
+                    unrealized_pnl=unrealized_pnl,
+                    unrealized_pnl_pct=float(item.get("evlu_pfls_rt") or 0),
                     market=Market.KR_FUTURES,
                     currency="KRW",
                     multiplier=250_000,
-                    margin_required=float(item.get("mgna_amt", 0)),
+                    margin_required=float(item.get("mgna_amt") or 0),
                     expiry=item.get("expr_dt", "")[:6] or None,
                     net_side=net_side,
-                    pnl_per_contract=float(item.get("evlu_pfls_amt", 0)),
+                    pnl_per_contract=unrealized_pnl,
                 ))
 
             logger.debug("kis_futures_positions_fetched", count=len(positions))

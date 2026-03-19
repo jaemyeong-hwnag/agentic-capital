@@ -652,3 +652,119 @@ class TestGetFuturesSymbolsTool:
         tool = next(t for t in tools if t.name == "get_futures_symbols")
         result = await tool.ainvoke({})
         assert "101F6" in result
+
+
+class TestFuturesAccountPositions:
+    """Test get_positions for futures accounts (prdt_cd=03)."""
+
+    def _make_futures_adapter(self, *, is_paper: bool = True) -> KISTradingAdapter:
+        with (
+            patch("agentic_capital.adapters.kis_session.settings") as mock_s,
+            patch("agentic_capital.adapters.kis_session._load_cached_token", return_value=None),
+        ):
+            mock_s.kis_is_paper = is_paper
+            mock_s.kis_paper_app_key = ""
+            mock_s.kis_paper_app_secret = ""
+            mock_s.kis_paper_account_no = ""
+            mock_s.effective_kis_app_key = "test-key"
+            mock_s.effective_kis_app_secret = "test-secret"
+            mock_s.effective_kis_account_no = "6003908203"  # futures account (prdt_cd=03)
+            session = KISSession()
+        session._access_token = "token"
+        assert session.prdt_cd == "03"
+        return KISTradingAdapter(session=session)
+
+    @pytest.mark.asyncio
+    async def test_futures_account_skips_domestic_stock_api(self):
+        """For prdt_cd=03, get_positions must NOT call domestic stock API."""
+        adapter = self._make_futures_adapter()
+
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {"rt_cd": "0", "output1": [], "output2": {}}
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+
+        await adapter.get_positions()
+
+        # Only one GET call (futures balance), not domestic stock balance
+        assert adapter._session.get.call_count == 1
+        call_url = adapter._session.get.call_args[0][0]
+        assert "domestic-futureoption" in call_url
+
+    @pytest.mark.asyncio
+    async def test_futures_account_returns_futures_positions_paper(self):
+        """Paper futures account: get_positions returns positions from VTFO6118R output1."""
+        from agentic_capital.ports.trading import FuturesPosition
+        adapter = self._make_futures_adapter(is_paper=True)
+
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{
+                "shtn_pdno": "A01606",
+                "pdno": "KR4A01660005",
+                "cblc_qty": "1",
+                "hldg_qty": None,
+                "pchs_avg_pric": "860.00",
+                "prpr": "855.00",
+                "evlu_pfls_amt": "-1250000",
+                "evlu_pfls_rt": "-0.58",
+                "mgna_amt": "18000000",
+                "expr_dt": "202606",
+            }],
+            "output2": {},
+        }
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+
+        positions = await adapter.get_positions()
+
+        assert len(positions) == 1
+        p = positions[0]
+        assert isinstance(p, FuturesPosition)
+        assert p.symbol == "A01606"  # shtn_pdno used, not ISIN
+        assert p.quantity == 1.0
+        assert p.net_side == "long"
+
+    @pytest.mark.asyncio
+    async def test_futures_position_uses_cblc_qty_when_hldg_qty_is_none(self):
+        """When hldg_qty is None, cblc_qty must be used for quantity."""
+        adapter = self._make_futures_adapter()
+
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{
+                "shtn_pdno": "A01606",
+                "pdno": "KR4A01660005",
+                "cblc_qty": "2",
+                "hldg_qty": None,  # null from API
+                "pchs_avg_pric": "860.00",
+                "prpr": "870.00",
+                "evlu_pfls_amt": "500000",
+            }],
+            "output2": {},
+        }
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+
+        positions = await adapter.get_positions()
+        assert len(positions) == 1
+        assert positions[0].quantity == 2.0
+
+    @pytest.mark.asyncio
+    async def test_futures_position_zero_qty_skipped(self):
+        """Positions with zero quantity (no holdings) must be excluded."""
+        adapter = self._make_futures_adapter()
+
+        futures_resp = MagicMock()
+        futures_resp.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{
+                "shtn_pdno": "A01606",
+                "cblc_qty": "0",
+                "hldg_qty": None,
+            }],
+            "output2": {},
+        }
+        adapter._session.get = AsyncMock(return_value=futures_resp)
+
+        positions = await adapter.get_positions()
+        assert positions == []
