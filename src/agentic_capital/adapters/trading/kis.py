@@ -452,30 +452,78 @@ class KISTradingAdapter(TradingPort):
             return []
 
     async def get_futures_quote(self, symbol: str) -> dict:
-        """선물 현재가 조회 (FHKIF03010100)."""
+        """선물 현재가 조회.
+
+        실계좌: FHKIF03010100 (선물 현재가 조회)
+        모의투자: FHKIF03010100은 paper 서버 미지원 → KOSPI200 지수(FHPUP02100000)로
+                  근사치 사용 (basis 무시, 모의투자용으로 허용)
+        """
+        from agentic_capital.adapters.kis_session import _REAL_BASE
         await self._session.ensure_token()
         try:
             r = await self._session.get(
-                f"{self._session.base_url}/uapi/domestic-futureoption/v1/quotations/inquire-price",
+                f"{_REAL_BASE}/uapi/domestic-futureoption/v1/quotations/inquire-price",
                 headers=self._session.headers("FHKIF03010100"),
                 params={"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": symbol},
             )
             data = r.json()
-            if data.get("rt_cd") != "0":
-                return {}
-            output = data.get("output", {})
-            return {
-                "symbol": symbol,
-                "price": float(output.get("stck_prpr", 0)),
-                "open": float(output.get("stck_oprc", 0)),
-                "high": float(output.get("stck_hgpr", 0)),
-                "low": float(output.get("stck_lwpr", 0)),
-                "volume": int(output.get("acml_vol", 0)),
-                "change": float(output.get("prdy_vrss", 0)),
-                "change_pct": float(output.get("prdy_ctrt", 0)),
-            }
+            if data.get("rt_cd") == "0":
+                output = data.get("output", {})
+                price = float(output.get("stck_prpr", 0))
+                if price > 0:
+                    return {
+                        "symbol": symbol,
+                        "price": price,
+                        "open": float(output.get("stck_oprc", 0)),
+                        "high": float(output.get("stck_hgpr", 0)),
+                        "low": float(output.get("stck_lwpr", 0)),
+                        "volume": int(output.get("acml_vol", 0)),
+                        "change": float(output.get("prdy_vrss", 0)),
+                        "change_pct": float(output.get("prdy_ctrt", 0)),
+                    }
+            logger.debug(
+                "kis_futures_quote_real_failed",
+                symbol=symbol, rt_cd=data.get("rt_cd"), msg=data.get("msg1"),
+            )
         except Exception:
             logger.exception("kis_get_futures_quote_failed", symbol=symbol)
+
+        # Fallback: KOSPI200 지수 현재가 (모의투자 또는 실API 장외 시간)
+        return await self._get_kospi200_index_as_futures_proxy(symbol)
+
+    async def _get_kospi200_index_as_futures_proxy(self, symbol: str) -> dict:
+        """KOSPI200 지수 현재가를 선물 근사치로 반환.
+
+        선물 가격 ≈ 지수 가격 (basis 무시 — 모의투자에서만 사용).
+        표준(101xx) / 미니(105xx) 모두 동일 지수 기준.
+        """
+        from agentic_capital.adapters.kis_session import _REAL_BASE
+        try:
+            r = await self._session.get(
+                f"{_REAL_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price",
+                headers=self._session.headers("FHPUP02100000"),
+                params={"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": "0200"},
+            )
+            data = r.json()
+            if data.get("rt_cd") != "0":
+                logger.debug("kis_kospi200_index_failed", rt_cd=data.get("rt_cd"), msg=data.get("msg1"))
+                return {}
+            output = data.get("output", {})
+            price = float(output.get("bstp_nmix_prpr", 0) or 0)
+            if price <= 0:
+                return {}
+            return {
+                "symbol": symbol,
+                "price": price,
+                "open": float(output.get("bstp_nmix_oprc", 0) or 0),
+                "high": float(output.get("bstp_nmix_hgpr", 0) or 0),
+                "low": float(output.get("bstp_nmix_lwpr", 0) or 0),
+                "volume": int(float(output.get("acml_vol", 0) or 0)),
+                "change": float(output.get("bstp_nmix_prdy_vrss", 0) or 0),
+                "change_pct": float(output.get("bstp_nmix_prdy_ctrt", 0) or 0),
+            }
+        except Exception:
+            logger.exception("kis_kospi200_index_fallback_failed", symbol=symbol)
             return {}
 
     async def get_active_futures_contracts(self) -> list[dict]:
