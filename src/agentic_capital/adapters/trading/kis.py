@@ -35,6 +35,26 @@ from agentic_capital.ports.trading import (
 logger = structlog.get_logger()
 
 
+# ── Futures symbol helpers ────────────────────────────────────────────────────
+
+# KIS 선물 단축종목코드 체계:
+#   KOSPI200 표준선물: A01{y}{mm}  (승수 250,000 KRW/pt)
+#   KOSPI200 미니선물: A30{y}{mm}  (승수  50,000 KRW/pt)
+# 예: A01606 = 표준 202606, A30606 = 미니 202606
+# ※ 미니 심볼(A30xxx)은 VTTO5105R(주문가능조회)로 실시간 검증 후 사용.
+
+_MINI_FUTURES_MULTIPLIER = 50_000
+_STANDARD_FUTURES_MULTIPLIER = 250_000
+
+
+def _symbol_multiplier(symbol: str) -> int:
+    """Return KRW/pt multiplier for a KIS futures symbol.
+
+    Prefix A3 → KOSPI200 mini (50,000). All others → standard (250,000).
+    """
+    return _MINI_FUTURES_MULTIPLIER if symbol.startswith("A3") else _STANDARD_FUTURES_MULTIPLIER
+
+
 async def _fetch_yfinance_kospi200() -> dict:
     """Fetch KOSPI200 index via Yahoo Finance public API.
 
@@ -573,7 +593,7 @@ class KISTradingAdapter(TradingPort):
                     unrealized_pnl_pct=float(item.get("evlu_pfls_rt") or 0),
                     market=Market.KR_FUTURES,
                     currency="KRW",
-                    multiplier=250_000,
+                    multiplier=_symbol_multiplier(symbol),
                     margin_required=float(item.get("mgna_amt") or 0),
                     expiry=item.get("expr_dt", "")[:6] or None,
                     net_side=net_side,
@@ -640,14 +660,15 @@ class KISTradingAdapter(TradingPort):
         """활성 KR 선물 계약 목록 조회.
 
         KIS 실제 종목코드 체계 (체결내역 확인 기반):
-          - KOSPI200 표준: A01{ydigit}{mm:02d}  (승수 250,000)
-            예: A01606 = 코스피200 F 202606 (2026년 6월물)
+          - KOSPI200 표준: A01{ydigit}{mm:02d}  (승수 250,000)  예: A01606
+          - KOSPI200 미니: A30{ydigit}{mm:02d}  (승수  50,000)  예: A30606
           - 분기월: 3월(03) / 6월(06) / 9월(09) / 12월(12)
           - 만기일: 각 분기 두 번째 목요일
 
         우선순위:
           1. 주문가능 API(VTTO5105R)로 후보 종목 유효성 검증
           2. 유효한 종목만 반환 (가격은 KOSPI200 지수 근사치 사용)
+          3. 미니선물 심볼(A30xxx)은 orderable_qty > 0 확인된 것만 포함
         """
         from datetime import date, timedelta
 
@@ -659,23 +680,34 @@ class KISTradingAdapter(TradingPort):
             days_to_thu = (3 - d.weekday()) % 7
             return d + timedelta(days=days_to_thu) + timedelta(weeks=n - 1)
 
-        # KIS 실제 종목코드: A01{연도1자리}{월2자리}
-        candidates: list[tuple[str, date]] = []
-        for y in (today.year, today.year + 1):
-            for qm in QUARTERLY:
-                expiry = _nth_thursday(y, qm, 2)
-                if expiry < today:
-                    continue
-                ydigit = str(y)[-1]
-                sym = f"A01{ydigit}{qm:02d}"
-                candidates.append((sym, expiry))
-            if len(candidates) >= 3:
-                break
+        # 후보 생성: 표준(A01) + 미니(A30) 각 최근 2개 분기물
+        # (prefix, multiplier, strict_validate)
+        # strict_validate=True → orderable_qty=0이면 제외 (미니는 API 검증 필수)
+        PRODUCTS = [
+            ("A01", _STANDARD_FUTURES_MULTIPLIER, False),
+            ("A30", _MINI_FUTURES_MULTIPLIER, True),
+        ]
+
+        candidates: list[tuple[str, date, int, bool]] = []
+        for prefix, mult, strict in PRODUCTS:
+            count = 0
+            for y in (today.year, today.year + 1):
+                for qm in QUARTERLY:
+                    expiry = _nth_thursday(y, qm, 2)
+                    if expiry < today:
+                        continue
+                    ydigit = str(y)[-1]
+                    sym = f"{prefix}{ydigit}{qm:02d}"
+                    candidates.append((sym, expiry, mult, strict))
+                    count += 1
+                    if count >= 2:
+                        break
+                if count >= 2:
+                    break
 
         results = []
-        for sym, exp in candidates[:3]:
-            # 주문가능 API로 유효 종목 검증
-            ord_psbl_qty = 1  # default: include unless API explicitly returns 0
+        for sym, exp, mult, strict in candidates:
+            ord_psbl_qty = 0 if strict else 1
             try:
                 await self._session.ensure_token()
                 r = await self._session.get(
@@ -696,11 +728,18 @@ class KISTradingAdapter(TradingPort):
                     ord_psbl_qty = int(out.get("ord_psbl_qty", 1) or 1)
                 else:
                     logger.debug("kis_futures_contract_check_unavailable", symbol=sym, msg=data.get("msg1", ""))
-                    # API가 지원 안 되면 fallback: 포함
+                    if not strict:
+                        ord_psbl_qty = 1  # 표준은 API 오류 시 포함
             except Exception:
                 logger.debug("kis_futures_contract_check_failed", symbol=sym)
+                if not strict:
+                    ord_psbl_qty = 1
 
-            # 현재가는 KOSPI200 지수 근사치
+            # 미니선물은 orderable_qty > 0이어야 포함 (심볼 존재 확인 용도)
+            if strict and ord_psbl_qty == 0:
+                logger.debug("kis_mini_futures_contract_excluded", symbol=sym)
+                continue
+
             q = await self.get_futures_quote(sym)
             price = q.get("price", 0) if q else 0
 
@@ -710,10 +749,11 @@ class KISTradingAdapter(TradingPort):
                 "volume": 0,
                 "change_pct": q.get("change_pct", 0) if q else 0,
                 "expiry": exp.strftime("%Y%m"),
-                "multiplier": 250_000,
+                "multiplier": mult,
                 "orderable_qty": ord_psbl_qty,
             })
-            logger.debug("kis_futures_contract_added", symbol=sym, expiry=exp.strftime("%Y%m"), orderable=ord_psbl_qty)
+            logger.debug("kis_futures_contract_added", symbol=sym, expiry=exp.strftime("%Y%m"),
+                         mult=mult, orderable=ord_psbl_qty)
 
         logger.debug("kis_active_futures_contracts", count=len(results))
         return results
@@ -881,8 +921,17 @@ class KISTradingAdapter(TradingPort):
 
             output = data.get("output", {})
             order_id = output.get("ODNO", "")
+
+            # 예상 수수료 계산: 약정금액 × KIS 온라인 선물 수수료율 0.0000220
+            # (실제 체결 수수료는 VTFO6118R output2.fee 또는 VTTO5201R output2.fee_smtl 참고)
+            _FUT_COMMISSION_RATE = 0.0000220  # KIS HTS/MTS 선물 기본 수수료율
+            est_price = order.price or 0.0
+            est_multiplier = order.multiplier or _symbol_multiplier(order.symbol)
+            est_commission = est_price * order.quantity * est_multiplier * _FUT_COMMISSION_RATE
+
             logger.info("kis_futures_order_submitted", order_id=order_id,
-                        symbol=order.symbol, side=order.side.value)
+                        symbol=order.symbol, side=order.side.value,
+                        est_commission=round(est_commission, 0))
             return OrderResult(
                 order_id=order_id,
                 symbol=order.symbol,
@@ -891,7 +940,11 @@ class KISTradingAdapter(TradingPort):
                 filled_price=order.price or 0.0,
                 status="submitted",
                 market=order.market,
-                metadata={"KRX_FWDG_ORD_ORGNO": output.get("KRX_FWDG_ORD_ORGNO", "")},
+                metadata={
+                    "KRX_FWDG_ORD_ORGNO": output.get("KRX_FWDG_ORD_ORGNO", ""),
+                    "est_commission": round(est_commission, 0),
+                    "commission_rate": _FUT_COMMISSION_RATE,
+                },
             )
         except Exception:
             logger.exception("kis_submit_futures_order_failed", symbol=order.symbol)
@@ -1048,16 +1101,11 @@ class KISTradingAdapter(TradingPort):
         end_date: str | None = None,
         symbol: str = "",
     ) -> list[OrderResult]:
-        """Get domestic stock order fill history.
-
-        Args:
-            start_date: YYYYMMDD format. Defaults to today.
-            end_date: YYYYMMDD format. Defaults to today.
-            symbol: Filter by stock code (empty = all).
-
-        Returns:
-            List of filled orders.
-        """
+        """Get order fill history. 선물 계좌(prdt_cd=03)는 자동으로 선물 API 사용."""
+        if self._session.prdt_cd == "03":
+            return await self.get_futures_fills(
+                start_date=start_date, end_date=end_date, symbol=symbol
+            )
         await self._session.ensure_token()
         today = datetime.now().strftime("%Y%m%d")
         start = start_date or today
@@ -1112,6 +1160,81 @@ class KISTradingAdapter(TradingPort):
             return fills
         except Exception:
             logger.exception("kis_get_fills_failed")
+            raise
+
+    async def get_futures_fills(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        symbol: str = "",
+    ) -> list[OrderResult]:
+        """선물/옵션 주문체결 내역 조회 (VTTO5201R / TTTO5201R).
+
+        output1: 체결 건별 내역
+        output2: 합계 (fee_smtl = 수수료합계)
+
+        KIS는 건별 수수료를 반환하지 않음 — output2.fee_smtl을 체결 건수로 나눠
+        거래당 평균 수수료를 metadata에 포함한다.
+        """
+        await self._session.ensure_token()
+        today = datetime.now().strftime("%Y%m%d")
+        start = start_date or today
+        end = end_date or today
+        try:
+            r = await self._session.get(
+                f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/inquire-ccnl",
+                headers=self._session.headers(_FUT_TR["fills"][self._mode()]),
+                params={
+                    "CANO": self._session.cano,
+                    "ACNT_PRDT_CD": self._session.prdt_cd,
+                    "SLL_BUY_DVSN_CD": "00",      # 00=전체
+                    "CCLD_NCCS_DVSN": "01",        # 01=체결만
+                    "PDNO": symbol,
+                    "INQR_STRT_DT": start,
+                    "INQR_END_DT": end,
+                    "CTX_AREA_FK200": "",
+                    "CTX_AREA_NK200": "",
+                },
+            )
+            data = r.json()
+            if data.get("rt_cd") != "0":
+                raise RuntimeError(f"KIS futures fills failed: {data.get('msg1', data)}")
+
+            # output2: 수수료합계 (fee_smtl) — per-trade fee를 여기서 배분
+            o2 = data.get("output2", {}) or {}
+            fee_total = float(o2.get("fee_smtl") or o2.get("fee") or 0)
+
+            items = data.get("output1", [])
+            fee_per_trade = fee_total / len(items) if items else 0.0
+
+            fills = []
+            for item in items:
+                qty = float(item.get("ft_ccld_qty") or item.get("tot_ccld_qty") or 0)
+                if qty <= 0:
+                    continue
+                side_cd = item.get("sll_buy_dvsn_cd", "02")
+                price = float(item.get("fuop_ccld_unpr") or item.get("ccld_avg_unpr") or 0)
+                fills.append(OrderResult(
+                    order_id=item.get("odno", ""),
+                    symbol=item.get("shtn_pdno") or item.get("pdno", ""),
+                    side=OrderSide.BUY if side_cd == "02" else OrderSide.SELL,
+                    quantity=qty,
+                    filled_price=price,
+                    status="filled",
+                    market=Market.KR_FUTURES,
+                    metadata={
+                        "commission": round(fee_per_trade, 0),
+                        "commission_total": fee_total,
+                        "fill_time": item.get("ccld_dtime", ""),
+                        "item_name": item.get("prdt_name", ""),
+                    },
+                ))
+
+            logger.debug("kis_futures_fills_fetched",
+                         count=len(fills), fee_total=fee_total, start=start, end=end)
+            return fills
+        except Exception:
+            logger.exception("kis_get_futures_fills_failed")
             raise
 
     async def get_overseas_fills(

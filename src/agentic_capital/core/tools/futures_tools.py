@@ -23,7 +23,8 @@ from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 logger = structlog.get_logger()
 
 # Default multiplier when broker doesn't return it for a position
-_DEFAULT_FUTURES_MULTIPLIER = 250_000
+# Mini futures (A30xxx, 50,000 KRW/pt) is the primary product at this capital level.
+_DEFAULT_FUTURES_MULTIPLIER = 50_000
 
 
 class SubmitFuturesOrderInput(BaseModel):
@@ -60,20 +61,21 @@ def build_futures_tools(
     async def get_futures_balance() -> str:
         """Get margin account balance.
 
-        Returns: tot(total equity capped to capital_limit), avl(available margin),
-                 pnl_today(futures unrealized P&L only), op_cost(10000/day), net_today.
+        Returns: tot(total equity), avl(available margin), pnl_today(unrealized P&L),
+                 fee_today(actual KIS commission paid today), net_today(pnl - fee).
 
-        Note: pnl_today reflects futures positions only — not total account daily_pnl,
-        which may include other asset classes on the same brokerage account.
+        fee_today = actual broker commission from VTFO6118R output2.fee.
+        KIS online futures commission rate ≈ 0.0022% of notional per trade.
+        1 KOSPI200 contract roundtrip fee ≈ 9,500 KRW (buy ~4,750 + sell ~4,750).
+
+        Note: pnl_today reflects open futures positions only.
         """
         if not trading:
             return "ERR:no_trading"
         try:
             b = await trading.get_balance()
-            total = min(b.total, capital_limit) if capital_limit else b.total
-            available = min(b.available, capital_limit) if capital_limit else b.available
 
-            # Futures-only P&L: sum unrealized P&L from futures positions
+            # Futures-only unrealized P&L from open positions
             futures_pnl = 0.0
             try:
                 positions = await trading.get_positions()
@@ -83,11 +85,11 @@ def build_futures_tools(
             except Exception:
                 pass
 
-            net = futures_pnl - 10_000  # op_cost
+            fee = b.daily_fee  # actual paid commission from broker
+            net = futures_pnl - fee
             return (
-                f"tot:{total:.0f},avl:{available:.0f},ccy:{b.currency}"
-                f",pnl_today:{futures_pnl:.0f},fee_today:{b.daily_fee:.0f}"
-                f",op_cost:10000,net_today:{net:.0f}"
+                f"tot:{b.total:.0f},avl:{b.available:.0f},ccy:{b.currency}"
+                f",pnl_today:{futures_pnl:.0f},fee_today:{fee:.0f},net_today:{net:.0f}"
             )
         except Exception as e:
             return f"ERR:{e}"
@@ -241,6 +243,7 @@ def build_futures_tools(
                 err = result.metadata.get("error", "rejected")
                 return f"ERR:{err}"
 
+            commission = result.metadata.get("est_commission", 0.0)
             decision = {
                 "type": "trade",
                 "action": side.upper(),
@@ -253,7 +256,7 @@ def build_futures_tools(
                 "confidence": 0.7,
                 "order_id": result.order_id,
                 "status": result.status,
-                "commission": 0.0,
+                "commission": commission,
             }
             decisions_sink.append(decision)
 
@@ -265,10 +268,12 @@ def build_futures_tools(
                 qty=quantity,
                 effect=position_effect,
                 status=result.status,
+                commission=round(commission, 0),
             )
             return (
                 f"oid:{result.order_id},sym:{symbol},sd:{side[:1].upper()},"
                 f"qty:{quantity},pe:{position_effect},st:{result.status}"
+                f",fee_est:{commission:.0f}"
             )
         except Exception as e:
             return f"ERR:{e}"
