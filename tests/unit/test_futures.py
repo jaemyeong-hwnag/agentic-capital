@@ -1050,3 +1050,106 @@ class TestFuturesEngine:
             await engine._run_cycle()
             engine._recorder.record_agent_cycle.assert_called_once()
             engine._recorder.commit.assert_called_once()
+
+
+# ── FuturesVirtualAdapter tests ───────────────────────────────────────────────
+
+
+class TestFuturesVirtualAdapter:
+    """Tests for FuturesVirtualAdapter (local futures simulation)."""
+
+    def _make_adapter(self, price: float = 380.0, capital: float = 50_000_000.0):
+        from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])  # no real stock positions
+        adapter = FuturesVirtualAdapter(inner, initial_capital=capital)
+        return adapter, price
+
+    def _patch_price(self, price: float):
+        from unittest.mock import patch
+        return patch(
+            "agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+            new=AsyncMock(return_value={"price": price, "open": price, "high": price,
+                                        "low": price, "volume": 1000, "change": 0.0, "change_pct": 0.0}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_initial_balance_equals_capital(self):
+        adapter, price = self._make_adapter(380.0, capital=50_000_000.0)
+        with self._patch_price(price):
+            bal = await adapter.get_balance()
+        assert bal.total == 50_000_000.0
+        assert bal.available == 50_000_000.0
+        assert bal.currency == "KRW"
+
+    @pytest.mark.asyncio
+    async def test_open_position_fills_virtually(self):
+        adapter, price = self._make_adapter(380.0)
+        order = Order(
+            symbol="101F6", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open",
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(order)
+        assert result.status == "filled"
+        assert result.filled_price == 380.0
+        assert result.symbol == "101F6"
+
+    @pytest.mark.asyncio
+    async def test_position_unrealized_pnl_updated(self):
+        adapter, _ = self._make_adapter(380.0)
+        order = Order(
+            symbol="101F6", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open", multiplier=250_000.0,
+        )
+        with self._patch_price(380.0):
+            await adapter.submit_order(order)
+        # Price moves up 1 point
+        with self._patch_price(381.0):
+            positions = await adapter.get_positions()
+        fut_pos = [p for p in positions if p.market == Market.KR_FUTURES]
+        assert len(fut_pos) == 1
+        assert fut_pos[0].unrealized_pnl == pytest.approx(250_000.0, rel=0.01)
+
+    @pytest.mark.asyncio
+    async def test_close_position_removes_from_positions(self):
+        adapter, price = self._make_adapter(380.0)
+        open_order = Order(
+            symbol="101F6", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open",
+        )
+        close_order = Order(
+            symbol="101F6", side=OrderSide.SELL, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="close",
+        )
+        with self._patch_price(price):
+            await adapter.submit_order(open_order)
+            result = await adapter.submit_order(close_order)
+        assert result.status == "filled"
+        with self._patch_price(price):
+            positions = await adapter.get_positions()
+        assert not any(p.market == Market.KR_FUTURES for p in positions)
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_insufficient_margin(self):
+        # Capital of 100 KRW — clearly not enough for any futures margin
+        adapter, _ = self._make_adapter(380.0, capital=100.0)
+        order = Order(
+            symbol="101F6", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open",
+        )
+        with self._patch_price(380.0):
+            result = await adapter.submit_order(order)
+        assert result.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_non_futures_order_delegated_to_inner(self):
+        adapter, price = self._make_adapter(380.0)
+        stock_order = Order(
+            symbol="005930", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_STOCK,
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(stock_order)
+        # Should be handled by inner (mocked to return OID1/filled)
+        assert result.order_id == "OID1"

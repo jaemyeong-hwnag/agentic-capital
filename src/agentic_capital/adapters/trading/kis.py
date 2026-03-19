@@ -34,6 +34,51 @@ from agentic_capital.ports.trading import (
 
 logger = structlog.get_logger()
 
+
+async def _fetch_yfinance_kospi200() -> dict:
+    """Fetch KOSPI200 index via Yahoo Finance public API.
+
+    Returns parsed dict with price, open, high, low, volume, change, change_pct.
+    Returns {} on failure or when market is closed.
+    Module-level function so tests can patch it.
+    """
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/%5EKS200",
+                params={"interval": "1m", "range": "1d"},
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+        data = r.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return {}
+        meta = result[0].get("meta", {})
+        price = float(meta.get("regularMarketPrice", 0) or 0)
+        if price <= 0:
+            return {}
+        prev_close = float(meta.get("previousClose", 0) or 0)
+        change = price - prev_close if prev_close > 0 else 0.0
+        change_pct = (change / prev_close * 100) if prev_close > 0 else 0.0
+        indicators = result[0].get("indicators", {}).get("quote", [{}])[0]
+        high = max((v for v in (indicators.get("high") or []) if v), default=price)
+        low = min((v for v in (indicators.get("low") or []) if v), default=price)
+        volume = sum(v or 0 for v in (indicators.get("volume") or []))
+        return {
+            "price": price,
+            "open": float(meta.get("regularMarketOpen", price) or price),
+            "high": high,
+            "low": low,
+            "volume": int(volume),
+            "change": change,
+            "change_pct": change_pct,
+        }
+    except Exception:
+        logger.exception("yfinance_kospi200_fetch_failed")
+        return {}
+
+
 # ── Domestic stock TR IDs ─────────────────────────────────────────────────────
 _KR_TR = {
     "balance":       {"real": "TTTC8434R", "paper": "VTTC8434R"},
@@ -492,39 +537,16 @@ class KISTradingAdapter(TradingPort):
         return await self._get_kospi200_index_as_futures_proxy(symbol)
 
     async def _get_kospi200_index_as_futures_proxy(self, symbol: str) -> dict:
-        """KOSPI200 지수 현재가를 선물 근사치로 반환.
+        """KOSPI200 지수 현재가를 선물 근사치로 반환 (모의투자 전용).
 
-        선물 가격 ≈ 지수 가격 (basis 무시 — 모의투자에서만 사용).
-        표준(101xx) / 미니(105xx) 모두 동일 지수 기준.
+        KIS paper token은 실서버 시세 접근 불가 → Yahoo Finance 공개 API 사용.
+        선물 가격 ≈ 지수 가격 (basis 무시 — 모의투자용으로 허용).
         """
-        from agentic_capital.adapters.kis_session import _REAL_BASE
-        try:
-            r = await self._session.get(
-                f"{_REAL_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price",
-                headers=self._session.headers("FHPUP02100000"),
-                params={"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": "0200"},
-            )
-            data = r.json()
-            if data.get("rt_cd") != "0":
-                logger.debug("kis_kospi200_index_failed", rt_cd=data.get("rt_cd"), msg=data.get("msg1"))
-                return {}
-            output = data.get("output", {})
-            price = float(output.get("bstp_nmix_prpr", 0) or 0)
-            if price <= 0:
-                return {}
-            return {
-                "symbol": symbol,
-                "price": price,
-                "open": float(output.get("bstp_nmix_oprc", 0) or 0),
-                "high": float(output.get("bstp_nmix_hgpr", 0) or 0),
-                "low": float(output.get("bstp_nmix_lwpr", 0) or 0),
-                "volume": int(float(output.get("acml_vol", 0) or 0)),
-                "change": float(output.get("bstp_nmix_prdy_vrss", 0) or 0),
-                "change_pct": float(output.get("bstp_nmix_prdy_ctrt", 0) or 0),
-            }
-        except Exception:
-            logger.exception("kis_kospi200_index_fallback_failed", symbol=symbol)
+        d = await _fetch_yfinance_kospi200()
+        if not d:
             return {}
+        logger.debug("yfinance_kospi200_price", price=d["price"], symbol=symbol)
+        return {"symbol": symbol, **d}
 
     async def get_active_futures_contracts(self) -> list[dict]:
         """활성 KR 선물 계약 목록 조회.
@@ -728,7 +750,10 @@ class KISTradingAdapter(TradingPort):
 
             if data.get("rt_cd") != "0":
                 logger.warning("kis_futures_order_rejected",
-                               symbol=order.symbol, msg=data.get("msg1", ""))
+                               symbol=order.symbol, msg=data.get("msg1", ""),
+                               rt_cd=data.get("rt_cd"),
+                               msg_cd=data.get("msg_cd"),
+                               body_sent=body)
                 return OrderResult(
                     order_id="", symbol=order.symbol, side=order.side,
                     quantity=0.0, filled_price=0.0, status="rejected", market=order.market,

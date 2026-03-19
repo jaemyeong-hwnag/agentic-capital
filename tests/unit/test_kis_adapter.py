@@ -544,47 +544,39 @@ class TestGetActiveFuturesContracts:
         failed = MagicMock()
         failed.json.return_value = {"rt_cd": "1", "msg1": "no data"}
         adapter._session.get = AsyncMock(return_value=failed)
-        contracts = await adapter.get_active_futures_contracts()
+        # Patch Yahoo Finance fallback to also return no data
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value={})):
+            contracts = await adapter.get_active_futures_contracts()
         assert contracts == []
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_kospi200_index_when_primary_fails(self):
-        """When FHKIF03010100 fails, KOSPI200 index proxy is used."""
+    async def test_falls_back_to_yfinance_when_primary_fails(self):
+        """When FHKIF03010100 fails, Yahoo Finance proxy is used."""
         adapter = self._make_adapter()
         failed_primary = MagicMock()
         failed_primary.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드 입니다"}
-        index_resp = MagicMock()
-        index_resp.json.return_value = {
-            "rt_cd": "0",
-            "output": {
-                "bstp_nmix_prpr": "380.50",
-                "bstp_nmix_oprc": "378.00",
-                "bstp_nmix_hgpr": "382.00",
-                "bstp_nmix_lwpr": "377.00",
-                "acml_vol": "100000",
-                "bstp_nmix_prdy_vrss": "1.50",
-                "bstp_nmix_prdy_ctrt": "0.40",
-            },
+        adapter._session.get = AsyncMock(return_value=failed_primary)
+        yf_data = {
+            "price": 380.50, "open": 378.00, "high": 382.00,
+            "low": 377.00, "volume": 100000, "change": 1.50, "change_pct": 0.40,
         }
-        # First call = primary (FHKIF03010100), second call = index fallback
-        adapter._session.get = AsyncMock(side_effect=[failed_primary, index_resp] * 10)
-        contracts = await adapter.get_active_futures_contracts()
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value=yf_data)):
+            contracts = await adapter.get_active_futures_contracts()
         assert len(contracts) > 0
         assert contracts[0]["price"] == 380.50
 
     @pytest.mark.asyncio
-    async def test_kospi200_index_proxy_returns_empty_when_price_is_zero(self):
-        """If index price is 0 (market closed), returns empty dict."""
+    async def test_yfinance_proxy_returns_empty_when_price_is_zero(self):
+        """If Yahoo Finance returns empty (market closed), contracts list is empty."""
         adapter = self._make_adapter()
         failed_primary = MagicMock()
         failed_primary.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드"}
-        index_zero = MagicMock()
-        index_zero.json.return_value = {
-            "rt_cd": "0",
-            "output": {"bstp_nmix_prpr": "0"},
-        }
-        adapter._session.get = AsyncMock(side_effect=[failed_primary, index_zero] * 10)
-        contracts = await adapter.get_active_futures_contracts()
+        adapter._session.get = AsyncMock(return_value=failed_primary)
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value={})):
+            contracts = await adapter.get_active_futures_contracts()
         assert contracts == []
 
     @pytest.mark.asyncio
