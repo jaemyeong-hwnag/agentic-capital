@@ -757,6 +757,52 @@ class TestFuturesSessionGuard:
         # fail-open: allowed even though sizing check failed
         assert result.status == "filled"
 
+    @pytest.mark.asyncio
+    async def test_get_balance_capped_at_capital_limit(self):
+        """get_balance returns capital_limit as total, not real account balance."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=50_000_000, available=15_000_000, currency="KRW"
+        ))
+        inner.get_positions = AsyncMock(return_value=[])
+        guard = FuturesSessionGuard(inner, capital_limit=1_500_000)
+
+        bal = await guard.get_balance()
+        assert bal.total == 1_500_000
+        assert bal.available == 1_500_000  # no unrealized losses
+
+    @pytest.mark.asyncio
+    async def test_get_balance_available_reduced_by_unrealized_loss(self):
+        """Available capital decreases as positions incur unrealized losses."""
+        from agentic_capital.ports.trading import FuturesPosition
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=50_000_000, available=14_000_000, currency="KRW"
+        ))
+        pos = MagicMock(spec=FuturesPosition)
+        pos.market = Market.KR_FUTURES
+        pos.unrealized_pnl = -500_000
+        inner.get_positions = AsyncMock(return_value=[pos])
+        guard = FuturesSessionGuard(inner, capital_limit=1_500_000)
+
+        bal = await guard.get_balance()
+        assert bal.total == 1_500_000
+        assert bal.available == 1_000_000  # 1.5M - 500K loss
+
+    @pytest.mark.asyncio
+    async def test_get_balance_no_cap_when_no_capital_limit(self):
+        """Without capital_limit, real balance is returned unchanged."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=50_000_000, available=15_000_000, currency="KRW"
+        ))
+        inner.get_positions = AsyncMock(return_value=[])
+        guard = FuturesSessionGuard(inner)  # no capital_limit
+
+        bal = await guard.get_balance()
+        assert bal.total == 50_000_000
+        assert bal.available == 15_000_000
+
 
 # ── futures_tools ─────────────────────────────────────────────────────────────
 

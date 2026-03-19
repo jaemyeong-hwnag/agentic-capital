@@ -502,7 +502,33 @@ class FuturesSessionGuard(TradingPort):
     # ── Delegate all other methods ────────────────────────────────────────────
 
     async def get_balance(self) -> Balance:
-        return await self._inner.get_balance()
+        """Return balance capped at capital_limit so AI reasons within its budget.
+
+        The paper account may have a much larger balance than the simulation's
+        capital_limit. Without capping, the AI sees 50M KRW and happily buys
+        contracts that immediately breach the 1.5M capital_limit and get force-closed.
+        By exposing capital_limit as total/available, the AI self-limits its trades.
+        """
+        real = await self._inner.get_balance()
+        if self._capital_limit is None:
+            return real
+        # Remaining budget = capital_limit minus open unrealized losses
+        unrealized_loss = 0.0
+        try:
+            positions = await self._inner.get_positions()
+            for p in positions:
+                if p.market in (Market.KR_FUTURES, Market.KR_OPTIONS) and p.unrealized_pnl < 0:
+                    unrealized_loss += abs(p.unrealized_pnl)
+        except Exception:
+            pass
+        remaining = max(0.0, self._capital_limit - unrealized_loss)
+        return Balance(
+            total=self._capital_limit,
+            available=remaining,
+            currency=real.currency,
+            daily_pnl=real.daily_pnl,
+            daily_fee=real.daily_fee,
+        )
 
     async def get_positions(self) -> list[Position]:
         return await self._inner.get_positions()
