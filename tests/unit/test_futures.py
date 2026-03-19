@@ -1153,3 +1153,25 @@ class TestFuturesVirtualAdapter:
             result = await adapter.submit_order(stock_order)
         # Should be handled by inner (mocked to return OID1/filled)
         assert result.order_id == "OID1"
+
+    @pytest.mark.asyncio
+    async def test_invalid_symbol_rejected(self):
+        """Hallucinated symbols like 101RC000 are rejected with error."""
+        adapter, price = self._make_adapter(380.0)
+        bad_order = Order(
+            symbol="101RC000", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open",
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(bad_order)
+        assert result.status == "rejected"
+        assert "invalid_symbol" in result.metadata.get("error", "")
+
+    def test_valid_symbol_patterns(self):
+        from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
+        assert FuturesVirtualAdapter._is_valid_kospi200_symbol("101F6")
+        assert FuturesVirtualAdapter._is_valid_kospi200_symbol("105C6")
+        assert FuturesVirtualAdapter._is_valid_kospi200_symbol("101I7")
+        assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("101RC000")
+        assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("KOSPI200")
+        assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("005930")

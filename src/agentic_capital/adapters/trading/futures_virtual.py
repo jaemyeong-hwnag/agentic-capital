@@ -147,7 +147,26 @@ class FuturesVirtualAdapter(TradingPort):
             return await self._inner.submit_order(order)
         return await self._submit_virtual_futures_order(order)
 
+    @staticmethod
+    def _is_valid_kospi200_symbol(symbol: str) -> bool:
+        """Validate KOSPI200 standard/mini futures symbol format: 101/105 + CFIL + digit."""
+        import re
+        return bool(re.fullmatch(r"(101|105)[CFIL]\d", symbol))
+
     async def _submit_virtual_futures_order(self, order: Order) -> OrderResult:
+        if not self._is_valid_kospi200_symbol(order.symbol):
+            logger.warning(
+                "futures_virtual_invalid_symbol",
+                symbol=order.symbol,
+                hint="Use 101/105 + month_code(C/F/I/L) + year_digit. Call get_futures_symbols() first.",
+            )
+            return OrderResult(
+                order_id="", symbol=order.symbol, side=order.side,
+                quantity=0.0, filled_price=0.0, status="rejected",
+                market=order.market,
+                metadata={"error": f"invalid_symbol:{order.symbol} — call get_futures_symbols() for valid symbols"},
+            )
+
         fill_price = await _fetch_kospi200_price()
         if fill_price <= 0:
             logger.warning("futures_virtual_no_price", symbol=order.symbol)
