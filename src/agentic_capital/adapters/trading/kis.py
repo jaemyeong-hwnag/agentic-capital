@@ -99,10 +99,16 @@ _OVS_TR = {
 }
 
 # ── Futures/Options TR IDs ────────────────────────────────────────────────────
+# Source: KIS Open API 공식 문서 (API 목록 엑셀 2024)
+# 주문: 주간 매수/매도 동일 TR_ID — TTTO1101U(실전), VTTO1101U(모의)
+# 잔고: CTFO6118R(실전), VTFO6118R(모의)
+# 체결내역: TTTO5201R(실전), VTTO5201R(모의)
 _FUT_TR = {
-    "order_buy":     {"real": "TTTO0311U", "paper": "VTFO0101U"},
-    "order_sell":    {"real": "TTTO0312U", "paper": "VTFO0101U"},  # same TR_ID, different body
-    "balance":       {"real": "CTRP6548R", "paper": "VTFO0003R"},
+    "order_buy":     {"real": "TTTO1101U", "paper": "VTTO1101U"},
+    "order_sell":    {"real": "TTTO1101U", "paper": "VTTO1101U"},  # same TR_ID for buy/sell
+    "balance":       {"real": "CTFO6118R", "paper": "VTFO6118R"},
+    "fills":         {"real": "TTTO5201R", "paper": "VTTO5201R"},
+    "order_check":   {"real": "TTTO5105R", "paper": "VTTO5105R"},  # 주문가능 조회
 }
 
 # ── Overseas exchange codes ───────────────────────────────────────────────────
@@ -194,12 +200,54 @@ class KISTradingAdapter(TradingPort):
         except Exception:
             return None
 
+    async def _get_futures_balance(self) -> Balance:
+        """선물 계좌 잔고 조회 (VTFO6118R / CTFO6118R).
+
+        선물/옵션 계좌(ACNT_PRDT_CD=03)는 주식 잔고 API 대신 이 메서드를 사용한다.
+        """
+        r = await self._session.get(
+            f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/inquire-balance",
+            headers=self._session.headers(self._fut_tr("balance")),
+            params={
+                "CANO": self._session.cano,
+                "ACNT_PRDT_CD": self._session.prdt_cd,
+                "MGNA_DVSN": "01",
+                "EXCC_STAT_CD": "1",
+                "CTX_AREA_FK200": "",
+                "CTX_AREA_NK200": "",
+            },
+        )
+        data = r.json()
+        if data.get("rt_cd") != "0":
+            raise RuntimeError(f"KIS futures balance failed: {data.get('msg1', data)}")
+        o2 = data.get("output2", {}) or {}
+        total = float(o2.get("tot_dncl_amt") or o2.get("dnca_cash") or 0)
+        available = float(o2.get("ord_psbl_cash") or o2.get("ord_psbl_tota") or 0)
+        daily_pnl = float(o2.get("trad_pfls_amt_smtl") or o2.get("futr_trad_pfls_amt") or 0)
+        fee = float(o2.get("fee") or 0)
+        logger.debug(
+            "kis_futures_balance_fetched",
+            total=total,
+            available=available,
+            daily_pnl=daily_pnl,
+            fee=fee,
+        )
+        return Balance(total=total, available=available, currency="KRW",
+                       daily_pnl=daily_pnl, daily_fee=fee)
+
     async def get_balance(self) -> Balance:
         """Get domestic account balance (KRW).
 
+        선물/옵션 계좌(ACNT_PRDT_CD=03)는 자동으로 선물 잔고 API를 사용한다.
         For overseas USD balance, use get_overseas_balance().
         """
         await self._session.ensure_token()
+        # 선물 계좌는 별도 잔고 API 사용
+        if self._session.prdt_cd == "03":
+            try:
+                return await self._get_futures_balance()
+            except Exception:
+                logger.exception("kis_futures_balance_failed_falling_back")
         try:
             r = await self._session.get(
                 f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
@@ -499,41 +547,39 @@ class KISTradingAdapter(TradingPort):
     async def get_futures_quote(self, symbol: str) -> dict:
         """선물 현재가 조회.
 
-        실계좌: FHKIF03010100 (선물 현재가 조회)
-        모의투자: FHKIF03010100은 paper 서버 미지원 → KOSPI200 지수(FHPUP02100000)로
-                  근사치 사용 (basis 무시, 모의투자용으로 허용)
+        FHMIF10000000 (실전/모의 공통)은 KOSPI200 지수를 output3에 반환.
+        선물 계약 가격 ≈ KOSPI200 지수 (모의투자 허용 근사치).
         """
-        from agentic_capital.adapters.kis_session import _REAL_BASE
         await self._session.ensure_token()
         try:
             r = await self._session.get(
-                f"{_REAL_BASE}/uapi/domestic-futureoption/v1/quotations/inquire-price",
-                headers=self._session.headers("FHKIF03010100"),
+                f"{self._session.base_url}/uapi/domestic-futureoption/v1/quotations/inquire-price",
+                headers=self._session.headers("FHMIF10000000"),
                 params={"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": symbol},
             )
             data = r.json()
             if data.get("rt_cd") == "0":
-                output = data.get("output", {})
-                price = float(output.get("stck_prpr", 0))
+                # output3 = KOSPI200 지수 현재가 (선물 근사치)
+                kospi = data.get("output3", {})
+                price = float(kospi.get("bstp_nmix_prpr", 0) or 0)
                 if price > 0:
+                    change_pct = float(kospi.get("bstp_nmix_prdy_ctrt", 0) or 0)
+                    change = float(kospi.get("bstp_nmix_prdy_vrss", 0) or 0)
+                    logger.debug("kis_futures_quote_kospi200", symbol=symbol, price=price)
                     return {
                         "symbol": symbol,
                         "price": price,
-                        "open": float(output.get("stck_oprc", 0)),
-                        "high": float(output.get("stck_hgpr", 0)),
-                        "low": float(output.get("stck_lwpr", 0)),
-                        "volume": int(output.get("acml_vol", 0)),
-                        "change": float(output.get("prdy_vrss", 0)),
-                        "change_pct": float(output.get("prdy_ctrt", 0)),
+                        "open": price - change,
+                        "high": price,
+                        "low": price,
+                        "volume": 0,
+                        "change": change,
+                        "change_pct": change_pct,
                     }
-            logger.debug(
-                "kis_futures_quote_real_failed",
-                symbol=symbol, rt_cd=data.get("rt_cd"), msg=data.get("msg1"),
-            )
         except Exception:
             logger.exception("kis_get_futures_quote_failed", symbol=symbol)
 
-        # Fallback: KOSPI200 지수 현재가 (모의투자 또는 실API 장외 시간)
+        # Fallback: Yahoo Finance KOSPI200 근사치
         return await self._get_kospi200_index_as_futures_proxy(symbol)
 
     async def _get_kospi200_index_as_futures_proxy(self, symbol: str) -> dict:
@@ -551,54 +597,81 @@ class KISTradingAdapter(TradingPort):
     async def get_active_futures_contracts(self) -> list[dict]:
         """활성 KR 선물 계약 목록 조회.
 
-        KIS는 선물 심볼 목록 전용 API가 없으므로 표준 종목코드 체계로 후보를
-        계산하고 get_futures_quote 로 유효성을 검증한다.
-
-        종목코드 체계:
-          - KOSPI200 표준: 101 + 월코드 + 연도 마지막 자리  (승수 250,000)
-          - KOSPI200 미니: 105 + 월코드 + 연도 마지막 자리  (승수 50,000)
-          - 분기월: 3월(C) / 6월(F) / 9월(I) / 12월(L)
+        KIS 실제 종목코드 체계 (체결내역 확인 기반):
+          - KOSPI200 표준: A01{ydigit}{mm:02d}  (승수 250,000)
+            예: A01606 = 코스피200 F 202606 (2026년 6월물)
+          - 분기월: 3월(03) / 6월(06) / 9월(09) / 12월(12)
           - 만기일: 각 분기 두 번째 목요일
 
-        Returns list[{symbol, price, volume, change_pct, expiry, multiplier}]
+        우선순위:
+          1. 주문가능 API(VTTO5105R)로 후보 종목 유효성 검증
+          2. 유효한 종목만 반환 (가격은 KOSPI200 지수 근사치 사용)
         """
         from datetime import date, timedelta
 
-        MONTH_CODES = {3: "C", 6: "F", 9: "I", 12: "L"}
         QUARTERLY = [3, 6, 9, 12]
         today = date.today()
 
         def _nth_thursday(year: int, month: int, n: int) -> date:
             d = date(year, month, 1)
-            days_to_thu = (3 - d.weekday()) % 7  # 3 = Thursday
+            days_to_thu = (3 - d.weekday()) % 7
             return d + timedelta(days=days_to_thu) + timedelta(weeks=n - 1)
 
-        # Enumerate candidates: 2 standard + 2 mini nearest quarterly contracts
-        candidates: list[tuple[str, date, int]] = []  # (symbol, expiry, multiplier)
+        # KIS 실제 종목코드: A01{연도1자리}{월2자리}
+        candidates: list[tuple[str, date]] = []
         for y in (today.year, today.year + 1):
             for qm in QUARTERLY:
                 expiry = _nth_thursday(y, qm, 2)
                 if expiry < today:
                     continue
-                code = MONTH_CODES[qm]
                 ydigit = str(y)[-1]
-                candidates.append((f"101{code}{ydigit}", expiry, 250_000))
-                candidates.append((f"105{code}{ydigit}", expiry, 50_000))
-            if len(candidates) >= 6:
+                sym = f"A01{ydigit}{qm:02d}"
+                candidates.append((sym, expiry))
+            if len(candidates) >= 3:
                 break
 
         results = []
-        for sym, exp, mult in candidates[:6]:
+        for sym, exp in candidates[:3]:
+            # 주문가능 API로 유효 종목 검증
+            ord_psbl_qty = 1  # default: include unless API explicitly returns 0
+            try:
+                await self._session.ensure_token()
+                r = await self._session.get(
+                    f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/inquire-psbl-order",
+                    headers=self._session.headers(self._fut_tr("order_check")),
+                    params={
+                        "CANO": self._session.cano,
+                        "ACNT_PRDT_CD": self._session.prdt_cd,
+                        "PDNO": sym,
+                        "SLL_BUY_DVSN_CD": "02",
+                        "UNIT_PRICE": "0",
+                        "ORD_DVSN_CD": "02",
+                    },
+                )
+                data = r.json()
+                if data.get("rt_cd") == "0":
+                    out = data.get("output", {}) or {}
+                    ord_psbl_qty = int(out.get("ord_psbl_qty", 1) or 1)
+                else:
+                    logger.debug("kis_futures_contract_check_unavailable", symbol=sym, msg=data.get("msg1", ""))
+                    # API가 지원 안 되면 fallback: 포함
+            except Exception:
+                logger.debug("kis_futures_contract_check_failed", symbol=sym)
+
+            # 현재가는 KOSPI200 지수 근사치
             q = await self.get_futures_quote(sym)
-            if q and q.get("price", 0) > 0:
-                results.append({
-                    "symbol": sym,
-                    "price": q["price"],
-                    "volume": q.get("volume", 0),
-                    "change_pct": q.get("change_pct", 0),
-                    "expiry": exp.strftime("%Y%m"),
-                    "multiplier": mult,
-                })
+            price = q.get("price", 0) if q else 0
+
+            results.append({
+                "symbol": sym,
+                "price": price,
+                "volume": 0,
+                "change_pct": q.get("change_pct", 0) if q else 0,
+                "expiry": exp.strftime("%Y%m"),
+                "multiplier": 250_000,
+                "orderable_qty": ord_psbl_qty,
+            })
+            logger.debug("kis_futures_contract_added", symbol=sym, expiry=exp.strftime("%Y%m"), orderable=ord_psbl_qty)
 
         logger.debug("kis_active_futures_contracts", count=len(results))
         return results
@@ -731,15 +804,20 @@ class KISTradingAdapter(TradingPort):
         await self._session.ensure_token()
         action = "order_buy" if order.side == OrderSide.BUY else "order_sell"
         try:
+            # VTTO1101U/TTTO1101U Request Body (KIS 공식문서 v1_국내선물-001)
             body = {
+                "ORD_PRCS_DVSN_CD": "02",          # 주문처리구분코드: 02=주문전송 (필수)
                 "CANO": self._session.cano,
                 "ACNT_PRDT_CD": self._session.prdt_cd,
-                "PDNO": order.symbol,
-                "ORD_DVSN": "01" if not order.price else "00",  # 01=시장가, 00=지정가
+                "SLL_BUY_DVSN_CD": "02" if order.side == OrderSide.BUY else "01",  # 01=매도, 02=매수
+                "SHTN_PDNO": order.symbol,          # 단축상품번호 (종목코드)
                 "ORD_QTY": str(int(order.quantity)),
-                "ORD_UNPR": str(order.price or 0),
-                # 01=신규(open), 02=청산(close) — must be explicit, not inferred from side
-                "CBLC_DVSN": "02" if order.position_effect == "close" else "01",
+                "UNIT_PRICE": str(order.price or 0),  # 시장가=0
+                "NMPR_TYPE_CD": "",
+                "KRX_NMPR_CNDT_CD": "",
+                "CTAC_TLNO": "",
+                "FUOP_ITEM_DVSN_CD": "",
+                "ORD_DVSN_CD": "02" if not order.price else "01",  # 01=지정가, 02=시장가
             }
             r = await self._session.post(
                 f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/order",

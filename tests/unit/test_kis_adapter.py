@@ -499,76 +499,75 @@ class TestKISTradingAdapterOrderStatus:
 
 
 class TestGetActiveFuturesContracts:
-    """Tests for KISTradingAdapter.get_active_futures_contracts()."""
+    """Tests for KISTradingAdapter.get_active_futures_contracts().
+
+    KIS 실제 종목코드 체계: A01{ydigit}{mm:02d}
+    예) A01606 = KOSPI200 F 2026년 6월물 (승수 250,000)
+    """
 
     def _make_adapter(self) -> KISTradingAdapter:
         session = _make_session(is_paper=True)
         session.ensure_token = AsyncMock()
         return KISTradingAdapter(session=session)
 
-    def _mock_quote_response(self, price: float = 380.0) -> MagicMock:
+    def _mock_order_check_response(self, orderable: int = 100) -> MagicMock:
+        """주문가능 API (VTTO5105R) 성공 응답 mock."""
         resp = MagicMock()
         resp.json.return_value = {
             "rt_cd": "0",
-            "output": {
-                "stck_prpr": str(price),
-                "stck_oprc": str(price - 1),
-                "stck_hgpr": str(price + 2),
-                "stck_lwpr": str(price - 2),
-                "acml_vol": "50000",
-                "prdy_vrss": "1.0",
-                "prdy_ctrt": "0.26",
-            },
+            "output": {"ord_psbl_qty": str(orderable), "tot_psbl_qty": str(orderable)},
         }
         return resp
 
     @pytest.mark.asyncio
     async def test_returns_active_contracts_with_valid_prices(self):
+        """유효한 KOSPI200 지수 가격이 있으면 계약 반환."""
         adapter = self._make_adapter()
-        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
-        contracts = await adapter.get_active_futures_contracts()
+        adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(100))
+        yf_data = {"price": 860.0, "open": 858.0, "high": 862.0, "low": 856.0,
+                   "volume": 50000, "change": 2.0, "change_pct": 0.23}
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value=yf_data)):
+            contracts = await adapter.get_active_futures_contracts()
         assert len(contracts) > 0
         for c in contracts:
             assert "symbol" in c
-            assert c["price"] > 0
-            assert "multiplier" in c
+            assert c["symbol"].startswith("A01")
+            assert c["multiplier"] == 250_000
             assert "expiry" in c
 
     @pytest.mark.asyncio
     async def test_standard_contract_has_250k_multiplier(self):
+        """KOSPI200 표준 선물 승수 = 250,000."""
         adapter = self._make_adapter()
-        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
-        contracts = await adapter.get_active_futures_contracts()
-        standard = [c for c in contracts if c["symbol"].startswith("101")]
-        assert all(c["multiplier"] == 250_000 for c in standard)
-
-    @pytest.mark.asyncio
-    async def test_mini_contract_has_50k_multiplier(self):
-        adapter = self._make_adapter()
-        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
-        contracts = await adapter.get_active_futures_contracts()
-        mini = [c for c in contracts if c["symbol"].startswith("105")]
-        assert all(c["multiplier"] == 50_000 for c in mini)
-
-    @pytest.mark.asyncio
-    async def test_no_contracts_when_all_quotes_fail(self):
-        adapter = self._make_adapter()
-        failed = MagicMock()
-        failed.json.return_value = {"rt_cd": "1", "msg1": "no data"}
-        adapter._session.get = AsyncMock(return_value=failed)
-        # Patch Yahoo Finance fallback to also return no data
+        adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(100))
+        yf_data = {"price": 860.0, "open": 858.0, "high": 862.0, "low": 856.0,
+                   "volume": 0, "change": 0.0, "change_pct": 0.0}
         with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
-                   new=AsyncMock(return_value={})):
+                   new=AsyncMock(return_value=yf_data)):
             contracts = await adapter.get_active_futures_contracts()
-        assert contracts == []
+        assert len(contracts) > 0
+        assert all(c["multiplier"] == 250_000 for c in contracts)
+
+    @pytest.mark.asyncio
+    async def test_symbol_format_is_a01_prefix(self):
+        """실제 KIS 종목코드는 A01{ydigit}{mm:02d} 형식."""
+        import re
+        adapter = self._make_adapter()
+        adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(50))
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value={"price": 860.0, "change_pct": 0.0})):
+            contracts = await adapter.get_active_futures_contracts()
+        for c in contracts:
+            assert re.match(r"A01\d{3}", c["symbol"]), f"Bad symbol format: {c['symbol']}"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_yfinance_when_primary_fails(self):
-        """When FHKIF03010100 fails, Yahoo Finance proxy is used."""
+        """주문가능 API가 실패해도 yfinance fallback으로 계약 반환."""
         adapter = self._make_adapter()
-        failed_primary = MagicMock()
-        failed_primary.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드 입니다"}
-        adapter._session.get = AsyncMock(return_value=failed_primary)
+        failed = MagicMock()
+        failed.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드 입니다"}
+        adapter._session.get = AsyncMock(return_value=failed)
         yf_data = {
             "price": 380.50, "open": 378.00, "high": 382.00,
             "low": 377.00, "volume": 100000, "change": 1.50, "change_pct": 0.40,
@@ -580,28 +579,31 @@ class TestGetActiveFuturesContracts:
         assert contracts[0]["price"] == 380.50
 
     @pytest.mark.asyncio
-    async def test_yfinance_proxy_returns_empty_when_price_is_zero(self):
-        """If Yahoo Finance returns empty (market closed), contracts list is empty."""
+    async def test_yfinance_proxy_returns_zero_price_when_empty(self):
+        """Yahoo Finance가 빈 값 반환 시 price=0으로 포함."""
         adapter = self._make_adapter()
-        failed_primary = MagicMock()
-        failed_primary.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드"}
-        adapter._session.get = AsyncMock(return_value=failed_primary)
+        failed = MagicMock()
+        failed.json.return_value = {"rt_cd": "1", "msg1": "없는 서비스 코드"}
+        adapter._session.get = AsyncMock(return_value=failed)
         with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
                    new=AsyncMock(return_value={})):
             contracts = await adapter.get_active_futures_contracts()
-        assert contracts == []
+        # 가격이 0이어도 종목 자체는 포함 (orderable=1 fallback)
+        assert len(contracts) > 0
+        assert all(c["price"] == 0 for c in contracts)
 
     @pytest.mark.asyncio
     async def test_contracts_are_not_expired(self):
         """All returned contracts must have expiry >= today."""
         from datetime import date
         adapter = self._make_adapter()
-        adapter._session.get = AsyncMock(return_value=self._mock_quote_response(380.0))
-        contracts = await adapter.get_active_futures_contracts()
+        adapter._session.get = AsyncMock(return_value=self._mock_order_check_response(100))
+        with patch("agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+                   new=AsyncMock(return_value={"price": 860.0, "change_pct": 0.0})):
+            contracts = await adapter.get_active_futures_contracts()
         today_str = date.today().strftime("%Y%m")
         for c in contracts:
-            # expiry YYYYMM must be >= current YYYYMM
-            assert c["expiry"] >= today_str, f"Expired contract in results: {c}"
+            assert c["expiry"] >= today_str, f"Expired contract: {c}"
 
 
 class TestGetFuturesSymbolsTool:
