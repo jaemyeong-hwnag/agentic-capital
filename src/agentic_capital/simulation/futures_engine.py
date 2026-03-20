@@ -294,10 +294,22 @@ class FuturesEngine:
         from datetime import datetime
         started_at = datetime.now()
 
+        # Fetch balance snapshot for cycle context — AI must know capital before deciding
+        bal_ctx = ""
+        try:
+            b = await self._trading.get_balance()
+            bal_ctx = f"balance:tot={b.total:.0f},avl={b.available:.0f},ccy={b.currency}"
+        except Exception:
+            pass
+
+        cycle_msg = f"cycle:{self._cycle_count}"
+        if bal_ctx:
+            cycle_msg += f"|{bal_ctx}"
+
         try:
             result = await react_agent.ainvoke(
-                {"messages": [HumanMessage(content=f"cycle:{self._cycle_count}")]},
-                config={"recursion_limit": 100},
+                {"messages": [HumanMessage(content=cycle_msg)]},
+                config={"recursion_limit": 20},
             )
             result_messages = result.get("messages", [])
         except Exception:

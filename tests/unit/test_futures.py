@@ -617,6 +617,71 @@ class TestFuturesSessionGuard:
         assert "capital_limit_exceeded" in result.metadata["error"]
 
     @pytest.mark.asyncio
+    async def test_affordability_gate_rejects_standard_futures_with_small_capital(self):
+        """Standard futures (250k mult) rejected when capital < worst-case 1-contract loss."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        order = Order(
+            symbol="A01606",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=866.0,
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        # worst_case = 866 * 0.10 * 250k = 21.65M > capital_limit=5M → reject
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000.0)
+        result = await guard.submit_order(order)
+        assert result.status == "rejected"
+        assert "unaffordable" in result.metadata["error"]
+        inner.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_affordability_gate_allows_mini_futures_with_5m_capital(self):
+        """Mini futures (50k mult) allowed when capital covers worst-case 1-contract loss."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        order = Order(
+            symbol="A30606",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=866.0,
+            multiplier=50_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        # worst_case = 866 * 0.10 * 50k = 4.33M < capital_limit=5M → allow
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000.0)
+        result = await guard.submit_order(order)
+        assert result.status == "filled"
+        inner.submit_order.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_market_order_uses_quote_for_affordability_check(self):
+        """Market order (price=None) fetches current quote for affordability gate."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        inner.get_futures_quote = AsyncMock(return_value={"price": 866.0})
+        order = Order(
+            symbol="A01606",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=None,  # market order
+            multiplier=250_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        # effective_price fetched = 866 → worst=21.65M > 5M → reject
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000.0)
+        result = await guard.submit_order(order)
+        assert result.status == "rejected"
+        assert "unaffordable" in result.metadata["error"]
+
+    @pytest.mark.asyncio
     async def test_max_qty_guard_with_price_and_multiplier(self):
         """Max qty guard caps contracts when price+multiplier are specified on order."""
         inner = _mock_inner()
@@ -627,15 +692,15 @@ class TestFuturesSessionGuard:
             order_type=OrderType.MARKET,
             quantity=10.0,
             price=380.0,
-            multiplier=250_000.0,
+            multiplier=50_000.0,  # mini futures: worst=1.9M per contract
             market=Market.KR_FUTURES,
             position_effect="open",
         )
-        # capital_limit=100k, worst_per=9.5M → max_qty=1
-        guard = FuturesSessionGuard(inner, capital_limit=100_000.0)
+        # capital_limit=10M, worst_per=1.9M → max_qty=5
+        guard = FuturesSessionGuard(inner, capital_limit=10_000_000.0)
         await guard.submit_order(order)
         submitted = inner.submit_order.call_args[0][0]
-        assert submitted.quantity == 1.0
+        assert submitted.quantity == 5.0
 
     @pytest.mark.asyncio
     async def test_enforce_qty_by_position_closes_excess(self):

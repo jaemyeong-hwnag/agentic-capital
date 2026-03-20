@@ -208,21 +208,32 @@ class FuturesSessionGuard(TradingPort):
                     metadata={"error": "capital_limit_exceeded:close_positions_first"},
                 )
 
+        # Resolve effective price for risk checks: use limit price or fetch current quote
+        # This ensures market orders (price=None) are still subject to risk controls.
+        effective_price = order.price
+        if not effective_price and order.multiplier:
+            try:
+                if hasattr(self._inner, "get_futures_quote"):
+                    q = await self._inner.get_futures_quote(order.symbol)
+                    effective_price = q.get("price") if q else None
+            except Exception:
+                pass
+
         # Position sizing: reject if notional > total_capital * position_size_pct
         # Isolated margin: each trade is sized as a fraction of total capital
         if (
             order.position_effect == "open"
             and self._position_size_pct is not None
-            and order.price
+            and effective_price
             and order.multiplier
         ):
-            notional = order.price * order.multiplier * int(order.quantity)
+            notional = effective_price * order.multiplier * int(order.quantity)
             try:
                 bal = await self._inner.get_balance()
                 max_notional = bal.total * self._position_size_pct
                 if notional > max_notional:
                     # Reduce qty rather than reject outright — let AI trade, just smaller
-                    safe_qty = max(1, int(max_notional / (order.price * order.multiplier)))
+                    safe_qty = max(1, int(max_notional / (effective_price * order.multiplier)))
                     if safe_qty < int(order.quantity):
                         logger.warning(
                             "futures_guard_position_sizing_capped",
@@ -250,10 +261,10 @@ class FuturesSessionGuard(TradingPort):
         if (
             order.position_effect == "open"
             and self._max_leverage is not None
-            and order.price
+            and effective_price
             and order.multiplier
         ):
-            notional = order.price * order.multiplier * int(order.quantity)
+            notional = effective_price * order.multiplier * int(order.quantity)
             try:
                 bal = await self._inner.get_balance()
                 if bal.available > 0:
@@ -261,7 +272,7 @@ class FuturesSessionGuard(TradingPort):
                     if leverage > self._max_leverage:
                         # Reduce qty to fit within leverage cap
                         safe_qty = max(1, int(
-                            (bal.available * self._max_leverage) / (order.price * order.multiplier)
+                            (bal.available * self._max_leverage) / (effective_price * order.multiplier)
                         ))
                         if safe_qty < int(order.quantity):
                             logger.warning(
@@ -306,16 +317,39 @@ class FuturesSessionGuard(TradingPort):
                     multiplier=order.multiplier,
                 )
 
-        # Max quantity guard: cap contracts so worst-case 10% drop <= capital_limit
-        # Only applies when both price and multiplier are known on the order.
-        # If multiplier is unknown, skip cap and rely on PnL-based checks instead.
+        # Affordability gate: reject if 1-contract worst-case loss > capital_limit
+        # Prevents standard futures (250k mult, ~21M worst-case) being traded with 5M capital.
+        # Uses effective_price so market orders are also covered.
         if (
             order.position_effect == "open"
             and self._capital_limit is not None
-            and order.price
+            and effective_price
             and order.multiplier
         ):
-            worst_loss_per_contract = order.price * 0.10 * order.multiplier
+            worst_loss_1_contract = effective_price * 0.10 * order.multiplier
+            if worst_loss_1_contract > self._capital_limit:
+                logger.warning(
+                    "futures_guard_product_unaffordable",
+                    symbol=order.symbol,
+                    multiplier=order.multiplier,
+                    worst_loss_1contract=round(worst_loss_1_contract, 0),
+                    capital_limit=self._capital_limit,
+                )
+                return OrderResult(
+                    order_id="", symbol=order.symbol, side=order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected", market=order.market,
+                    metadata={"error": f"unaffordable:worst_case_loss_{worst_loss_1_contract:.0f}>capital_{self._capital_limit:.0f}"},
+                )
+
+        # Max quantity guard: cap contracts so worst-case 10% drop <= capital_limit
+        # Uses effective_price (limit or fetched current quote) so market orders are also checked.
+        if (
+            order.position_effect == "open"
+            and self._capital_limit is not None
+            and effective_price
+            and order.multiplier
+        ):
+            worst_loss_per_contract = effective_price * 0.10 * order.multiplier
             if worst_loss_per_contract > 0:
                 max_qty = max(1, int(self._capital_limit / worst_loss_per_contract))
                 if order.quantity > max_qty:

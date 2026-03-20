@@ -61,6 +61,9 @@ MANDATE_FUTURES = (
     "|MAX_CONTRACTS=3(SYSTEM_ENFORCED) — open orders capped at 3 contracts regardless of request"
     "|DAILY_LOSS_LIMIT=5%_of_capital(SYSTEM_ENFORCED) — trading halted today if breached"
     "|SESSION_END_CLOSE=auto(SYSTEM_ENFORCED) — all positions closed 10min before session end"
+    "|MARGIN_CHECK=avl×0.8<sym_margin → skip_trade,request_wakeup(300) — never loop if cant_afford"
+    "|CYCLE_FLOW=1.check_positions 2.check_symbols 3.decide(trade_or_skip) 4.request_wakeup DONE"
+    "|NO_REPEAT=after request_wakeup → NO more tool calls — cycle is done, stop immediately"
 )
 
 # Message type abbreviations (MetaGPT: explicit type tags reduce parse errors 60%)
