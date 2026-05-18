@@ -38,7 +38,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | M4 통신 + 어댑터 | ✅ 완료 (Phase 1) | KIS 완료, Binance/Alpaca Phase 2 |
 | M5 시뮬레이션 | ✅ 완료 | 100% (12/12) |
 | M5.5 선물 단타 모드 | ✅ 완료 | FuturesEngine + FuturesSessionGuard + `--futures` 플래그 |
-| M6 Paper Trading | ⬚ 부분 구현 | 67% (6/9) |
+| M6 Paper Trading + 비용 검증 | ⬚ 부분 구현 | 70% (비용 계측 시작, 리더보드/사후 ROI 필요) |
 | M7 실거래 | ⬚ 진행 가능 | KIS_IS_PAPER=false 설정으로 실전 전환 가능 |
 
 ---

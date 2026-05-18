@@ -278,6 +278,30 @@
 | actual_outcome | TEXT | 실제 결과 (나중 업데이트) |
 | created_at | TIMESTAMPTZ | 결정 시점 |
 
+### agent_cycles 테이블 (LLM 사이클 추적)
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | UUID | 사이클 고유 ID |
+| simulation_id | UUID | FK → simulation_runs |
+| agent_id | UUID | 사이클 실행 에이전트 |
+| agent_name | VARCHAR | 에이전트 이름 스냅샷 |
+| cycle_number | INT | 시뮬레이션 내 사이클 번호 |
+| tool_sequence | JSONB | 툴 호출 순서, 입력, 출력 |
+| llm_reasoning | TEXT | 최종 LLM 판단/결론 |
+| emotion_snapshot | JSONB | 판단 시점 감정 상태 |
+| duration_ms | INT | 사이클 수행 시간 |
+| tool_calls_count | INT | 툴 호출 횟수 |
+| decisions_count | INT | 기록된 결정 수 |
+| errors_count | INT | 에러 수 |
+| next_cycle_seconds | FLOAT | 에이전트가 요청한 다음 실행 간격 |
+| ai_cost_krw | FLOAT | 해당 사이클 AI 비용 추정치 |
+| net_pnl_krw | FLOAT | 해당 사이클 귀속 순손익 (nullable) |
+| decision_roi | FLOAT | `net_pnl_krw / ai_cost_krw` (nullable) |
+| economics_snapshot | JSONB | 비용 산정 기준과 경제성 스냅샷 |
+
+> `agent_cycles`는 알파보다 먼저 비용을 기록한다. 실현 손익이 늦게 확정되는 경우에도 `ai_cost_krw`를 먼저 저장해 사후 비용 포함 분석이 가능하도록 한다.
+
 ---
 
 ## 8. 에이전트 메모리 (A-MEM 기반)
