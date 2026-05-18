@@ -1,6 +1,6 @@
 """Tests for ORM models — verify all models can be instantiated and have correct columns."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from agentic_capital.infra.models import (
@@ -11,7 +11,6 @@ from agentic_capital.infra.models import (
     AgentModel,
     AgentPersonalityHistoryModel,
     AgentPersonalityModel,
-    AgentToolModel,
     Base,
     CompanySnapshotModel,
     EpisodicDetailModel,
@@ -67,7 +66,7 @@ class TestAgentModels:
     def test_personality_history_model(self) -> None:
         h = AgentPersonalityHistoryModel(
             id=uuid4(),
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             agent_id=uuid4(),
             parameter="openness",
             old_value=0.5,
@@ -81,7 +80,7 @@ class TestAgentModels:
     def test_emotion_history_model(self) -> None:
         e = AgentEmotionHistoryModel(
             id=uuid4(),
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             agent_id=uuid4(),
             valence=0.3,
             arousal=0.6,
@@ -154,7 +153,7 @@ class TestOrganizationModels:
     def test_permission_history_model(self) -> None:
         p = PermissionHistoryModel(
             id=uuid4(),
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             agent_id=uuid4(),
             action="grant",
             changes={"added": ["trade_crypto"]},
@@ -220,7 +219,7 @@ class TestMarketModels:
     def test_ohlcv_model(self) -> None:
         o = MarketOHLCVModel(
             id=uuid4(),
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             symbol="AAPL",
             market="us_stock",
             open=150.0,
@@ -236,6 +235,28 @@ class TestMarketModels:
 
 
 class TestSimulationModels:
+    def test_agent_cycle_model_economics_fields(self) -> None:
+        c = AgentCycleModel(
+            id=uuid4(),
+            simulation_id=uuid4(),
+            agent_id=uuid4(),
+            agent_name="Trader-Gamma",
+            cycle_number=1,
+            tool_sequence=[{"t": "get_balance"}],
+            llm_reasoning="No trade: cost edge absent",
+            emotion_snapshot={"CF": 0.6},
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+            ai_cost_krw=125.0,
+            net_pnl_krw=250.0,
+            decision_roi=2.0,
+            economics_snapshot={"ai_cost_krw": 125.0},
+        )
+
+        assert c.ai_cost_krw == 125.0
+        assert c.decision_roi == 2.0
+        assert c.__tablename__ == "agent_cycles"
+
     def test_simulation_run_model(self) -> None:
         s = SimulationRunModel(
             id=uuid4(),
@@ -250,7 +271,7 @@ class TestSimulationModels:
     def test_company_snapshot_model(self) -> None:
         c = CompanySnapshotModel(
             id=uuid4(),
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             simulation_id=uuid4(),
             total_capital=1050000,
             allocated_capital=900000,

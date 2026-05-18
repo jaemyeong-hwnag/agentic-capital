@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     initial_capital: int = 1_000_000
     log_level: str = "INFO"
 
+    # Cost-aware evaluation
+    ai_daily_op_cost_krw: float = 10_000.0
+    ai_cost_per_cycle_krw: float = 0.0
+    ai_cost_per_tool_call_krw: float = 0.0
+
     # Futures risk management
     futures_max_contracts: int = 3          # hard cap per open order
     futures_daily_loss_pct: float = 0.05    # halt trading if daily loss >= 5% of capital

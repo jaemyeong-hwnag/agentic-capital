@@ -8,14 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentic_capital.core.communication.protocol import AgentMessage
-from agentic_capital.core.decision.pipeline import TradingDecision
-from agentic_capital.core.organization.hr import HREvent
-from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 from agentic_capital.infra.models.agent import (
     AgentDecisionModel,
     AgentEmotionHistoryModel,
@@ -30,8 +26,15 @@ from agentic_capital.infra.models.organization import (
     RoleModel,
 )
 from agentic_capital.infra.models.simulation import CompanySnapshotModel, SimulationRunModel
-from agentic_capital.infra.models.tool import AgentToolModel
 from agentic_capital.infra.models.trade import PositionModel, TradeModel
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from agentic_capital.core.communication.protocol import AgentMessage
+    from agentic_capital.core.decision.pipeline import TradingDecision
+    from agentic_capital.core.organization.hr import HREvent
+    from agentic_capital.core.personality.models import EmotionState, PersonalityVector
 
 logger = structlog.get_logger()
 
@@ -301,19 +304,25 @@ class SimulationRecorder:
         tool_sequence: list[dict],
         llm_reasoning: str,
         emotion_snapshot: dict,
-        started_at: "datetime",
-        completed_at: "datetime",
+        started_at: datetime,
+        completed_at: datetime,
         decisions_count: int = 0,
         errors_count: int = 0,
         next_cycle_seconds: float = 0,
+        net_pnl_krw: float | None = None,
     ) -> None:
         """Record full LLM cycle: tool call chain + final reasoning + timing.
 
         tool_sequence: compact list [{t: tool_name, in: args_str, out: result_str}]
         llm_reasoning: last AIMessage content (agent's conclusion text)
         """
+        from agentic_capital.core.evaluation.costs import estimate_cycle_economics
         from agentic_capital.infra.models.cycle import AgentCycleModel
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        economics = estimate_cycle_economics(
+            tool_calls_count=len(tool_sequence),
+            net_pnl_krw=net_pnl_krw,
+        )
         record = AgentCycleModel(
             simulation_id=self._simulation_id,
             agent_id=agent_id,
@@ -329,6 +338,10 @@ class SimulationRecorder:
             decisions_count=decisions_count,
             errors_count=errors_count,
             next_cycle_seconds=next_cycle_seconds,
+            ai_cost_krw=economics.ai_cost_krw,
+            net_pnl_krw=economics.net_pnl_krw,
+            decision_roi=economics.decision_roi,
+            economics_snapshot=economics.to_compact_dict(),
         )
         self._session.add(record)
         await self._session.flush()
@@ -451,7 +464,9 @@ class SimulationRecorder:
         created_by: uuid.UUID | None = None,
     ) -> None:
         """Persist AI-created tool. Upserts by name so AI can iterate on tools."""
-        from sqlalchemy import select, update as sa_update
+        from sqlalchemy import select
+        from sqlalchemy import update as sa_update
+
         from agentic_capital.infra.models.tool import AgentToolModel
 
         existing = (
@@ -481,6 +496,7 @@ class SimulationRecorder:
     async def load_tools(self) -> list[dict]:
         """Load all active AI-created tools for injection into next cycle."""
         from sqlalchemy import select
+
         from agentic_capital.infra.models.tool import AgentToolModel
 
         result = await self._session.execute(
@@ -503,6 +519,7 @@ class SimulationRecorder:
         trader is gone (caller should reassign to a fallback agent).
         """
         from sqlalchemy import select
+
         from agentic_capital.infra.models.trade import TradeModel
 
         stmt = (
@@ -524,7 +541,8 @@ class SimulationRecorder:
         Returns list of dicts with symbol/quantity/avg_price for comparison
         with real broker account during reconciliation.
         """
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
+
         from agentic_capital.infra.models.trade import PositionModel
 
         # Get latest updated_at per symbol across all simulations

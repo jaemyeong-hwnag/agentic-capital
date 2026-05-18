@@ -53,3 +53,9 @@ class AgentCycleModel(Base):
     decisions_count: Mapped[int] = mapped_column(Integer, default=0)
     errors_count: Mapped[int] = mapped_column(Integer, default=0)
     next_cycle_seconds: Mapped[float] = mapped_column(Float, default=0)
+
+    # Cost-aware evaluation
+    ai_cost_krw: Mapped[float] = mapped_column(Float, default=0)
+    net_pnl_krw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    decision_roi: Mapped[float | None] = mapped_column(Float, nullable=True)
+    economics_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)

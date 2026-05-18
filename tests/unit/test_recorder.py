@@ -1,13 +1,14 @@
 """Unit tests for simulation recorder."""
 
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentic_capital.core.decision.pipeline import TradingDecision
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
-from agentic_capital.simulation.recorder import SimulationRecorder, _personality_to_dict, _emotion_to_dict
+from agentic_capital.simulation.recorder import SimulationRecorder, _emotion_to_dict, _personality_to_dict
 
 
 class TestPersonalityToDict:
@@ -249,6 +250,39 @@ class TestSimulationRecorder:
             org_snapshot={"roles": ["ceo", "trader", "analyst"]},
         )
         assert recorder._session.add.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_record_agent_cycle_adds_economics_snapshot(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        started = datetime(2026, 1, 1, 9, 0, 0)
+        completed = datetime(2026, 1, 1, 9, 0, 1)
+
+        with patch("agentic_capital.core.evaluation.costs.settings") as mock_settings:
+            mock_settings.ai_cost_per_cycle_krw = 100.0
+            mock_settings.ai_cost_per_tool_call_krw = 25.0
+            mock_settings.ai_daily_op_cost_krw = 10_000.0
+            await recorder.record_agent_cycle(
+                agent_id=uuid.uuid4(),
+                agent_name="Trader-Gamma",
+                cycle_number=7,
+                tool_sequence=[
+                    {"t": "get_balance", "in": "", "out": "tot:1000"},
+                    {"t": "request_wakeup", "in": "seconds:60", "out": "done"},
+                ],
+                llm_reasoning="wait for better setup",
+                emotion_snapshot={"CF": 0.5},
+                started_at=started,
+                completed_at=completed,
+                decisions_count=1,
+                net_pnl_krw=300.0,
+            )
+
+        record = recorder._session.add.call_args.args[0]
+        assert record.ai_cost_krw == 150.0
+        assert record.net_pnl_krw == 300.0
+        assert record.decision_roi == 2.0
+        assert record.economics_snapshot["cost_basis"]["fixed_cycle_krw"] == 100.0
 
     @pytest.mark.asyncio
     async def test_commit(self):

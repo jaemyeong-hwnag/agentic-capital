@@ -19,6 +19,7 @@ Abbreviation schema (defined once, implicit thereafter):
 """
 from __future__ import annotations
 
+from agentic_capital.config import settings
 from agentic_capital.formats.toon import to_toon
 
 # Injected once at top of every system prompt — defines all abbreviations.
@@ -61,7 +62,7 @@ MANDATE_FUTURES = (
     "|MAX_CONTRACTS=3(SYSTEM_ENFORCED) — open orders capped at 3 contracts regardless of request"
     "|DAILY_LOSS_LIMIT=5%_of_capital(SYSTEM_ENFORCED) — trading halted today if breached"
     "|SESSION_END_CLOSE=auto(SYSTEM_ENFORCED) — all positions closed 10min before session end"
-    "|MARGIN_CHECK=avl×0.8<sym_margin → skip_trade,request_wakeup(300) — never loop if cant_afford"
+    "|MARGIN_CHECK=avl*0.8<sym_margin → skip_trade,request_wakeup(300) — never loop if cant_afford"
     "|CYCLE_FLOW=1.check_positions 2.check_symbols 3.decide(trade_or_skip) 4.request_wakeup DONE"
     "|NO_REPEAT=after request_wakeup → NO more tool calls — cycle is done, stop immediately"
 )
@@ -124,17 +125,15 @@ def psych(personality, emotion) -> str:
     return f"<P>{p_str}</P>\n<E>{e_str}</E>"
 
 
-_DAILY_OP_COST = 10_000  # fixed daily AI operating cost (KRW)
-
-
 def bal(total: float, available: float, currency: str,
         daily_pnl: float = 0.0, daily_fee: float = 0.0,
         ovs_pnl_krw: float = 0.0) -> str:
     """Compact balance with daily P&L (domestic + overseas) and operating cost."""
     base = f"tot:{total:.0f},avl:{available:.0f},ccy:{currency}"
     total_pnl = daily_pnl + ovs_pnl_krw
-    net = total_pnl - _DAILY_OP_COST
-    base += f",pnl_today:{total_pnl:.0f},fee_today:{daily_fee:.0f},op_cost:{_DAILY_OP_COST},net_today:{net:.0f}"
+    daily_op_cost = settings.ai_daily_op_cost_krw
+    net = total_pnl - daily_op_cost
+    base += f",pnl_today:{total_pnl:.0f},fee_today:{daily_fee:.0f},op_cost:{daily_op_cost:.0f},net_today:{net:.0f}"
     if ovs_pnl_krw != 0.0:
         base += f",ovs_pnl_krw:{ovs_pnl_krw:.0f}"
     return base

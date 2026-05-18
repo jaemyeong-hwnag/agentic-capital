@@ -4,11 +4,11 @@ Validates that the system can handle multiple agents
 running LangGraph workflows concurrently without issues.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.base import AgentProfile
@@ -86,6 +86,18 @@ def _create_agents(count: int = 10) -> list:
         agents.append(agent)
 
     return agents
+
+
+@pytest.fixture(autouse=True)
+def mock_langgraph_react_agent():
+    """Keep scale tests deterministic and offline."""
+    from unittest.mock import patch
+
+    mock_agent = MagicMock()
+    mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content="cycle_done")]})
+    with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+         patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+        yield
 
 
 @pytest.mark.e2e

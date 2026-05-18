@@ -9,9 +9,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from langchain_core.messages import AIMessage
 
-from agentic_capital.core.agents.base import AgentProfile
 from agentic_capital.core.agents.analyst import AnalystAgent
+from agentic_capital.core.agents.base import AgentProfile
 from agentic_capital.core.agents.ceo import CEOAgent
 from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.agents.trader import TraderAgent
@@ -56,6 +57,16 @@ def _make_recorder():
     recorder.record_personality_drift = AsyncMock()
     recorder.commit = AsyncMock()
     return recorder
+
+
+@pytest.fixture(autouse=True)
+def mock_langgraph_react_agent():
+    """Keep E2E simulation tests deterministic and offline by default."""
+    mock_agent = MagicMock()
+    mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content="cycle_done")]})
+    with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+         patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+        yield
 
 
 @pytest.mark.e2e
@@ -199,7 +210,6 @@ class TestFullSimulationCycle:
             llm=llm,
         )
 
-        initial_openness = ceo.personality.openness
         trading = _make_trading()
         # Give positions with loss to trigger personality drift
         trading.get_positions = AsyncMock(return_value=[
@@ -234,7 +244,6 @@ class TestFullSimulationCycle:
     @pytest.mark.asyncio
     async def test_ceo_hire_decision_recorded(self):
         """CEO hire decision is recorded as both decision and HR event."""
-        from langchain_core.messages import AIMessage
         llm = _make_llm(
             '{"actions": [{"type": "hire", "target": "NewAnalyst", "detail": "analyst", "reason": "need market coverage", "capital": 1000000}], "confidence": 0.9}'
         )
@@ -262,7 +271,7 @@ class TestFullSimulationCycle:
     @pytest.mark.asyncio
     async def test_llm_failure_graceful(self):
         """Agent handles LLM failure gracefully — no crash, empty decisions."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         llm = _make_llm()
         ceo = CEOAgent(
             profile=_make_profile("CEO"),
