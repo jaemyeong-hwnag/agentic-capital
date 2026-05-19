@@ -120,6 +120,15 @@ AI는 자유롭게 결정하지만 모든 행동은 증거로 남는다.
 
 실전 모드(`KIS_IS_PAPER=false`)는 기본적으로 read-only다. 실계좌 잔고, 포지션, 주문 가능 계약 조회는 수행하지만, `FUTURES_LIVE_ORDERS_ENABLED=true`가 명시되지 않으면 `FuturesSessionGuard`가 모든 선물 주문을 `live_orders_disabled`로 거절한다.
 
+실전 주문 허용 전에는 두 가지 조건을 추가로 만족해야 한다.
+
+```
+1. 실계좌 total/available이 capital_limit보다 작으면 실제 계좌 금액을 우선한다.
+2. get_futures_symbols는 실제 available budget으로 감당 가능한 계약이 없으면 심볼을 노출하지 않는다.
+```
+
+따라서 실전 키가 유효해도 현금 주문가능액이 부족하거나 KIS가 선물/옵션 계좌를 인정하지 않으면 실전 주문 루프를 시작하지 않는다.
+
 ## 로드맵 보정
 
 | 단계 | 목표 |
