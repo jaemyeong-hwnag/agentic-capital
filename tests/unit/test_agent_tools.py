@@ -33,6 +33,12 @@ def _make_trading():
     return trading
 
 
+def _make_market_data(price: float = 70_000.0):
+    market_data = MagicMock()
+    market_data.get_quote = AsyncMock(return_value=MagicMock(price=price))
+    return market_data
+
+
 class TestBuildAgentTools:
     """Test build_agent_tools() returns correct tools and they work."""
 
@@ -273,6 +279,34 @@ class TestBuildAgentTools:
             symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
         )
         assert "submitted" in result
+
+    @pytest.mark.asyncio
+    async def test_market_buy_uses_quote_for_capital_check(self):
+        trading = _make_trading()
+        market_data = _make_market_data(price=70_000.0)
+        tools, _, _, _ = build_agent_tools(
+            trading=trading,
+            market_data=market_data,
+            capital_limit=28_690,
+        )
+        tool = next(t for t in tools if t.name == "submit_order")
+        result = await tool.coroutine(
+            symbol="005930", side="buy", quantity=1, price=None, market="kr_stock"
+        )
+        assert result.startswith("ERR:insufficient_capital")
+        assert "avl:28690" in result
+        trading.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_market_buy_without_quote_is_rejected(self):
+        trading = _make_trading()
+        tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=28_690)
+        tool = next(t for t in tools if t.name == "submit_order")
+        result = await tool.coroutine(
+            symbol="005930", side="buy", quantity=1, price=None, market="kr_stock"
+        )
+        assert result == "ERR:price_required_for_buy_risk_check"
+        trading.submit_order.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_submit_order_sell_not_blocked_by_capital(self):

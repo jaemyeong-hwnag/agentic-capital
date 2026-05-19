@@ -358,8 +358,18 @@ def build_agent_tools(
 
             # Capital hard limit only — the ONLY system-imposed constraint
             # Position policy is AI-decided and informational only (not enforced here)
-            if side.lower() == "buy" and price and price > 0:
-                order_value = price * quantity
+            if side.lower() == "buy":
+                risk_price = price
+                if (risk_price is None or risk_price <= 0) and market_data:
+                    try:
+                        q = await market_data.get_quote(symbol)
+                        risk_price = q.price
+                    except Exception:
+                        risk_price = None
+                if risk_price is None or risk_price <= 0:
+                    return "ERR:price_required_for_buy_risk_check"
+
+                order_value = risk_price * quantity
                 b = await trading.get_balance()
                 effective_available = min(b.available, capital_limit) if capital_limit else b.available
 
@@ -367,7 +377,7 @@ def build_agent_tools(
                     return (
                         f"ERR:insufficient_capital|"
                         f"need:{order_value:.0f}|avl:{effective_available:.0f}|"
-                        f"max_qty:{int(effective_available // price)}"
+                        f"max_qty:{int(effective_available // risk_price)}"
                     )
 
             o = Order(
