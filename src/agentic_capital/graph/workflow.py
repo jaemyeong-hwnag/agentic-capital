@@ -8,6 +8,7 @@ The only constraint: capital. The only goal: make money.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import structlog
@@ -21,6 +22,64 @@ from agentic_capital.graph.nodes import record_cycle
 logger = structlog.get_logger()
 
 _langchain_llm = None
+
+
+_QUOTA_ERROR_MARKERS = (
+    "resource_exhausted",
+    "429",
+    "quota",
+    "rate limit",
+    "retrydelay",
+    "please retry",
+)
+
+
+def _parse_retry_delay_seconds(message: str) -> int | None:
+    """Parse provider retry hints into seconds."""
+    retry_delay_match = re.search(
+        r"retryDelay['\"]?\s*[:=]\s*['\"](?P<seconds>\d+(?:\.\d+)?)s",
+        message,
+        re.IGNORECASE,
+    )
+    if retry_delay_match:
+        return max(1, int(float(retry_delay_match.group("seconds"))))
+
+    human_match = re.search(
+        r"retry\s+in\s+"
+        r"(?:(?P<hours>\d+(?:\.\d+)?)h)?"
+        r"(?:(?P<minutes>\d+(?:\.\d+)?)m)?"
+        r"(?:(?P<seconds>\d+(?:\.\d+)?)s)?",
+        message,
+        re.IGNORECASE,
+    )
+    if not human_match:
+        return None
+
+    hours = float(human_match.group("hours") or 0)
+    minutes = float(human_match.group("minutes") or 0)
+    seconds = float(human_match.group("seconds") or 0)
+    total = int(hours * 3600 + minutes * 60 + seconds)
+    return total if total > 0 else None
+
+
+def _error_retry_seconds(error: str) -> int | None:
+    """Return an adaptive retry delay for provider quota/rate-limit errors."""
+    normalized = error.lower()
+    if not any(marker in normalized for marker in _QUOTA_ERROR_MARKERS):
+        return None
+
+    parsed_seconds = _parse_retry_delay_seconds(error)
+    if parsed_seconds is None:
+        parsed_seconds = 3600
+
+    return min(max(parsed_seconds, 60), 28_800)
+
+
+def _cycle_error_backoff_seconds(errors: list[str]) -> int:
+    """Avoid zero-delay loops after failed cycles."""
+    if not errors:
+        return 0
+    return max(_error_retry_seconds(error) or 300 for error in errors)
 
 
 def _get_langchain_llm():
@@ -192,8 +251,10 @@ async def run_agent_cycle(
         recorder=recorder,
     )
 
-    # Agent-requested wakeup delay: take the last request (most recent intent)
-    next_cycle_seconds = wakeup_sink[-1] if wakeup_sink else 0
+    # Agent-requested wakeup delay takes priority. On failures, never loop at
+    # zero delay: provider quota errors can otherwise burn the entire day.
+    error_backoff_seconds = _cycle_error_backoff_seconds(errors)
+    next_cycle_seconds = wakeup_sink[-1] if wakeup_sink else error_backoff_seconds
 
     # Record full LLM activity trace: tool sequence + reasoning
     if recorder:
@@ -231,6 +292,7 @@ async def run_agent_cycle(
         decisions=len(all_decisions),
         tool_calls=len(decisions_sink),
         errors=len(errors),
+        error_backoff_seconds=error_backoff_seconds,
         next_cycle_seconds=next_cycle_seconds,
     )
 

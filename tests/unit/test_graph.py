@@ -12,7 +12,7 @@ from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
-from agentic_capital.graph.workflow import run_agent_cycle
+from agentic_capital.graph.workflow import _error_retry_seconds, run_agent_cycle
 from agentic_capital.ports.llm import LLMPort
 
 
@@ -198,7 +198,7 @@ class TestRunAgentCycle:
         """If ReAct agent throws, cycle still returns with errors."""
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
         mock_agent = MagicMock()
-        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("LLM quota exceeded"))
+        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("LLM provider crashed"))
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
              patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
@@ -206,6 +206,31 @@ class TestRunAgentCycle:
 
         assert result["agent_name"] == "CEO"
         assert len(result["errors"]) > 0
+        assert result["next_cycle_seconds"] == 300
+
+    @pytest.mark.asyncio
+    async def test_quota_failure_uses_provider_retry_delay(self):
+        """Provider quota hints should slow the loop instead of retrying immediately."""
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        mock_agent = MagicMock()
+        message = (
+            "Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): "
+            "429 RESOURCE_EXHAUSTED. Quota exceeded. retryDelay': '26105s'"
+        )
+        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError(message))
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+            result = await run_agent_cycle(ceo, cycle_number=1)
+
+        assert result["agent_name"] == "CEO"
+        assert len(result["errors"]) == 1
+        assert result["next_cycle_seconds"] == 26105
+
+    def test_parses_human_quota_retry_delay(self):
+        """Gemini human-readable retry hints should be parsed for long backoff."""
+        error = "Quota exceeded. Please retry in 7h15m5.72624757s."
+        assert _error_retry_seconds(error) == 26105
 
     @pytest.mark.asyncio
     async def test_extracts_org_decisions_from_message(self):
