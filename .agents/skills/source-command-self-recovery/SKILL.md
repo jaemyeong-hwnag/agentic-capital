@@ -12,7 +12,7 @@ Treat every execution as an ops loop, not a one-shot command.
 For any shell, Python, test, service, background process, monitor, deployment, or automation:
 
 1. Define expected success before running.
-2. Monitor output, exit status, process state, logs, and side effects.
+2. Set an adaptive timer and monitor output, exit status, process state, logs, and side effects.
 3. If failure is clear, stop the failing/stale execution.
 4. Diagnose the root cause from evidence.
 5. Fix local code/config/docs/tests when safe.
@@ -31,14 +31,40 @@ Record mentally or in the user update:
 - `failure`: concrete fail condition, such as nonzero exit, traceback, timeout, repeated same error, no log progress, duplicate process, unsafe live state, or invalid output.
 - `rollback/stop`: how to stop it if it fails.
 - `verification`: smallest useful check plus any repo-required full check.
+- `timer`: initial check interval and adaptive criteria for waiting, stopping, or intervening.
 
 For background jobs, always know the process identifier: screen/tmux session, PID, container, service name, run id, log file, or DB row.
+
+## Adaptive Timer
+
+Every execution must have a timer. Do not use one fixed timeout for everything. Choose and adjust the next check interval from the command's expected behavior.
+
+Start with these defaults, then adapt:
+
+| Work type | First check | Continue waiting when | Intervene when |
+|----------|-------------|-----------------------|----------------|
+| Fast command, lint, small unit test | 5-15s | output changes or test count advances | no output past expected duration, immediate traceback, repeated same failure |
+| Full test suite, build, install | 30-60s | test/build progress advances, CPU/disk/network active, logs vary | no progress for multiple checks, dependency/network error, same failing test repeats |
+| Dev server, service, daemon | 5-20s until ready, then 30-120s | health/log heartbeat advances | port not bound, crash loop, readiness timeout, duplicate process |
+| Long training, migration, batch job | 60-300s | epoch/step/row count/checkpoint advances | metric/log frozen beyond normal cadence, resource exhaustion, irreversible error |
+| Live ops/trading/production-like loop | 10-60s during startup, then task-specific heartbeat | DB cycle/run advances, logs show intended sleep/heartbeat, one process only | duplicate process, unsafe mode, repeated error, stale DB cycle, unclear order/account state |
+
+Adaptive rules:
+
+- Shorten the interval after errors, warnings, startup, or live-risk signals.
+- Lengthen the interval only when progress is measurable and the process is in an intended wait/sleep state.
+- On each timer tick, read enough evidence to choose one action: `wait`, `stop`, `diagnose`, `fix`, `restart`, or `report_blocked`.
+- If there is no new output, check secondary signals: process state, CPU, log mtime, DB status, health endpoint, queue length, container health, or file growth.
+- Do not wait just because a process exists. A live process with stale logs or stale DB rows is suspect.
+- If the same error appears on two timer ticks, stop waiting and enter recovery.
+- For live/production-like systems, prefer earlier intervention over extended uncertain waiting.
 
 ## Monitor
 
 While running:
 
 - Poll long-running commands instead of assuming progress.
+- Use the adaptive timer to decide when to poll again.
 - Inspect recent logs, not only process existence.
 - Check external dependencies that affect the run: DB, Redis, Docker, network, credentials, ports, queues, broker/API availability.
 - For DB-backed systems, query the latest run/cycle/job status using actual schema columns.
@@ -106,6 +132,7 @@ Keep final status concise:
 
 ```
 self_recovery:
+  timer: <intervals used and why wait/stop/restart was chosen>
   stopped: <what was stopped, if anything>
   cause: <root cause bucket + evidence>
   fixed: <files/config/state changed>
