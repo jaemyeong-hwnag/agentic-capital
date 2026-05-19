@@ -100,6 +100,23 @@ AI는 자유롭게 결정하지만 모든 행동은 증거로 남는다.
 | `formats.compact.bal` | `AI_DAILY_OP_COST_KRW` 기반 `op_cost`, `net_today` 노출 |
 | `build_agent_tools` | 비용 인식 잔고, 자유 거래/비거래, HR, 동적 도구 생성 제공 |
 | `FuturesSessionGuard` | 자본 제약을 물리적 리스크 가드로 구현 |
+| `FuturesVirtualAdapter` | KIS 모의투자 미니 선물 조회가 실패할 때 자본 한도 내 가상 미니 계약으로 paper loop 지속 |
+| `build_futures_tools.get_futures_symbols` | 현재 자본으로 즉시 거절될 표준 선물 대신 거래 가능한 계약을 우선 노출 |
+
+## 선물 스캘핑 운영 보정
+
+최근 무매매 원인은 알파 부재가 아니라 **실행 가능한 상품 유니버스 부재**였다. 500만원 자본 한도에서 표준 KOSPI200 선물 1계약은 손실 가정 기준 자본 한도를 초과했고, KIS 모의투자는 미니 선물(`A30xxx`) 조회를 실패시켜 AI가 선택할 수 있는 작은 계약이 사라졌다.
+
+수정된 운영 기준은 다음과 같다.
+
+```
+1. KIS paper mode에서는 실계좌 API를 유지하되, 미니 선물 조회 실패 시 가상 미니 계약을 추가한다.
+2. AI에게 노출되는 심볼은 capital_limit, multiplier, futures_stop_loss_pct 기준으로 필터링한다.
+3. 표준 선물은 자본 한도 초과 시 숨기고, 미니 선물이 감당 가능하면 미니를 우선 노출한다.
+4. 실제 KIS 체결 조회는 선물/옵션 API가 요구하는 주문일자 파라미터로 호출한다.
+```
+
+이 보정은 실전 주문 우회가 아니다. `kis_is_paper=True`이고 `futures_virtual_paper_fallback=True`인 경우에만 시뮬레이션 지속성을 위해 적용된다. 실전 모드에서는 브로커가 실제 제공하는 계약과 체결만 사용한다.
 
 ## 로드맵 보정
 
