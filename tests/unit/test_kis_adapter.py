@@ -204,6 +204,9 @@ class TestKISTradingAdapter:
     @pytest.mark.asyncio
     async def test_get_order_status(self):
         adapter = self._make_adapter()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"rt_cd": "0", "output1": []}
+        adapter._session.get = AsyncMock(return_value=mock_response)
         result = await adapter.get_order_status("ORDER123")
         assert result.order_id == "ORDER123"
         assert result.status == "unknown"
@@ -399,6 +402,24 @@ class TestKISTradingAdapterExtended:
         fills = await adapter.get_fills()
         assert len(fills) == 1
         assert fills[0].symbol == "000660"
+
+    @pytest.mark.asyncio
+    async def test_get_futures_fills_uses_required_order_date_params(self):
+        """KIS futures fills endpoint requires STRT_ORD_DT/END_ORD_DT parameter names."""
+        adapter = self._make_adapter(is_paper=True)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"rt_cd": "0", "output1": [], "output2": {"fee_smtl": "0"}}
+        adapter._session.get = AsyncMock(return_value=mock_response)
+        fills = await adapter.get_futures_fills("20260518", "20260519")
+        assert fills == []
+        params = adapter._session.get.call_args.kwargs["params"]
+        assert params["STRT_ORD_DT"] == "20260518"
+        assert params["END_ORD_DT"] == "20260519"
+        assert params["SORT_SQN"] == ""
+        assert params["STRT_ODNO"] == ""
+        assert params["MKET_ID_CD"] == ""
+        assert "INQR_STRT_DT" not in params
+        assert "INQR_END_DT" not in params
 
     @pytest.mark.asyncio
     async def test_submit_futures_order_paper_rejects(self):

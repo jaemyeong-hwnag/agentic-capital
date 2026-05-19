@@ -682,6 +682,26 @@ class TestFuturesSessionGuard:
         assert "unaffordable" in result.metadata["error"]
 
     @pytest.mark.asyncio
+    async def test_affordability_gate_uses_stop_loss_when_configured(self):
+        """Engine-level stop-loss sizing lets mini futures fit small capital at high prices."""
+        inner = _mock_inner()
+        inner.get_positions = AsyncMock(return_value=[])
+        order = Order(
+            symbol="A30606",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=1171.3,
+            multiplier=50_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000.0, stop_loss_pct=0.02)
+        result = await guard.submit_order(order)
+        assert result.status == "filled"
+        inner.submit_order.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_max_qty_guard_with_price_and_multiplier(self):
         """Max qty guard caps contracts when price+multiplier are specified on order."""
         inner = _mock_inner()
@@ -1166,6 +1186,21 @@ class TestFuturesTools:
         # pnl_today should be futures unrealized_pnl=250000, not stock -1000000
         assert "pnl_today:250000" in result
         assert "-1000000" not in result
+
+    @pytest.mark.asyncio
+    async def test_get_futures_symbols_hides_unaffordable_standard_when_mini_exists(self):
+        """AI should see the tradable mini contract instead of an immediately rejected standard."""
+        from agentic_capital.core.tools.futures_tools import build_futures_tools
+        trading = self._build_trading()
+        trading.get_active_futures_contracts = AsyncMock(return_value=[
+            {"symbol": "A01606", "price": 1171.3, "volume": 1000, "change_pct": 0.1, "expiry": "202606", "multiplier": 250_000},
+            {"symbol": "A30606", "price": 1171.3, "volume": 0, "change_pct": 0.1, "expiry": "202606", "multiplier": 50_000},
+        ])
+        tools, _, _ = build_futures_tools(trading=trading, capital_limit=5_000_000)
+        tool = next(t for t in tools if t.name == "get_futures_symbols")
+        result = await tool.ainvoke({})
+        assert "A30606" in result
+        assert "A01606" not in result
 
 
 # ── FuturesEngine (smoke tests) ───────────────────────────────────────────────
@@ -1707,6 +1742,18 @@ class TestFuturesVirtualAdapter:
         assert result.symbol == "101F6"
 
     @pytest.mark.asyncio
+    async def test_kis_style_mini_symbol_fills_virtually(self):
+        adapter, price = self._make_adapter(1171.3)
+        order = Order(
+            symbol="A30606", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_FUTURES, position_effect="open", multiplier=50_000.0,
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(order)
+        assert result.status == "filled"
+        assert result.symbol == "A30606"
+
+    @pytest.mark.asyncio
     async def test_position_unrealized_pnl_updated(self):
         adapter, _ = self._make_adapter(380.0)
         order = Order(
@@ -1778,11 +1825,34 @@ class TestFuturesVirtualAdapter:
         assert result.status == "rejected"
         assert "invalid_symbol" in result.metadata.get("error", "")
 
+    @pytest.mark.asyncio
+    async def test_active_contracts_add_virtual_kis_mini(self):
+        adapter, _ = self._make_adapter(1171.3)
+        adapter._inner.get_active_futures_contracts = AsyncMock(return_value=[
+            {"symbol": "A01606", "price": 1171.3, "volume": 1000, "change_pct": 0.1, "expiry": "202606", "multiplier": 250_000},
+        ])
+        contracts = await adapter.get_active_futures_contracts()
+        mini = next(c for c in contracts if c["symbol"] == "A30606")
+        assert mini["multiplier"] == 50_000
+        assert mini["virtual"] is True
+        assert contracts[0]["symbol"] == "A30606"
+
+    @pytest.mark.asyncio
+    async def test_virtual_mini_quote_uses_local_price(self):
+        adapter, price = self._make_adapter(1171.3)
+        with self._patch_price(price):
+            quote = await adapter.get_futures_quote("A30606")
+        assert quote["symbol"] == "A30606"
+        assert quote["price"] == 1171.3
+        assert quote["multiplier"] == 50_000
+
     def test_valid_symbol_patterns(self):
         from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
         assert FuturesVirtualAdapter._is_valid_kospi200_symbol("101F6")
         assert FuturesVirtualAdapter._is_valid_kospi200_symbol("105C6")
         assert FuturesVirtualAdapter._is_valid_kospi200_symbol("101I7")
+        assert FuturesVirtualAdapter._is_valid_kospi200_symbol("A01606")
+        assert FuturesVirtualAdapter._is_valid_kospi200_symbol("A30606")
         assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("101RC000")
         assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("KOSPI200")
         assert not FuturesVirtualAdapter._is_valid_kospi200_symbol("005930")

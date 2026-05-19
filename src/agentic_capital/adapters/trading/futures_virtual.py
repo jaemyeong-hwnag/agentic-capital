@@ -32,9 +32,17 @@ _KOSPI200_MINI_MULT = 50_000
 
 
 def _multiplier_for(symbol: str) -> float:
-    if symbol.startswith("105"):
+    if symbol.startswith(("105", "A30")):
         return _KOSPI200_MINI_MULT
     return _KOSPI200_STANDARD_MULT
+
+
+def _is_kis_standard(symbol: str) -> bool:
+    return symbol.startswith("A01") and len(symbol) >= 4
+
+
+def _to_kis_mini(symbol: str) -> str:
+    return f"A30{symbol[3:]}" if _is_kis_standard(symbol) else symbol
 
 
 async def _fetch_kospi200_price() -> float:
@@ -149,9 +157,12 @@ class FuturesVirtualAdapter(TradingPort):
 
     @staticmethod
     def _is_valid_kospi200_symbol(symbol: str) -> bool:
-        """Validate KOSPI200 standard/mini futures symbol format: 101/105 + CFIL + digit."""
+        """Validate KOSPI200 standard/mini futures symbol format."""
         import re
-        return bool(re.fullmatch(r"(101|105)[CFIL]\d", symbol))
+        return bool(
+            re.fullmatch(r"(101|105)[CFIL]\d", symbol)
+            or re.fullmatch(r"A(01|30)\d{3,}", symbol)
+        )
 
     async def _submit_virtual_futures_order(self, order: Order) -> OrderResult:
         if not self._is_valid_kospi200_symbol(order.symbol):
@@ -270,13 +281,50 @@ class FuturesVirtualAdapter(TradingPort):
     async def get_fills(self, start_date=None, end_date=None, symbol=""):
         return await self._inner.get_fills(start_date, end_date, symbol)
 
-    def get_active_futures_contracts(self):
-        # Delegate to inner if it has this method (KIS adapter)
+    async def get_active_futures_contracts(self):
+        """Return broker contracts plus virtual KIS mini contracts when needed."""
         if hasattr(self._inner, "get_active_futures_contracts"):
-            return self._inner.get_active_futures_contracts()
+            contracts = await self._inner.get_active_futures_contracts()
+            return self._with_virtual_minis(contracts)
         return []
 
-    def get_futures_quote(self, symbol: str):
+    async def get_futures_quote(self, symbol: str):
+        if symbol.startswith("A30"):
+            price = await _fetch_kospi200_price()
+            if price <= 0:
+                return {}
+            return {
+                "symbol": symbol,
+                "price": price,
+                "open": price,
+                "high": price,
+                "low": price,
+                "volume": 0,
+                "change": 0.0,
+                "change_pct": 0.0,
+                "multiplier": _KOSPI200_MINI_MULT,
+                "virtual": True,
+            }
         if hasattr(self._inner, "get_futures_quote"):
-            return self._inner.get_futures_quote(symbol)
+            return await self._inner.get_futures_quote(symbol)
         return {}
+
+    @staticmethod
+    def _with_virtual_minis(contracts: list[dict]) -> list[dict]:
+        symbols = {str(c.get("symbol", "")) for c in contracts}
+        augmented = list(contracts)
+        for c in contracts:
+            symbol = str(c.get("symbol", ""))
+            if not _is_kis_standard(symbol):
+                continue
+            mini_symbol = _to_kis_mini(symbol)
+            if mini_symbol in symbols:
+                continue
+            mini = dict(c)
+            mini["symbol"] = mini_symbol
+            mini["multiplier"] = _KOSPI200_MINI_MULT
+            mini["virtual"] = True
+            augmented.append(mini)
+            symbols.add(mini_symbol)
+        augmented.sort(key=lambda c: (0 if int(c.get("multiplier", 0) or 0) <= _KOSPI200_MINI_MULT else 1, str(c.get("symbol", ""))))
+        return augmented

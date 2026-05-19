@@ -18,6 +18,7 @@ import structlog
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from agentic_capital.config import settings
 from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
 logger = structlog.get_logger()
@@ -176,6 +177,15 @@ def build_futures_tools(
             if not contracts:
                 return "ERR:no_active_contracts_found"
             from agentic_capital.formats.toon import to_toon
+            loss_pct = settings.futures_stop_loss_pct if settings.futures_stop_loss_pct > 0 else 0.10
+            visible_contracts = contracts
+            if capital_limit is not None:
+                affordable = [
+                    c for c in contracts
+                    if float(c.get("price") or 0) * loss_pct * float(c.get("multiplier") or 0) <= capital_limit
+                ]
+                if affordable:
+                    visible_contracts = affordable
             rows = [
                 [
                     c["symbol"],
@@ -185,7 +195,7 @@ def build_futures_tools(
                     c.get("expiry", ""),
                     str(int(c.get("multiplier", 0))),
                 ]
-                for c in contracts
+                for c in visible_contracts
             ]
             return to_toon("symbols", ["sym", "px", "vol", "chg_pct", "exp", "mult"], rows)
         except Exception as e:

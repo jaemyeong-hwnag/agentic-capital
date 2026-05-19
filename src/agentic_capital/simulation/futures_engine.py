@@ -52,6 +52,7 @@ class FuturesEngine:
     def _init_adapters(self) -> None:
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
+        from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
         from agentic_capital.adapters.trading.futures_guard import FuturesSessionGuard
         from agentic_capital.config import settings
@@ -59,6 +60,8 @@ class FuturesEngine:
         kis_session = KISSession()
         raw_trading = KISTradingAdapter(session=kis_session)
         wrapped = raw_trading
+        if settings.kis_is_paper and settings.futures_virtual_paper_fallback:
+            wrapped = FuturesVirtualAdapter(wrapped, initial_capital=self._capital_limit)
 
         self._trading = FuturesSessionGuard(
             wrapped,

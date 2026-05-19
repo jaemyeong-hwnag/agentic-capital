@@ -1190,8 +1190,11 @@ class KISTradingAdapter(TradingPort):
                     "SLL_BUY_DVSN_CD": "00",      # 00=전체
                     "CCLD_NCCS_DVSN": "01",        # 01=체결만
                     "PDNO": symbol,
-                    "INQR_STRT_DT": start,
-                    "INQR_END_DT": end,
+                    "STRT_ORD_DT": start,
+                    "END_ORD_DT": end,
+                    "SORT_SQN": "",
+                    "STRT_ODNO": "",
+                    "MKET_ID_CD": "",
                     "CTX_AREA_FK200": "",
                     "CTX_AREA_NK200": "",
                 },
@@ -1309,4 +1312,3 @@ class KISTradingAdapter(TradingPort):
         except Exception:
             logger.exception("kis_get_overseas_fills_failed")
             raise
-

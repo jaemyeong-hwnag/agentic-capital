@@ -63,6 +63,12 @@ class FuturesSessionGuard(TradingPort):
         self._max_leverage = max_leverage           # e.g. 5.0 = 5x
         self._position_size_pct = position_size_pct  # e.g. 0.05 = 5%
 
+    def _affordability_loss_pct(self) -> float:
+        """Loss fraction used to decide whether one contract fits the capital budget."""
+        if self._stop_loss_pct and self._stop_loss_pct > 0:
+            return self._stop_loss_pct
+        return 0.10
+
     @property
     def active_symbol(self) -> str | None:
         return self._active_symbol
@@ -317,8 +323,8 @@ class FuturesSessionGuard(TradingPort):
                     multiplier=order.multiplier,
                 )
 
-        # Affordability gate: reject if 1-contract worst-case loss > capital_limit
-        # Prevents standard futures (250k mult, ~21M worst-case) being traded with 5M capital.
+        # Affordability gate: reject if 1-contract bounded loss > capital_limit.
+        # Uses the configured stop-loss when present; standalone tests/default use 10%.
         # Uses effective_price so market orders are also covered.
         if (
             order.position_effect == "open"
@@ -326,12 +332,13 @@ class FuturesSessionGuard(TradingPort):
             and effective_price
             and order.multiplier
         ):
-            worst_loss_1_contract = effective_price * 0.10 * order.multiplier
+            worst_loss_1_contract = effective_price * self._affordability_loss_pct() * order.multiplier
             if worst_loss_1_contract > self._capital_limit:
                 logger.warning(
                     "futures_guard_product_unaffordable",
                     symbol=order.symbol,
                     multiplier=order.multiplier,
+                    loss_pct=self._affordability_loss_pct(),
                     worst_loss_1contract=round(worst_loss_1_contract, 0),
                     capital_limit=self._capital_limit,
                 )
@@ -341,7 +348,7 @@ class FuturesSessionGuard(TradingPort):
                     metadata={"error": f"unaffordable:worst_case_loss_{worst_loss_1_contract:.0f}>capital_{self._capital_limit:.0f}"},
                 )
 
-        # Max quantity guard: cap contracts so worst-case 10% drop <= capital_limit
+        # Max quantity guard: cap contracts so bounded loss <= capital_limit
         # Uses effective_price (limit or fetched current quote) so market orders are also checked.
         if (
             order.position_effect == "open"
@@ -349,7 +356,7 @@ class FuturesSessionGuard(TradingPort):
             and effective_price
             and order.multiplier
         ):
-            worst_loss_per_contract = effective_price * 0.10 * order.multiplier
+            worst_loss_per_contract = effective_price * self._affordability_loss_pct() * order.multiplier
             if worst_loss_per_contract > 0:
                 max_qty = max(1, int(self._capital_limit / worst_loss_per_contract))
                 if order.quantity > max_qty:
@@ -433,7 +440,7 @@ class FuturesSessionGuard(TradingPort):
             if not fut:
                 return
             p = fut[0]
-            worst_per_contract = p.current_price * 0.10 * p.multiplier
+            worst_per_contract = p.current_price * self._affordability_loss_pct() * p.multiplier
             if worst_per_contract <= 0:
                 return
             safe_qty = max(1, int(self._capital_limit / worst_per_contract))
