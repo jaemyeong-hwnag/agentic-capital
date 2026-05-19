@@ -177,6 +177,18 @@ expected_net_edge(new_position)
 
 이 설계는 프로젝트 대전제를 어기지 않는다. 투자 방법은 제한하지 않고, 시스템은 오직 실제 자본과 실제 보유 수량이라는 물리적 제약만 강제한다. 보유자산 교체 여부, 후보 선정, 기대수익 추정, 타이밍 판단은 AI 에이전트의 자율 영역이다.
 
+### LLM quota/self-recovery 운영
+
+실전 엔진에서 LLM provider quota, rate limit, `RESOURCE_EXHAUSTED`, HTTP 429가 발생하면 이는 로컬 매매 로직 실패가 아니라 외부 실행 제약이다. 이 경우 엔진은 같은 오류를 0초 간격으로 반복하지 않고 provider가 준 `retryDelay` 또는 `Please retry in ...` 값을 파싱해 다음 사이클을 뒤로 미룬다.
+
+```
+quota/rate-limit error -> parse retry hint -> next_cycle_seconds >= 60
+generic ReAct/LLM error -> next_cycle_seconds = 300
+agent request_wakeup -> agent intent takes priority
+```
+
+이 규칙은 AI 자율성을 제한하지 않는다. 주문 판단, 보유자산 매도 후 재배분, 관망 여부는 여전히 에이전트가 결정한다. 시스템은 외부 LLM quota가 소진된 동안 불필요한 호출 비용과 중복 사이클을 막고, quota가 회복되면 같은 실전 KIS 어댑터와 계좌 상태로 판단을 재개하게 한다.
+
 ## 로드맵 보정
 
 | 단계 | 목표 |
