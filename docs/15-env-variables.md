@@ -128,3 +128,24 @@ KIS_IS_PAPER=false      ← 실전 계좌 조회 전환
 FUTURES_LIVE_ORDERS_ENABLED=true   ← 실전 선물 주문 명시적 허용
 QDRANT_URL              ← 벡터 DB 확장
 ```
+
+## 실전 주식 실행 체크
+
+`KIS_IS_PAPER=false`인 주식 모드는 KIS 실전 계좌를 사용한다. 실행 전 최소 검증은 다음 순서로 한다.
+
+```
+1. KIS token 발급 성공
+2. get_balance로 total/available 조회 성공
+3. get_positions로 보유 종목 조회 성공
+4. 매수 주문은 price 또는 quote 기반 예상 주문금액이 available/capital_limit 이하인지 확인
+```
+
+시장가 매수처럼 `price`가 비어 있는 주문은 `market_data.get_quote()`로 현재가를 가져와 위험 한도를 계산한다. 현재가 조회도 실패하면 주문은 `price_required_for_buy_risk_check`로 거절된다.
+
+주식 모드의 유효 주문 가능액은 다음 값이다.
+
+```
+effective_available = min(kis_available_cash, capital_limit)
+```
+
+따라서 계좌 총평가액이 크더라도 이미 보유 주식에 묶여 현금 주문가능액이 작으면 신규 매수는 제한된다. 기존 보유 주식 매도는 실전 주문이므로, 실전 실행 전 `get_positions` 결과를 반드시 확인한다.
