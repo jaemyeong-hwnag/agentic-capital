@@ -271,6 +271,28 @@ class TestKISTradingAdapterExtended:
         assert bal.currency == "USD"
 
     @pytest.mark.asyncio
+    async def test_get_overseas_balance_accepts_dict_summary(self):
+        """get_overseas_balance accepts KIS dict output2 when no rows exist."""
+        adapter = self._make_adapter(is_paper=False)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "rt_cd": "0",
+            "output1": [],
+            "output2": {
+                "tot_evlu_pfls_amt": "0.00000000",
+                "frcr_evlu_amt2": "0.000000",
+                "frcr_dncl_amt_2": "0.000000",
+            },
+            "msg_cd": "KIOK0560",
+            "msg1": "조회할 내용이 없습니다",
+        }
+        adapter._session.get = AsyncMock(return_value=mock_response)
+        bal = await adapter.get_overseas_balance("USD")
+        assert bal.total == 0.0
+        assert bal.available == 0.0
+        assert bal.currency == "USD"
+
+    @pytest.mark.asyncio
     async def test_get_overseas_balance_paper_raises(self):
         """get_overseas_balance raises NotImplementedError in paper mode."""
         adapter = self._make_adapter(is_paper=True)

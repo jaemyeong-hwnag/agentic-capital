@@ -372,8 +372,13 @@ class KISTradingAdapter(TradingPort):
             if data.get("rt_cd") != "0":
                 raise RuntimeError(f"KIS overseas balance failed: {data.get('msg1', data)}")
 
-            o2 = data.get("output2", [{}])
-            info = o2[0] if o2 else {}
+            o2 = data.get("output2", {})
+            if isinstance(o2, list):
+                info = o2[0] if o2 else {}
+            elif isinstance(o2, dict):
+                info = o2
+            else:
+                info = {}
             total_krw = float(info.get("tot_evlu_pfls_amt", 0))   # KRW equivalent P&L
             total_foreign = float(info.get("frcr_evlu_amt2", 0))  # Foreign currency total
             available = float(info.get("frcr_dncl_amt_2", 0))     # Available foreign cash
