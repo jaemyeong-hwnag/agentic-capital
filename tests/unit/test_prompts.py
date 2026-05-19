@@ -35,6 +35,7 @@ class TestSystemPrompt:
     def test_json_instruction(self):
         prompt = build_system_prompt("X", "trader", "", PersonalityVector(), EmotionState())
         assert "GOAL=profit" in prompt
+        assert "REBAL=" in prompt
 
 
 class TestTradingPrompt:

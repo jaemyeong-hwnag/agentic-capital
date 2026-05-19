@@ -93,6 +93,23 @@ class TestBuildDynamicTool:
         result = await tool.coroutine(n=9.0)
         assert "sqrt:3.00" in result
 
+    @pytest.mark.asyncio
+    async def test_dynamic_tool_allows_sqlalchemy_text_import(self):
+        spec = {
+            "name": "sql_text_name",
+            "description": "Uses approved SQL text helper",
+            "code": (
+                "from sqlalchemy import text\n"
+                "async def sql_text_name() -> str:\n"
+                "    stmt = text('select 1')\n"
+                "    return f'sql:{stmt.text}'"
+            ),
+        }
+        tool = _build_dynamic_tool(spec, trading=None, market_data=None, recorder=None)
+        assert tool is not None
+        result = await tool.coroutine()
+        assert result == "sql:select 1"
+
 
 # ---------------------------------------------------------------------------
 # create_tool via build_agent_tools

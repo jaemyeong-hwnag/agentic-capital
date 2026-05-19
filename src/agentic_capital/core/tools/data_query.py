@@ -38,6 +38,24 @@ _FORBIDDEN_TOKENS = [
     "__import__", "open(", "exec(", "eval(",
 ]
 
+
+def _safe_import(name: str, globals=None, locals=None, fromlist=(), level: int = 0):
+    """Allow only explicitly approved imports inside AI-created tools."""
+    if name == "sqlalchemy" and set(fromlist or ()) <= {"text"}:
+        import sqlalchemy
+        return sqlalchemy
+    raise ImportError(f"import_not_allowed:{name}")
+
+
+_SAFE_BUILTINS["__import__"] = _safe_import
+
+
+def _market_key(value: Any) -> str:
+    """Normalize market enum/string values for position comparisons."""
+    raw = getattr(value, "value", value)
+    return str(raw or "").lower()
+
+
 # ---------------------------------------------------------------------------
 # Shared position policy — set by CEO/risk_manager, enforced in submit_order
 # Persists for the duration of the simulation run (reset on restart)
@@ -55,6 +73,7 @@ def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
     import json
     import math
     from datetime import datetime as _dt
+    from sqlalchemy import text
     return {
         "__builtins__": _SAFE_BUILTINS,
         "trading": trading,
@@ -63,6 +82,7 @@ def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
         "json": json,
         "math": math,
         "datetime": _dt,
+        "text": text,
     }
 
 
@@ -146,6 +166,17 @@ class SubmitOrderInput(BaseModel):
     reason: str = Field(default="", description="Trade rationale — why this trade, what signal, what thesis")
 
 
+class EvaluateReallocationInput(BaseModel):
+    buy_symbol: str = Field(description="Candidate buy symbol")
+    buy_quantity: float = Field(description="Candidate buy quantity")
+    buy_market: str = Field(default="kr_stock", description="Candidate buy market")
+    buy_price: float | None = Field(default=None, description="Candidate buy price. Omit to use quote.")
+    sell_symbol: str | None = Field(default=None, description="Optional held symbol to sell for funding")
+    sell_quantity: float = Field(default=0.0, description="Optional sell quantity from held position")
+    sell_market: str = Field(default="kr_stock", description="Sell market")
+    sell_price: float | None = Field(default=None, description="Optional sell price. Omit to use quote/current position price.")
+
+
 class CancelOrderInput(BaseModel):
     order_id: str = Field(description="Order ID to cancel")
     market: str = Field(description="Market: kr_stock | us_stock | kr_futures | kr_options | hk_stock | cn_stock | jp_stock | vn_stock")
@@ -208,12 +239,11 @@ class CreateToolInput(BaseModel):
     code: str = Field(
         description=(
             "Complete async Python function. Must define 'async def {name}(...):'.\n"
-            "Available in scope: trading, market_data, recorder, json, math, datetime\n"
+            "Available in scope: trading, market_data, recorder, json, math, datetime, text\n"
             "Return type must be str (compact AI-friendly format).\n"
             "Forbidden: import os/sys/subprocess/socket, open(), exec(), eval()\n"
             "Example:\n"
             "async def calc_sharpe(agent_id: str, days: int = 7) -> str:\n"
-            "    from sqlalchemy import text\n"
             "    rows = (await recorder._session.execute(\n"
             "        text('SELECT pnl FROM trades WHERE agent_id=:id'), {'id': agent_id}\n"
             "    )).fetchall()\n"
@@ -358,7 +388,22 @@ def build_agent_tools(
 
             # Capital hard limit only — the ONLY system-imposed constraint
             # Position policy is AI-decided and informational only (not enforced here)
-            if side.lower() == "buy":
+            side_l = side.lower()
+            market_l = market.lower()
+            if side_l == "sell" and market_l in {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}:
+                positions = await trading.get_positions()
+                owned_qty = sum(
+                    float(getattr(p, "quantity", 0) or 0)
+                    for p in positions
+                    if getattr(p, "symbol", "") == symbol and _market_key(getattr(p, "market", "")) == market_l
+                )
+                if quantity > owned_qty:
+                    return (
+                        f"ERR:insufficient_position|"
+                        f"sym:{symbol}|have:{owned_qty:.8g}|sell:{quantity:.8g}|max_qty:{owned_qty:.8g}"
+                    )
+
+            if side_l == "buy":
                 risk_price = price
                 if (risk_price is None or risk_price <= 0) and market_data:
                     try:
@@ -382,7 +427,7 @@ def build_agent_tools(
 
             o = Order(
                 symbol=symbol,
-                side=OrderSide(side.lower()),
+                side=OrderSide(side_l),
                 order_type=OrderType.LIMIT if price is not None else OrderType.MARKET,
                 quantity=quantity,
                 price=price,
@@ -440,6 +485,88 @@ def build_agent_tools(
             return _order(outcome)
         except Exception as e:
             logger.exception("agent_submit_order_failed", agent=agent_name, symbol=symbol)
+            return f"ERR:{e}"
+
+    async def evaluate_reallocation(
+        buy_symbol: str,
+        buy_quantity: float,
+        buy_market: str = "kr_stock",
+        buy_price: float | None = None,
+        sell_symbol: str | None = None,
+        sell_quantity: float = 0.0,
+        sell_market: str = "kr_stock",
+        sell_price: float | None = None,
+    ) -> str:
+        """Estimate cash gap and friction for SELL+BUY reallocation without placing orders."""
+        if not trading:
+            return "ERR:no_trading"
+        try:
+            from agentic_capital.simulation.recorder import _estimate_commission
+
+            balance = await trading.get_balance()
+            available = min(balance.available, capital_limit) if capital_limit else balance.available
+            positions = await trading.get_positions()
+
+            def _position(symbol: str, market: str):
+                for p in positions:
+                    if getattr(p, "symbol", "") == symbol and _market_key(getattr(p, "market", "")) == market:
+                        return p
+                return None
+
+            async def _price(symbol: str, fallback: float | None) -> float | None:
+                if fallback and fallback > 0:
+                    return fallback
+                pos = _position(symbol, buy_market if symbol == buy_symbol else sell_market)
+                if pos and getattr(pos, "current_price", 0):
+                    return float(pos.current_price)
+                if market_data:
+                    try:
+                        q = await market_data.get_quote(symbol)
+                        return float(q.price)
+                    except Exception:
+                        return None
+                return None
+
+            buy_px = await _price(buy_symbol, buy_price)
+            if buy_px is None or buy_px <= 0:
+                return "ERR:buy_price_required"
+
+            buy_value = buy_px * buy_quantity
+            buy_fee = _estimate_commission(buy_market, buy_value)
+
+            sell_value = 0.0
+            sell_fee = 0.0
+            sell_have = 0.0
+            if sell_symbol and sell_quantity > 0:
+                sell_pos = _position(sell_symbol, sell_market)
+                sell_have = float(getattr(sell_pos, "quantity", 0) or 0)
+                if sell_quantity > sell_have:
+                    return (
+                        f"ERR:insufficient_position|sym:{sell_symbol}|"
+                        f"have:{sell_have:.8g}|sell:{sell_quantity:.8g}|max_qty:{sell_have:.8g}"
+                    )
+                sell_px = await _price(sell_symbol, sell_price)
+                if sell_px is None or sell_px <= 0:
+                    return "ERR:sell_price_required"
+                sell_value = sell_px * sell_quantity
+                sell_fee = _estimate_commission(sell_market, sell_value)
+
+            cash_after_sell = available + sell_value - sell_fee
+            buy_total_cost = buy_value + buy_fee
+            cash_gap = max(0.0, buy_total_cost - cash_after_sell)
+            friction = buy_fee + sell_fee
+            net_cash_after = cash_after_sell - buy_total_cost
+            action = "funded" if cash_gap <= 0 else "need_more_cash_or_smaller_buy"
+            if not sell_symbol and cash_gap > 0:
+                action = "evaluate_selling_positions_or_wait"
+            return (
+                f"realloc:{action}|buy:{buy_symbol},{buy_quantity:.8g}@{buy_px:.0f},cost:{buy_total_cost:.0f}|"
+                f"sell:{sell_symbol or ''},{sell_quantity:.8g},proceeds:{sell_value:.0f}|"
+                f"avl:{available:.0f}|gap:{cash_gap:.0f}|net_cash_after:{net_cash_after:.0f}|"
+                f"friction:{friction:.0f}|min_expected_edge_gt:{friction:.0f}"
+            )
+        except Exception as e:
+            logger.exception("agent_evaluate_reallocation_failed", agent=agent_name)
             return f"ERR:{e}"
 
     async def cancel_order(
@@ -745,8 +872,22 @@ def build_agent_tools(
         StructuredTool.from_function(
             coroutine=submit_order,
             name="submit_order",
-            description="Submit a buy or sell order. Any instrument: stocks, ETFs, leveraged ETFs, futures, options, derivatives. You decide market, symbol, and price. No restrictions.",
+            description=(
+                "Submit a buy or sell order. You decide market, symbol, quantity, and price. "
+                "If cash is insufficient, first use evaluate_reallocation to compare HOLD vs SELL+BUY; "
+                "spot sell orders are limited to owned quantity."
+            ),
             args_schema=SubmitOrderInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=evaluate_reallocation,
+            name="evaluate_reallocation",
+            description=(
+                "Estimate cash gap, sale proceeds, buy cost, and friction for selling a held asset "
+                "to fund a better expected trade. This does not place orders. Use before SELL+BUY "
+                "when available cash is low or capital is locked in positions."
+            ),
+            args_schema=EvaluateReallocationInput,
         ),
         StructuredTool.from_function(
             coroutine=cancel_order,

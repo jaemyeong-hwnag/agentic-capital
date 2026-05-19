@@ -57,6 +57,7 @@ class TestBuildAgentTools:
         assert "get_positions" in names
         assert "get_fills" in names
         assert "submit_order" in names
+        assert "evaluate_reallocation" in names
         assert "cancel_order" in names
         assert "save_memory" in names
         assert "search_memory" in names
@@ -319,6 +320,87 @@ class TestBuildAgentTools:
             symbol="005930", side="sell", quantity=10, price=70000.0, market="kr_stock"
         )
         assert not result.startswith("ERR:insufficient_capital")
+
+    @pytest.mark.asyncio
+    async def test_submit_order_sell_rejects_unowned_spot_quantity(self):
+        trading = _make_trading()
+        tools, _, _, _ = build_agent_tools(trading=trading)
+        tool = next(t for t in tools if t.name == "submit_order")
+        result = await tool.coroutine(
+            symbol="005930", side="sell", quantity=101, price=70000.0, market="kr_stock"
+        )
+        assert result.startswith("ERR:insufficient_position")
+        assert "have:100" in result
+        assert "max_qty:100" in result
+        trading.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_reallocation_without_sell_reports_cash_gap(self):
+        trading = _make_trading()
+        trading.get_balance.return_value = MagicMock(
+            total=1_886_634,
+            available=28_690,
+            currency="KRW",
+            daily_pnl=0.0,
+            daily_fee=0.0,
+        )
+        market_data = _make_market_data(price=70_000.0)
+        tools, _, _, _ = build_agent_tools(trading=trading, market_data=market_data)
+        tool = next(t for t in tools if t.name == "evaluate_reallocation")
+        result = await tool.coroutine(
+            buy_symbol="396500",
+            buy_quantity=1,
+            buy_market="kr_stock",
+        )
+        assert result.startswith("realloc:evaluate_selling_positions_or_wait")
+        assert "buy:396500,1@70000" in result
+        assert "avl:28690" in result
+        assert "gap:" in result
+        assert "friction:" in result
+
+    @pytest.mark.asyncio
+    async def test_evaluate_reallocation_with_sell_can_fund_buy(self):
+        trading = _make_trading()
+        trading.get_balance.return_value = MagicMock(
+            total=1_886_634,
+            available=28_690,
+            currency="KRW",
+            daily_pnl=0.0,
+            daily_fee=0.0,
+        )
+        tools, _, _, _ = build_agent_tools(trading=trading)
+        tool = next(t for t in tools if t.name == "evaluate_reallocation")
+        result = await tool.coroutine(
+            buy_symbol="396500",
+            buy_quantity=1,
+            buy_market="kr_stock",
+            buy_price=70_000.0,
+            sell_symbol="005930",
+            sell_quantity=1,
+            sell_market="kr_stock",
+            sell_price=72_000.0,
+        )
+        assert result.startswith("realloc:funded")
+        assert "sell:005930,1,proceeds:72000" in result
+        assert "gap:0" in result
+
+    @pytest.mark.asyncio
+    async def test_evaluate_reallocation_rejects_unowned_sell_quantity(self):
+        trading = _make_trading()
+        tools, _, _, _ = build_agent_tools(trading=trading)
+        tool = next(t for t in tools if t.name == "evaluate_reallocation")
+        result = await tool.coroutine(
+            buy_symbol="396500",
+            buy_quantity=1,
+            buy_market="kr_stock",
+            buy_price=70_000.0,
+            sell_symbol="005930",
+            sell_quantity=101,
+            sell_market="kr_stock",
+            sell_price=72_000.0,
+        )
+        assert result.startswith("ERR:insufficient_position")
+        assert "max_qty:100" in result
 
     @pytest.mark.asyncio
     async def test_set_position_policy_tool(self):
