@@ -151,6 +151,32 @@ order_value = quote_price_or_limit_price * quantity
 | 신규 매수 | `available` 기준으로 제한 |
 | 보유 주식 매도 | 실제 보유 포지션에 한해 가능하므로 실행 전 포지션 확인 필수 |
 
+### 보유자산 매도 후 재배분 판단
+
+가용 현금이 부족하다고 해서 시스템이 자동으로 거래를 포기하지 않는다. 에이전트는 보유 중인 자산을 계속 들고 있을 때의 기대값과, 일부를 매도해 더 우위가 큰 후보를 매수할 때의 기대값을 비교해야 한다.
+
+```
+SELL+BUY 실행 조건:
+expected_net_edge(new_position)
+  > expected_net_edge(current_position)
+  + sell_fee
+  + buy_fee
+  + tax_or_spread_estimate
+  + slippage
+  + AI/infra operating cost
+```
+
+이를 위해 `build_agent_tools`는 `evaluate_reallocation` 도구를 제공한다.
+
+| 도구 | 역할 |
+|------|------|
+| `evaluate_reallocation` | 후보 매수 비용, 보유자산 매도대금, 현금 부족분, 예상 거래 마찰 비용을 주문 없이 계산 |
+| `submit_order` | 국내/해외 현물 매도 시 실제 보유 수량 초과 주문을 거절 |
+
+중요한 점은 `evaluate_reallocation`이 매수/매도 추천기가 아니라는 것이다. 이 도구는 자본 제약과 비용 하한을 계산해 AI에게 제공한다. 최종 판단은 에이전트가 해야 하며, 보유 종목을 파는 것이 이득이라는 근거가 비용 하한보다 충분히 클 때만 `SELL` 후 `BUY`를 실행한다.
+
+이 설계는 프로젝트 대전제를 어기지 않는다. 투자 방법은 제한하지 않고, 시스템은 오직 실제 자본과 실제 보유 수량이라는 물리적 제약만 강제한다. 보유자산 교체 여부, 후보 선정, 기대수익 추정, 타이밍 판단은 AI 에이전트의 자율 영역이다.
+
 ## 로드맵 보정
 
 | 단계 | 목표 |
