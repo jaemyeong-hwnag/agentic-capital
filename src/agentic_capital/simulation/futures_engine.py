@@ -71,6 +71,8 @@ class FuturesEngine:
             stop_loss_pct=self._stop_loss_pct,
             max_leverage=self._max_leverage,
             position_size_pct=self._position_size_pct,
+            orders_enabled=settings.kis_is_paper or settings.futures_live_orders_enabled,
+            order_block_reason="live_orders_disabled" if not settings.kis_is_paper else "orders_disabled",
         )
 
     async def _init_recorder(self) -> uuid.UUID:

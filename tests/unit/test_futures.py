@@ -214,6 +214,19 @@ class TestFuturesSessionGuard:
         assert guard.active_symbol == "101W6"  # unchanged
 
     @pytest.mark.asyncio
+    async def test_orders_disabled_blocks_futures_before_submission(self):
+        inner = _mock_inner()
+        guard = FuturesSessionGuard(
+            inner,
+            orders_enabled=False,
+            order_block_reason="live_orders_disabled",
+        )
+        result = await guard.submit_order(_futures_order("A30606"))
+        assert result.status == "rejected"
+        assert result.metadata["error"] == "live_orders_disabled"
+        inner.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_sync_state_sets_active_symbol(self):
         inner = _mock_inner()
         inner.get_positions = AsyncMock(return_value=[_futures_position("101W6")])

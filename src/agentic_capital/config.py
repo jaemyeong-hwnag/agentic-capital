@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     futures_max_leverage: float = 5.0       # max leverage: notional / available_capital
     futures_position_size_pct: float = 0.05 # max 5% of total capital per open trade
     futures_virtual_paper_fallback: bool = True  # simulate mini futures when KIS paper rejects them
+    futures_live_orders_enabled: bool = False  # explicit opt-in required before live futures orders
     futures_volatility_threshold_pct: float = 2.0  # skip cycle if KOSPI200 moves >2% from open
     futures_deadman_max_errors: int = 5     # consecutive errors before deadman triggers
     futures_deadman_cooldown_secs: int = 300  # cooldown seconds after deadman trigger

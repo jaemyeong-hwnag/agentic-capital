@@ -52,6 +52,8 @@ class FuturesSessionGuard(TradingPort):
         stop_loss_pct: float | None = None,
         max_leverage: float | None = None,
         position_size_pct: float | None = None,
+        orders_enabled: bool = True,
+        order_block_reason: str = "orders_disabled",
     ) -> None:
         self._inner = inner
         self._active_symbol: str | None = None
@@ -62,6 +64,8 @@ class FuturesSessionGuard(TradingPort):
         self._stop_loss_pct = stop_loss_pct        # e.g. 0.02 = 2%
         self._max_leverage = max_leverage           # e.g. 5.0 = 5x
         self._position_size_pct = position_size_pct  # e.g. 0.05 = 5%
+        self._orders_enabled = orders_enabled
+        self._order_block_reason = order_block_reason
 
     def _affordability_loss_pct(self) -> float:
         """Loss fraction used to decide whether one contract fits the capital budget."""
@@ -144,6 +148,25 @@ class FuturesSessionGuard(TradingPort):
         # Pass-through for non-futures markets
         if order.market not in (Market.KR_FUTURES, Market.KR_OPTIONS):
             return await self._inner.submit_order(order)
+
+        if not self._orders_enabled:
+            logger.warning(
+                "futures_guard_order_blocked",
+                reason=self._order_block_reason,
+                symbol=order.symbol,
+                side=order.side.value,
+                position_effect=order.position_effect,
+            )
+            return OrderResult(
+                order_id="",
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                filled_price=0.0,
+                status="rejected",
+                market=order.market,
+                metadata={"error": self._order_block_reason},
+            )
 
         # Daily loss halt: block ALL new opens if today's loss limit was breached
         if self._halt_date and order.position_effect == "open":
