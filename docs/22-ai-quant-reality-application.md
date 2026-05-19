@@ -118,6 +118,8 @@ AI는 자유롭게 결정하지만 모든 행동은 증거로 남는다.
 
 이 보정은 실전 주문 우회가 아니다. `kis_is_paper=True`이고 `futures_virtual_paper_fallback=True`인 경우에만 시뮬레이션 지속성을 위해 적용된다. 실전 모드에서는 브로커가 실제 제공하는 계약과 체결만 사용한다.
 
+실전 모드(`KIS_IS_PAPER=false`)는 기본적으로 read-only다. 실계좌 잔고, 포지션, 주문 가능 계약 조회는 수행하지만, `FUTURES_LIVE_ORDERS_ENABLED=true`가 명시되지 않으면 `FuturesSessionGuard`가 모든 선물 주문을 `live_orders_disabled`로 거절한다.
+
 ## 로드맵 보정
 
 | 단계 | 목표 |

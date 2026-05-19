@@ -92,6 +92,7 @@ KIS_APP_SECRET          ← 필수
 KIS_ACCOUNT_NO          ← 필수
 KIS_IS_PAPER=true       ← 모의투자
 INITIAL_CAPITAL=10000000
+FUTURES_LIVE_ORDERS_ENABLED=false  ← 실전 모드에서도 기본값은 주문 차단(read-only)
 ```
 
 ```bash
@@ -123,6 +124,7 @@ UPBIT_ACCESS_KEY        ← 국내 암호화폐
 UPBIT_SECRET_KEY
 ALPACA_API_KEY          ← 미국 주식 직접
 ALPACA_SECRET_KEY
-KIS_IS_PAPER=false      ← 실전 전환
+KIS_IS_PAPER=false      ← 실전 계좌 조회 전환
+FUTURES_LIVE_ORDERS_ENABLED=true   ← 실전 선물 주문 명시적 허용
 QDRANT_URL              ← 벡터 DB 확장
 ```
