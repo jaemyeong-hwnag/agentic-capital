@@ -715,6 +715,30 @@ class TestFuturesSessionGuard:
         inner.submit_order.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_affordability_gate_uses_real_available_budget(self):
+        """Live accounts with tiny available cash cannot be inflated by capital_limit."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=1_886_634, available=28_690, currency="KRW"
+        ))
+        inner.get_positions = AsyncMock(return_value=[])
+        order = Order(
+            symbol="A30606",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1.0,
+            price=1132.42,
+            multiplier=50_000.0,
+            market=Market.KR_FUTURES,
+            position_effect="open",
+        )
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000.0, stop_loss_pct=0.02)
+        result = await guard.submit_order(order)
+        assert result.status == "rejected"
+        assert "budget_28690" in result.metadata["error"]
+        inner.submit_order.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_max_qty_guard_with_price_and_multiplier(self):
         """Max qty guard caps contracts when price+multiplier are specified on order."""
         inner = _mock_inner()
@@ -729,11 +753,11 @@ class TestFuturesSessionGuard:
             market=Market.KR_FUTURES,
             position_effect="open",
         )
-        # capital_limit=10M, worst_per=1.9M → max_qty=5
+        # risk budget=min(capital_limit=10M, real_available=8M), worst_per=1.9M -> max_qty=4
         guard = FuturesSessionGuard(inner, capital_limit=10_000_000.0)
         await guard.submit_order(order)
         submitted = inner.submit_order.call_args[0][0]
-        assert submitted.quantity == 5.0
+        assert submitted.quantity == 4.0
 
     @pytest.mark.asyncio
     async def test_enforce_qty_by_position_closes_excess(self):
@@ -886,6 +910,20 @@ class TestFuturesSessionGuard:
         bal = await guard.get_balance()
         assert bal.total == 1_500_000
         assert bal.available == 1_000_000  # 1.5M - 500K loss
+
+    @pytest.mark.asyncio
+    async def test_get_balance_never_inflates_live_account(self):
+        """Capital limit must not make a small live account look larger."""
+        inner = _mock_inner()
+        inner.get_balance = AsyncMock(return_value=Balance(
+            total=1_886_634, available=28_690, currency="KRW"
+        ))
+        inner.get_positions = AsyncMock(return_value=[])
+        guard = FuturesSessionGuard(inner, capital_limit=5_000_000)
+
+        bal = await guard.get_balance()
+        assert bal.total == 1_886_634
+        assert bal.available == 28_690
 
     @pytest.mark.asyncio
     async def test_get_balance_no_cap_when_no_capital_limit(self):
@@ -1214,6 +1252,22 @@ class TestFuturesTools:
         result = await tool.ainvoke({})
         assert "A30606" in result
         assert "A01606" not in result
+
+    @pytest.mark.asyncio
+    async def test_get_futures_symbols_returns_error_when_none_fit_budget(self):
+        """Live accounts with too little available cash should not see any tradable futures."""
+        from agentic_capital.core.tools.futures_tools import build_futures_tools
+        trading = self._build_trading()
+        trading.get_balance = AsyncMock(return_value=Balance(
+            total=1_886_634, available=28_690, currency="KRW"
+        ))
+        trading.get_active_futures_contracts = AsyncMock(return_value=[
+            {"symbol": "A30606", "price": 1132.42, "volume": 0, "change_pct": 0.1, "expiry": "202606", "multiplier": 50_000},
+        ])
+        tools, _, _ = build_futures_tools(trading=trading, capital_limit=5_000_000)
+        tool = next(t for t in tools if t.name == "get_futures_symbols")
+        result = await tool.ainvoke({})
+        assert result == "ERR:no_affordable_contracts_found:budget_28690"
 
 
 # ── FuturesEngine (smoke tests) ───────────────────────────────────────────────

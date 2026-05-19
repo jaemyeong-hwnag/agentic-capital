@@ -73,6 +73,17 @@ class FuturesSessionGuard(TradingPort):
             return self._stop_loss_pct
         return 0.10
 
+    async def _risk_budget(self) -> float | None:
+        """Return the smaller of real available funds and simulation capital limit."""
+        try:
+            bal = await self.get_balance()
+            budget = min(bal.available, bal.total)
+            if self._capital_limit is not None:
+                budget = min(budget, self._capital_limit)
+            return max(0.0, budget)
+        except Exception:
+            return self._capital_limit
+
     @property
     def active_symbol(self) -> str | None:
         return self._active_symbol
@@ -355,20 +366,21 @@ class FuturesSessionGuard(TradingPort):
             and effective_price
             and order.multiplier
         ):
+            risk_budget = await self._risk_budget()
             worst_loss_1_contract = effective_price * self._affordability_loss_pct() * order.multiplier
-            if worst_loss_1_contract > self._capital_limit:
+            if risk_budget is not None and worst_loss_1_contract > risk_budget:
                 logger.warning(
                     "futures_guard_product_unaffordable",
                     symbol=order.symbol,
                     multiplier=order.multiplier,
                     loss_pct=self._affordability_loss_pct(),
                     worst_loss_1contract=round(worst_loss_1_contract, 0),
-                    capital_limit=self._capital_limit,
+                    risk_budget=round(risk_budget, 0),
                 )
                 return OrderResult(
                     order_id="", symbol=order.symbol, side=order.side,
                     quantity=0.0, filled_price=0.0, status="rejected", market=order.market,
-                    metadata={"error": f"unaffordable:worst_case_loss_{worst_loss_1_contract:.0f}>capital_{self._capital_limit:.0f}"},
+                    metadata={"error": f"unaffordable:worst_case_loss_{worst_loss_1_contract:.0f}>budget_{risk_budget:.0f}"},
                 )
 
         # Max quantity guard: cap contracts so bounded loss <= capital_limit
@@ -379,9 +391,10 @@ class FuturesSessionGuard(TradingPort):
             and effective_price
             and order.multiplier
         ):
+            risk_budget = await self._risk_budget()
             worst_loss_per_contract = effective_price * self._affordability_loss_pct() * order.multiplier
-            if worst_loss_per_contract > 0:
-                max_qty = max(1, int(self._capital_limit / worst_loss_per_contract))
+            if worst_loss_per_contract > 0 and risk_budget is not None:
+                max_qty = max(1, int(risk_budget / worst_loss_per_contract))
                 if order.quantity > max_qty:
                     logger.warning(
                         "futures_guard_qty_capped",
@@ -576,7 +589,9 @@ class FuturesSessionGuard(TradingPort):
         real = await self._inner.get_balance()
         if self._capital_limit is None:
             return real
-        # Remaining budget = capital_limit minus open unrealized losses
+        # Remaining budget = min(real account, simulation budget) minus open losses.
+        # Paper accounts are often oversized, but live accounts must never be inflated
+        # above their actual cash/equity.
         unrealized_loss = 0.0
         try:
             positions = await self._inner.get_positions()
@@ -585,10 +600,12 @@ class FuturesSessionGuard(TradingPort):
                     unrealized_loss += abs(p.unrealized_pnl)
         except Exception:
             pass
-        remaining = max(0.0, self._capital_limit - unrealized_loss)
+        capped_total = min(real.total, self._capital_limit)
+        remaining = max(0.0, capped_total - unrealized_loss)
+        available = min(real.available, remaining)
         return Balance(
-            total=self._capital_limit,
-            available=remaining,
+            total=capped_total,
+            available=available,
             currency=real.currency,
             daily_pnl=real.daily_pnl,
             daily_fee=real.daily_fee,

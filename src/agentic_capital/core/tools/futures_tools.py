@@ -180,12 +180,19 @@ def build_futures_tools(
             loss_pct = settings.futures_stop_loss_pct if settings.futures_stop_loss_pct > 0 else 0.10
             visible_contracts = contracts
             if capital_limit is not None:
+                risk_budget = capital_limit
+                try:
+                    balance = await trading.get_balance()
+                    risk_budget = min(risk_budget, balance.available, balance.total)
+                except Exception:
+                    pass
                 affordable = [
                     c for c in contracts
-                    if float(c.get("price") or 0) * loss_pct * float(c.get("multiplier") or 0) <= capital_limit
+                    if float(c.get("price") or 0) * loss_pct * float(c.get("multiplier") or 0) <= risk_budget
                 ]
-                if affordable:
-                    visible_contracts = affordable
+                if not affordable:
+                    return f"ERR:no_affordable_contracts_found:budget_{risk_budget:.0f}"
+                visible_contracts = affordable
             rows = [
                 [
                     c["symbol"],
