@@ -40,6 +40,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | M5.5 선물 단타 모드 | ✅ 완료 | FuturesEngine + FuturesSessionGuard + `--futures` 플래그 |
 | M6 Paper Trading + 비용 검증 | ⬚ 부분 구현 | 70% (비용 계측 시작, 리더보드/사후 ROI 필요) |
 | M7 실거래 | ⬚ 진행 가능 | KIS_IS_PAPER=false 설정으로 실전 전환 가능 |
+| M8 로컬 LLM 전환 | ⬚ 계획 수립 | 외부 quota 의존 제거, local eval/paper/live-readonly 단계 필요 |
 
 ---
 
@@ -314,12 +315,44 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 ---
 
+## M8: 로컬 LLM 전환
+
+> Gemini quota와 외부 LLM 장애에 의존하지 않고 1시간 단위 판단을 지속하기 위한 로컬 reasoning kernel.
+
+### 태스크
+
+| # | 태스크 | 산출물 | 상태 |
+|---|--------|--------|------|
+| 8.1 | LLM provider abstraction 정리 | Gemini/local/hybrid provider switch | ⬚ |
+| 8.2 | Local OpenAI-compatible adapter | Ollama/llama.cpp/vLLM/LM Studio 호환 | ⬚ |
+| 8.3 | tool calling/structured output 호환 | ReAct tool schema, JSON repair | ⬚ |
+| 8.4 | local eval harness | golden scenarios + QA metrics | ⬚ |
+| 8.5 | 학습/eval dataset exporter | DB 로그 -> JSONL/Parquet | ⬚ |
+| 8.6 | prompt-only/few-shot/SFT 단계 검증 | 모델별 품질 리포트 | ⬚ |
+| 8.7 | local paper 24h soak test | 무중단 paper run | ⬚ |
+| 8.8 | local live readonly shadow mode | 실계좌 조회 + 주문 없는 판단 기록 | ⬚ |
+| 8.9 | tiny-cap guarded live | 기존 주문 가드 유지한 소액 실전 | ⬚ |
+
+### 완료 기준
+
+- [ ] local eval QA pass_rate 95% 이상
+- [ ] 자본/보유수량/주문 가드 위반 0건
+- [ ] tool call schema 실패율 1% 미만
+- [ ] local paper 24h 무중단
+- [ ] local live readonly 24h 판단 기록 정상
+- [ ] provider/model/cost/latency가 DB에 기록됨
+
+상세 계획은 [23 - Local LLM Roadmap](23-local-llm-roadmap.md)을 따른다.
+
+---
+
 ## 마일스톤 의존성
 
 ```
 M1 ✅ ──→ M2 ✅ ──→ M3 ✅ ──→ M5 ✅ ──→ M6 ──→ M7
                 │                ↑
                 └──→ M4 ✅───────┘
+                         └──→ M8
 ```
 
 - M1 → M2: 프로젝트 구조 필요
@@ -328,6 +361,8 @@ M1 ✅ ──→ M2 ✅ ──→ M3 ✅ ──→ M5 ✅ ──→ M6 ──→
 - M3 + M4 → M5: 에이전트 + 통신 + 어댑터 합체
 - M5 → M6: 시뮬레이션 엔진 필요
 - M6 → M7: Paper Trading 검증 후 실거래
+- M4 + M5 + M6 → M8: LLMPort, ReAct tool loop, recorder/eval 로그 필요
+- M8 → M7 안정화: 외부 quota 없이 live-readonly/paper 운영 가능해야 실전 안정성 증가
 
 ---
 

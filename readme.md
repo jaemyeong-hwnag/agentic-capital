@@ -94,6 +94,7 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [20 - Milestones](docs/20-milestones.md) | Implementation roadmap (M1-M7) |
 | [21 - Design Validation](docs/21-design-validation.md) | Paper-based DB/dataset AI-friendliness audit |
 | [22 - AI Quant Reality Application](docs/22-ai-quant-reality-application.md) | Cost-aware realistic operating model |
+| [23 - Local LLM Roadmap](docs/23-local-llm-roadmap.md) | Local LLM migration milestones, training, QA, and live-readiness criteria |
 
 ## Key Papers
 
