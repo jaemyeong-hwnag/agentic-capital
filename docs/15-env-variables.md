@@ -15,6 +15,7 @@ LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_API_KEY=                 # 로컬 gateway 인증을 켠 경우에만 사용
 LOCAL_LLM_TIMEOUT_SECONDS=30
 LOCAL_LLM_TEMPERATURE=0.2
+LOCAL_LLM_SEND_NATIVE_TOOLS=false  # OpenAI native tools payload 전송 opt-in
 DOMAIN_LLM_FORGE_ROOT=/Users/tpirates/workspace-hjm/domain-llm-forge
 DOMAIN_LLM_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-llm-forge/.env
 DOMAIN_MODEL_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-model-forge/.env
@@ -84,6 +85,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_LLM_API_KEY` | 선택 | 로컬 gateway 인증이 있을 때만 사용. 공백이면 Authorization header 미전송 |
 | `LOCAL_LLM_TIMEOUT_SECONDS` | 선택 | 로컬 LLM/RAG 요청 timeout |
 | `LOCAL_LLM_TEMPERATURE` | 선택 | 로컬 chat completion temperature |
+| `LOCAL_LLM_SEND_NATIVE_TOOLS` | 선택 | 기본값 `false`. domain-llm-forge RAG Gateway처럼 OpenAI native tool payload를 받지 않는 서버에는 tool schema를 compact system prompt로만 전달한다. vLLM/llama-server 등 native tool calling을 검증한 서버에서만 `true`로 켠다 |
 | `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
 | `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
@@ -110,6 +112,7 @@ LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Gemini 기준선은 gemin
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
+LOCAL_LLM_SEND_NATIVE_TOOLS=false
 GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
@@ -141,6 +144,7 @@ LLM_PROVIDER=local      ← 로컬 sidecar 사용 시
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
+LOCAL_LLM_SEND_NATIVE_TOOLS=false
 GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수

@@ -39,8 +39,13 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 - `SIMULATION_ZERO_DECISION_MAX_CYCLES`: 연속 `decisions=0` cycle이 임계값 이상이면 자동 stop
 - `SIMULATION_MIN_CYCLE_SECONDS`: agent가 `next_cycle_seconds=0`을 반환해도 최소 sleep으로 clamp
 - `SIMULATION_STOP_WHEN_MARKET_CLOSED`: 켜져 있으면 장 마감 상태에서 0초 재시도 대신 stop
+- `KIS_IS_PAPER=true`에서 `submit_order`가 해외 현물 시장(`us_stock`, `hk_stock`, `cn_stock`, `jp_stock`, `vn_stock`)을 받으면 broker 호출 전에 `ERR:paper_no_overseas`로 중단한다.
 
 기본값은 zero-decision 5 cycles, minimum pacing 60 seconds다.
+
+로컬 ReAct loop는 기본적으로 OpenAI native tool payload를 전송하지 않는다.
+`LOCAL_LLM_SEND_NATIVE_TOOLS=false`일 때 tool 목록은 compact system prompt로 들어가며,
+서버가 native tool calling을 지원한다는 smoke/eval이 끝난 경우에만 `true`로 전환한다.
 
 ## Paper Shadow Gate
 

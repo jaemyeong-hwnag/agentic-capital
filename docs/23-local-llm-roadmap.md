@@ -72,6 +72,7 @@ Trading / MarketData
 - 메인 LangGraph ReAct loop와 futures ReAct loop는 `build_langchain_chat_model()`을 통해 `ChatGoogleGenerativeAI` 또는 `LocalOpenAICompatibleChatModel`을 선택한다.
 - `simulation_runs.llm_model`, `simulation_runs.embedding_model`, `simulation_runs.config.llm_provider`, `agent_cycles.economics_snapshot`에 provider/model metadata를 기록한다.
 - 로컬 provider는 OpenAI-compatible `/v1/chat/completions`와 `/v1/embeddings`를 사용하므로 `domain-llm-forge` RAG Gateway 또는 `llama-server` 뒤에 붙일 수 있다.
+- 기본 local ReAct tool calling은 OpenAI native `tools` payload를 보내지 않고, compact tool schema를 system prompt에 주입한다. `LOCAL_LLM_SEND_NATIVE_TOOLS=true`는 해당 서버가 native tool calling을 실제로 지원하는 경우에만 사용한다.
 - `scripts/run_local_finance_sidecar.sh`는 `domain-llm-forge/.env`와 `domain-model-forge/.env`를 값 출력 없이 source한 뒤 `finance_decision_model` RAG Gateway를 띄운다.
 
 ### M8.2 Tool Calling / Structured Output 호환
@@ -96,6 +97,9 @@ Trading / MarketData
 4. ReAct 실패 시 같은 prompt 무한 반복 금지
 5. tool call transcript를 agent_cycles.tool_sequence에 저장
 ```
+
+현재 구현은 1차 호환성 확보를 위해 description과 parameter schema를 축약해 prompt token을 줄이고,
+RAG Gateway가 거부하는 native `tools`/`tool_choice` 필드는 기본 전송하지 않는다.
 
 ### M8.3 Local Eval Harness
 
