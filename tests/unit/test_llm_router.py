@@ -378,6 +378,95 @@ async def test_local_finance_decision_pipeline_blocks_buy_over_risk_limit():
 
 
 @pytest.mark.asyncio
+async def test_local_finance_decision_pipeline_records_risk_guard_hard_fail_as_raw_failure():
+    async def collect_tool_results(payload):
+        return {
+            "get_balance": {"available": 1_000_000, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+            "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
+            "get_risk_limit": {"max_order_value": 1_000_000},
+            "search_rag": {
+                "evidence_ids": payload["evidence_ids"],
+                "evidence_count": len(payload["evidence"]),
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {
+                "query": "005930 매수?",
+                "queries": ["005930 매수?"],
+                "symbol": "005930",
+                "market": "kr_stock",
+                "route": "rag_and_fresh_quote",
+                "requires_fresh_data": True,
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_risk_limit"},
+                ],
+                "forbidden_tools": ["submit_order"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            return {
+                "action": "BUY",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "quantity": 1,
+                "required_tools": [
+                    "search_rag",
+                    "get_balance",
+                    "get_positions",
+                    "get_quote",
+                    "get_market_session",
+                    "get_risk_limit",
+                ],
+                "evidence_ids": ["risk_policy.md"],
+                "reason": "수익 보장 후보",
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {
+            "risk_flags": ["profit_guarantee"],
+            "hard_fail": True,
+            "explanation": "profit guarantee is forbidden",
+        }, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=(
+            [{"doc_id": "risk_policy.md", "text": "profit guarantees are forbidden"}],
+            {"model": "rag_search", "latency_ms": 1, "ok": True},
+        )),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-risk-guard",
+            user_question="005930 매수 수익 보장 가능?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True, "no_profit_guarantee": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["ok"] is False
+    assert result["record_type"] == "raw_model_failure"
+    assert result["record"]["failure_type"] == "risk_guard_hard_fail"
+    assert result["record"]["retrain_candidate"] is True
+    assert result["record"]["action"] == "BUY"
+    assert result["record"]["details"]["risk_flags"] == ["profit_guarantee"]
+    assert result["risk_flags"] == ["profit_guarantee"]
+    assert result["decision"]["action"] == "BUY"
+    assert result["record"]["evidence_ids"] == ["risk_policy.md"]
+
+
+@pytest.mark.asyncio
 async def test_call_finance_stage_parses_structured_gateway_repair_payload():
     class _Response:
         def raise_for_status(self):

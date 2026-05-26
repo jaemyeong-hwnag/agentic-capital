@@ -102,6 +102,9 @@ tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_tra
 
 위 조건 미달이면 주문 대신 `raw_model_failure` record를 만들고, `retrain_candidate=true`로 남겨 raw model failure 학습 루프에 넣는다.
 `NO_CONTEXT` action도 정상 shadow decision으로 세지 않고 `raw_model_failure`로 기록한다.
+`finance_risk_guard_model`이 `hard_fail=true`를 반환하면 action을 안전한 `REJECT`로 덮어
+shadow decision처럼 저장하지 않고, 원본 action과 `risk_flags`를 유지한
+`raw_model_failure(failure_type=risk_guard_hard_fail)`로 기록한다.
 
 오프라인 회귀 테스트:
 
@@ -123,6 +126,22 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `failure_type=trade_exceeds_risk_limit`
 - `retrain_candidate=true`
 - `evidence_ids` 유지
+- 주문 실행 없음
+
+## 2026-05-27 Risk Guard Hard-Fail Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 수익 보장성 `BUY` 후보를 반환하고,
+- `finance_risk_guard_model`이 `hard_fail=true`, `risk_flags=["profit_guarantee"]`를 반환하면,
+- runtime은 이를 `REJECT` shadow decision으로 변환하지 않는다.
+
+기대 record:
+
+- `failure_type=risk_guard_hard_fail`
+- 원본 `action=BUY` 유지
+- `risk_flags`와 `evidence_ids` 유지
+- `retrain_candidate=true`
 - 주문 실행 없음
 
 ## Security Notes

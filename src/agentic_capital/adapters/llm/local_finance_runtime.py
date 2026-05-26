@@ -444,12 +444,23 @@ async def run_local_finance_decision_pipeline(
         if risk_guard.get("hard_fail") is True:
             decision = {
                 **decision,
-                "action": "REJECT",
                 "risk_tags": sorted(set([*risk_flags, *decision.get("risk_tags", [])])),
                 "reason": f"risk_guard_hard_fail:{risk_guard.get('explanation', '')}",
             }
 
-        if _normalize_action(decision.get("action")) == "NO_CONTEXT":
+        if risk_guard.get("hard_fail") is True:
+            record = build_finance_shadow_failure_record(
+                FinanceShadowValidationError(
+                    "risk_guard_hard_fail",
+                    details={
+                        "risk_flags": risk_flags,
+                        "explanation": str(risk_guard.get("explanation") or ""),
+                    },
+                ),
+                decision,
+                tool_results=tool_results,
+            )
+        elif _normalize_action(decision.get("action")) == "NO_CONTEXT":
             record = build_finance_shadow_failure_record(
                 FinanceShadowValidationError("no_context"),
                 decision,
