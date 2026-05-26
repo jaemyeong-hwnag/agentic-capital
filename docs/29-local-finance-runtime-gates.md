@@ -29,7 +29,8 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 `BUY` 또는 `SELL`이 허용되는 경우:
 
 - `evidence_ids`가 비어 있지 않다.
-- 필요한 tool 결과 또는 `required_tools`가 명시되어 있다.
+- 필요한 tool 결과가 모두 존재한다.
+- `required_tools`만 있고 실제 tool result가 없으면 startup smoke와 paper shadow 모두 실패한다.
 
 ## Runtime Guards
 

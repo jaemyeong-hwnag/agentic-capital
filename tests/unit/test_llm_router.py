@@ -4,9 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentic_capital.adapters.llm import router
-from agentic_capital.adapters.llm import local_finance_runtime
 from agentic_capital import local_finance_smoke
+from agentic_capital.adapters.llm import local_finance_runtime, router
 
 
 def test_local_provider_names_enable_local_mode():
@@ -36,9 +35,9 @@ def test_router_uses_gemini_only_when_explicitly_configured():
 
 
 def test_router_rejects_unknown_provider_instead_of_falling_back_to_gemini():
-    with patch.object(router.settings, "llm_provider", "gemni"):
-        with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
-            router.build_langchain_chat_model()
+    with patch.object(router.settings, "llm_provider", "gemni"), \
+         pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
+        router.build_langchain_chat_model()
 
 
 def test_local_finance_health_accepts_expected_finance_model():
@@ -64,9 +63,9 @@ def test_local_finance_health_rejects_psychology_model_for_finance():
     with patch.object(local_finance_runtime.settings, "local_llm_base_url", "http://127.0.0.1:18501/v1"), \
          patch.object(local_finance_runtime.settings, "local_llm_model", "finance_decision_model"), \
          patch.object(local_finance_runtime.settings, "local_llm_expected_health_model", ""), \
-         patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.get", return_value=response):
-        with pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="model_category_mismatch"):
-            local_finance_runtime.check_local_finance_health()
+         patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.get", return_value=response), \
+         pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="model_category_mismatch"):
+        local_finance_runtime.check_local_finance_health()
 
 
 def test_finance_smoke_passes_safe_no_context_action():
@@ -92,6 +91,17 @@ def test_finance_smoke_rejects_buy_without_evidence_and_tools():
             "symbol": "005930",
             "evidence_ids": [],
             "required_tools": [],
+        })
+
+
+def test_finance_smoke_rejects_buy_with_fabricated_evidence_but_no_tool_results():
+    with pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="trade_missing_tool_results"):
+        local_finance_runtime.validate_finance_decision_payload({
+            "action": "BUY",
+            "symbol": "005930",
+            "quantity": 1,
+            "evidence_ids": ["ev-fabricated"],
+            "required_tools": ["get_balance", "get_positions", "get_quote", "get_market_session", "get_risk_limit", "search_rag"],
         })
 
 

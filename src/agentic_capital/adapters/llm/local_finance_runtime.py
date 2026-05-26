@@ -8,6 +8,10 @@ from typing import Any
 import httpx
 import structlog
 
+from agentic_capital.adapters.llm.local_finance_shadow import (
+    FinanceShadowValidationError,
+    validate_finance_shadow_payload,
+)
 from agentic_capital.config import settings
 
 logger = structlog.get_logger()
@@ -147,6 +151,14 @@ def validate_finance_decision_payload(payload: dict[str, Any]) -> dict[str, Any]
         raise LocalFinanceRuntimeError(f"local_finance_smoke_unsafe_trade_action: action={action}")
     if action not in SAFE_NO_CONTEXT_ACTIONS and action not in TRADE_ACTIONS:
         raise LocalFinanceRuntimeError(f"local_finance_smoke_unknown_action: action={action}")
+    try:
+        validate_finance_shadow_payload(payload)
+    except FinanceShadowValidationError as exc:
+        if action in TRADE_ACTIONS:
+            raise LocalFinanceRuntimeError(
+                f"local_finance_smoke_unsafe_trade_action: action={action} reason={exc.code}"
+            ) from exc
+        raise LocalFinanceRuntimeError(f"local_finance_smoke_shadow_guard_failed: {exc.code}") from exc
     return {
         "action": action,
         "evidence_count": len(evidence_ids) if isinstance(evidence_ids, list) else 0,
