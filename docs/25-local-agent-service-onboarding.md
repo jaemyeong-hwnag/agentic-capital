@@ -25,12 +25,12 @@
 
 | 영역 | 현재 상태 | 판단 |
 |---|---|---|
-| Config | `config.py`에 `LOCAL_LLM_PROVIDER`, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL` 없음 | provider switch 명세/구현 필요 |
-| LLMPort | `LLMPort.generate/embed`는 존재 | agent class 일부에서만 사용 |
-| Main ReAct loop | `graph/workflow.py`가 `ChatGoogleGenerativeAI`를 직접 생성 | LLMPort 우회. 비용 폭발의 핵심 경로 |
-| Futures ReAct loop | `simulation/futures_engine.py`도 `ChatGoogleGenerativeAI` 직접 생성 | futures도 동일하게 provider router 필요 |
-| SimulationEngine | `_init_adapters()`가 `GeminiLLMAdapter()` 고정 | local/hybrid 선택 불가 |
-| Recorder | `llm_model="gemini-2.5-flash"`, `embedding_model="text-embedding-004"` 고정 | 재현성/비용 분석에 provider metadata 부족 |
+| Config | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_EMBEDDING_MODEL` 지원 | `.env`에서 Gemini/local 전환 가능 |
+| LLMPort | `LLMPort.generate/embed`와 `LocalOpenAICompatibleAdapter` 존재 | domain-llm-forge RAG Gateway 또는 llama-server 연결 가능 |
+| Main ReAct loop | `graph/workflow.py`가 router를 통해 LangChain chat model 생성 | Gemini 직접 고정 제거 |
+| Futures ReAct loop | `simulation/futures_engine.py`가 router를 통해 LangChain chat model 생성 | 모의 선물 루프도 local provider 사용 가능 |
+| SimulationEngine | `_init_adapters()`가 `build_llm_adapter()` 사용 | local/gemini 선택 가능 |
+| Recorder | `llm_model`, `embedding_model`, provider metadata를 runtime 설정에서 기록 | 재현성/비용 분석 가능 |
 | Agent cycles | tool sequence, reasoning, economics 저장 | 학습/eval 원천으로 적합 |
 | Memory/RAG | JSONB embedding + cosine search 중심 | 운영 RAG에는 metadata/hybrid/rerank/small-to-big 부족 |
 | Dataset exporter | 없음 | DB 로그를 JSONL/Parquet로 내보내는 명세/구현 필요 |
@@ -324,15 +324,21 @@ quality_loop:
 환경변수는 실제 값은 `.env`, placeholder는 `.env.example`에만 둔다.
 
 ```env
-LOCAL_LLM_PROVIDER=local
+LLM_PROVIDER=local
+# LOCAL_LLM_PROVIDER=local  # 호환 alias
 LOCAL_LLM_BASE_URL=http://127.0.0.1:11434/v1
 LOCAL_LLM_MODEL=qwen3:1.7b
 LOCAL_EMBEDDING_MODEL=bge-m3
-LOCAL_LLM_FALLBACK_ENABLED=false
-LOCAL_LLM_HEALTH_TIMEOUT_SECONDS=10
-LOCAL_LLM_MAX_CONTEXT_TOKENS=32768
-LOCAL_LLM_COST_PER_HOUR_KRW=0
+LOCAL_LLM_API_KEY=
+LOCAL_LLM_TIMEOUT_SECONDS=30
+LOCAL_LLM_TEMPERATURE=0.2
+DOMAIN_LLM_FORGE_ROOT=/Users/tpirates/workspace-hjm/domain-llm-forge
+DOMAIN_LLM_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-llm-forge/.env
+DOMAIN_MODEL_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-model-forge/.env
+RAG_SERVICE=finance_decision_model
 ```
+
+`scripts/run_local_finance_sidecar.sh`는 위 env 파일들을 값 출력 없이 source하고 `domain-llm-forge/run_rag.sh <service> serve`를 실행한다.
 
 ## Records Requirement
 
@@ -370,17 +376,11 @@ LOCAL_LLM_COST_PER_HOUR_KRW=0
 현재 구조에서 반드시 바꿔야 하는 호출 경로:
 
 ```text
-Current:
-  SimulationEngine -> GeminiLLMAdapter
-  graph/workflow.py -> ChatGoogleGenerativeAI direct
-  futures_engine.py -> ChatGoogleGenerativeAI direct
-
-Required:
+Implemented:
   SimulationEngine/FuturesEngine
     -> LLMRouter
-      -> LocalOpenAICompatibleChatAdapter
-      -> LocalEmbeddingAdapter
-      -> GeminiAdapter only when policy allows
+      -> LocalOpenAICompatibleAdapter / LocalOpenAICompatibleChatModel
+      -> GeminiLLMAdapter / ChatGoogleGenerativeAI only when LLM_PROVIDER=gemini
 ```
 
 핵심 원칙:

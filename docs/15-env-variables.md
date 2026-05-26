@@ -8,6 +8,17 @@
 # ============================================================
 GEMINI_API_KEY=                    # Google AI Studio API Key (Gemini 2.5 Flash)
 OPENAI_API_KEY=                    # OpenAI API Key (text-embedding-3-large) — 임베딩용, 선택
+LLM_PROVIDER=gemini                # gemini | local. LOCAL_LLM_PROVIDER alias도 지원
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_EMBEDDING_MODEL=finance_embedding_model
+LOCAL_LLM_API_KEY=                 # 로컬 gateway 인증을 켠 경우에만 사용
+LOCAL_LLM_TIMEOUT_SECONDS=30
+LOCAL_LLM_TEMPERATURE=0.2
+DOMAIN_LLM_FORGE_ROOT=/Users/tpirates/workspace-hjm/domain-llm-forge
+DOMAIN_LLM_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-llm-forge/.env
+DOMAIN_MODEL_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-model-forge/.env
+RAG_SERVICE=finance_decision_model
 
 # ============================================================
 # Database
@@ -65,7 +76,18 @@ LANGCHAIN_PROJECT=agentic-capital
 
 | 변수 | 필수 | 설명 |
 |------|------|------|
-| `GEMINI_API_KEY` | **필수** | LLM 핵심 — 없으면 에이전트 동작 불가 |
+| `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때 에이전트 reasoning provider |
+| `LLM_PROVIDER` | **필수** | `gemini` 또는 `local`. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
+| `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL |
+| `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
+| `LOCAL_EMBEDDING_MODEL` | local 모드 필수 | 기본값 `finance_embedding_model` |
+| `LOCAL_LLM_API_KEY` | 선택 | 로컬 gateway 인증이 있을 때만 사용. 공백이면 Authorization header 미전송 |
+| `LOCAL_LLM_TIMEOUT_SECONDS` | 선택 | 로컬 LLM/RAG 요청 timeout |
+| `LOCAL_LLM_TEMPERATURE` | 선택 | 로컬 chat completion temperature |
+| `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
+| `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
+| `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
+| `RAG_SERVICE` | sidecar 실행 시 필수 | 기본값 `finance_decision_model` |
 | `DATABASE_URL` | **필수** | 메인 DB — 모든 기록 저장 |
 | `REDIS_URL` | **필수** | Working Memory, 감정 상태, 이벤트 |
 | `KIS_APP_KEY` | **필수** | 1차 트레이딩 어댑터 — 국내 주식 + 선물 |
@@ -84,7 +106,11 @@ LANGCHAIN_PROJECT=agentic-capital
 
 ### 주식 모드 (기본)
 ```
-GEMINI_API_KEY          ← 필수
+LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Gemini 기준선은 gemini
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_EMBEDDING_MODEL=finance_embedding_model
+GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수
@@ -99,9 +125,23 @@ FUTURES_LIVE_ORDERS_ENABLED=false  ← 실전 모드에서도 기본값은 주�
 python -m agentic_capital.main
 ```
 
+로컬 finance RAG Gateway를 사용할 때는 별도 터미널에서 다음처럼 sidecar를 먼저 띄운다. 실제 secret 값은
+`/Users/tpirates/workspace-hjm/domain-llm-forge/.env` 또는
+`/Users/tpirates/workspace-hjm/domain-model-forge/.env`에서 해당 프로젝트가 직접 읽게 두고, 이 저장소에는 값 자체를 복사하지 않는다.
+
+```bash
+bash scripts/run_local_finance_sidecar.sh
+```
+
+이 스크립트는 기본적으로 `finance_decision_model` RAG Gateway를 `127.0.0.1:8080`에 띄운다. 포트를 바꾸려면 `PORT=18000 bash scripts/run_local_finance_sidecar.sh`처럼 실행하고, 앱 쪽은 `LOCAL_LLM_BASE_URL=http://127.0.0.1:18000/v1`로 맞춘다.
+
 ### 선물 단타 모드
 ```
-GEMINI_API_KEY          ← 필수
+LLM_PROVIDER=local      ← 로컬 sidecar 사용 시
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_EMBEDDING_MODEL=finance_embedding_model
+GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수

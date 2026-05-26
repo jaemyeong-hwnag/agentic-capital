@@ -59,12 +59,20 @@ Trading / MarketData
 
 | 작업 | 산출물 | 완료 기준 |
 |------|--------|----------|
-| `LLMProvider` 설정 추가 | `LOCAL_LLM_PROVIDER`, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL` | `.env`에서 Gemini/local 전환 가능 |
-| LangGraph용 local chat model adapter | `LocalChatModel` 또는 OpenAI-compatible wrapper | `create_react_agent`에서 동일 tool 목록 사용 |
+| `LLMProvider` 설정 추가 | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL` | `.env`에서 Gemini/local 전환 가능 |
+| LangGraph용 local chat model adapter | `LocalOpenAICompatibleChatModel` | `create_react_agent`에서 동일 tool 목록 사용 |
 | provider health check | `/health` 또는 sample completion | 시작 전 모델 서버 미기동 감지 |
 | provider fallback 정책 | local 우선, Gemini fallback 또는 반대 | fallback 여부가 DB에 기록됨 |
 
 주의: fallback은 실전에서 조용히 provider를 바꾸면 판단 재현성이 깨진다. `simulation_runs.config`와 `agent_cycles.economics_snapshot`에 provider/model을 반드시 남긴다.
+
+현재 런타임 상태:
+
+- `SimulationEngine`의 `LLMPort` 생성은 `adapters/llm/router.py`를 통해 `GeminiLLMAdapter` 또는 `LocalOpenAICompatibleAdapter`를 선택한다.
+- 메인 LangGraph ReAct loop와 futures ReAct loop는 `build_langchain_chat_model()`을 통해 `ChatGoogleGenerativeAI` 또는 `LocalOpenAICompatibleChatModel`을 선택한다.
+- `simulation_runs.llm_model`, `simulation_runs.embedding_model`, `simulation_runs.config.llm_provider`, `agent_cycles.economics_snapshot`에 provider/model metadata를 기록한다.
+- 로컬 provider는 OpenAI-compatible `/v1/chat/completions`와 `/v1/embeddings`를 사용하므로 `domain-llm-forge` RAG Gateway 또는 `llama-server` 뒤에 붙일 수 있다.
+- `scripts/run_local_finance_sidecar.sh`는 `domain-llm-forge/.env`와 `domain-model-forge/.env`를 값 출력 없이 source한 뒤 `finance_decision_model` RAG Gateway를 띄운다.
 
 ### M8.2 Tool Calling / Structured Output 호환
 
