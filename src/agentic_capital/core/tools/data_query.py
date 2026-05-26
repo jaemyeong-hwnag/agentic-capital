@@ -58,6 +58,210 @@ def _market_key(value: Any) -> str:
     return str(raw or "").lower()
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_finance_tool_names(tool_plan_payload: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    candidates = [
+        tool_plan_payload.get("tool_plan"),
+        tool_plan_payload.get("required_tools"),
+        tool_plan_payload.get("tools"),
+        tool_plan_payload.get("tool_calls"),
+        tool_plan_payload.get("calls"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            names.add(candidate.strip())
+        elif isinstance(candidate, list):
+            for item in candidate:
+                if isinstance(item, str):
+                    names.add(item.strip())
+                elif isinstance(item, dict):
+                    name = item.get("tool") or item.get("name") or item.get("function")
+                    if isinstance(name, str):
+                        names.add(name.strip())
+        elif isinstance(candidate, dict):
+            names.update(_extract_finance_tool_names(candidate))
+    return {name for name in names if name}
+
+
+def _symbol_from_plan(tool_plan_payload: dict[str, Any], fallback: str = "") -> str:
+    for key in ("symbol", "ticker"):
+        value = tool_plan_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for value in tool_plan_payload.values():
+        if isinstance(value, dict):
+            symbol = _symbol_from_plan(value, fallback="")
+            if symbol:
+                return symbol
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    symbol = _symbol_from_plan(item, fallback="")
+                    if symbol:
+                        return symbol
+    return fallback
+
+
+def _market_session_from_open_markets(open_markets: list[str] | None, market: str) -> dict[str, Any]:
+    market_l = _market_key(market or "kr_stock")
+    open_values = {str(item).upper() for item in (open_markets or [])}
+    exchange = "KRX" if market_l.startswith("kr_") else "NYSE"
+    is_open = exchange in open_values or market_l.upper() in open_values
+    return {
+        "market": market_l or "kr_stock",
+        "exchange": exchange,
+        "state": "regular" if is_open else "closed",
+        "session": "regular" if is_open else "closed",
+        "is_open": is_open,
+        "regular_session": is_open,
+        "open_markets": sorted(open_values),
+    }
+
+
+def _serialise_position(position: Any) -> dict[str, Any]:
+    return {
+        "symbol": str(getattr(position, "symbol", "")),
+        "quantity": float(getattr(position, "quantity", 0) or 0),
+        "avg_price": float(getattr(position, "avg_price", 0) or 0),
+        "current_price": float(getattr(position, "current_price", 0) or 0),
+        "unrealized_pnl": float(getattr(position, "unrealized_pnl", 0) or 0),
+        "unrealized_pnl_pct": float(getattr(position, "unrealized_pnl_pct", 0) or 0),
+        "market": _market_key(getattr(position, "market", "")),
+        "currency": str(getattr(position, "currency", "")),
+    }
+
+
+async def collect_finance_decision_tool_results(
+    *,
+    tool_plan_payload: dict[str, Any],
+    trading: Any = None,
+    market_data: Any = None,
+    symbol: str = "",
+    market: str = "kr_stock",
+    open_markets: list[str] | None = None,
+    capital_limit: float | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    evidence_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Collect read-only structured tool results for the local finance sidecar.
+
+    This is separate from LangGraph ReAct text tools. It gives the finance
+    decision model deterministic JSON: balance, positions, quote, market
+    session, risk limit, and RAG evidence. It never submits orders.
+    """
+    requested = _extract_finance_tool_names(tool_plan_payload)
+    forbidden = sorted(requested & {"submit_order", "submit_live_order", "place_order", "execute_trade"})
+    required = {"get_balance", "get_positions", "get_quote", "get_market_session", "get_risk_limit", "search_rag"}
+    if not requested:
+        requested = set(required)
+    requested |= required
+
+    resolved_symbol = _symbol_from_plan(tool_plan_payload, fallback=symbol)
+    results: dict[str, Any] = {}
+    errors: list[dict[str, Any]] = []
+
+    if forbidden:
+        errors.append({"tool": "tool_plan", "error": "order_tool_blocked_in_shadow", "tools": forbidden})
+
+    balance_payload: dict[str, Any] = {}
+    if "get_balance" in requested:
+        if not trading:
+            errors.append({"tool": "get_balance", "error": "no_trading"})
+        else:
+            try:
+                balance = await trading.get_balance()
+                total = float(getattr(balance, "total", 0) or 0)
+                available = float(getattr(balance, "available", 0) or 0)
+                if capital_limit is not None:
+                    total = min(total, float(capital_limit))
+                    available = min(available, float(capital_limit))
+                balance_payload = {
+                    "total": total,
+                    "available": available,
+                    "currency": str(getattr(balance, "currency", "")),
+                    "daily_pnl": float(getattr(balance, "daily_pnl", 0) or 0),
+                    "daily_fee": float(getattr(balance, "daily_fee", 0) or 0),
+                }
+                results["get_balance"] = balance_payload
+            except Exception as exc:
+                errors.append({"tool": "get_balance", "error": type(exc).__name__})
+
+    if "get_positions" in requested:
+        if not trading:
+            errors.append({"tool": "get_positions", "error": "no_trading"})
+        else:
+            try:
+                results["get_positions"] = [_serialise_position(pos) for pos in await trading.get_positions()]
+            except Exception as exc:
+                errors.append({"tool": "get_positions", "error": type(exc).__name__})
+
+    if "get_quote" in requested:
+        if not market_data:
+            errors.append({"tool": "get_quote", "error": "no_market_data"})
+        elif not resolved_symbol:
+            errors.append({"tool": "get_quote", "error": "missing_symbol"})
+        else:
+            try:
+                quote = await market_data.get_quote(resolved_symbol)
+                results["get_quote"] = {
+                    "symbol": str(getattr(quote, "symbol", resolved_symbol)),
+                    "price": float(getattr(quote, "price", 0) or 0),
+                    "bid": _float_or_none(getattr(quote, "bid", None)),
+                    "ask": _float_or_none(getattr(quote, "ask", None)),
+                    "volume": _float_or_none(getattr(quote, "volume", None)),
+                    "market": str(getattr(quote, "market", market)),
+                    "currency": str(getattr(quote, "currency", "")),
+                }
+            except Exception as exc:
+                errors.append({"tool": "get_quote", "error": type(exc).__name__, "symbol": resolved_symbol})
+
+    if "get_market_session" in requested:
+        results["get_market_session"] = _market_session_from_open_markets(open_markets, market)
+
+    if "get_risk_limit" in requested:
+        available = float(balance_payload.get("available") or 0)
+        if capital_limit is not None:
+            max_order_value = min(available or float(capital_limit), float(capital_limit))
+        else:
+            max_order_value = available
+        results["get_risk_limit"] = {
+            "max_order_value": max_order_value,
+            "max_trade_value": max_order_value,
+            "capital_limit": float(capital_limit) if capital_limit is not None else None,
+            "paper_trade_only": True,
+        }
+
+    if "search_rag" in requested:
+        ev = evidence or []
+        ids = evidence_ids or [
+            str(item.get("id") or item.get("evidence_id") or item.get("doc_id") or item.get("chunk_id") or idx)
+            for idx, item in enumerate(ev)
+            if isinstance(item, dict)
+        ]
+        results["search_rag"] = {
+            "evidence_ids": ids,
+            "evidence_count": len(ev),
+            "evidence": ev[:6],
+        }
+
+    if errors:
+        results["_errors"] = errors
+    results["_meta"] = {
+        "requested_tools": sorted(requested),
+        "blocked_order_tools": forbidden,
+        "symbol": resolved_symbol,
+        "market": _market_key(market or "kr_stock"),
+    }
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Shared position policy — set by CEO/risk_manager, enforced in submit_order
 # Persists for the duration of the simulation run (reset on restart)
@@ -75,7 +279,9 @@ def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
     import json
     import math
     from datetime import datetime as _dt
+
     from sqlalchemy import text
+
     return {
         "__builtins__": _SAFE_BUILTINS,
         "trading": trading,
@@ -106,7 +312,7 @@ def _build_dynamic_tool(
 
     namespace = _make_tool_namespace(trading, market_data, recorder)
     try:
-        exec(code, namespace)  # noqa: S102
+        exec(code, namespace)
     except Exception as exc:
         logger.warning("dynamic_tool_exec_failed", name=name, error=str(exc))
         return None
@@ -675,23 +881,24 @@ def build_agent_tools(
           POST     = after-hours (16:00-20:00 ET / 05:00-09:00 KST next day)
           CLOSED   = closed (weekend, holiday, or outside all sessions)
         """
-        import yfinance as yf
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        KST = ZoneInfo("Asia/Seoul")
-        ET = ZoneInfo("America/New_York")  # DST-aware
+        import yfinance as yf
 
-        # yfinance raw → normalized state
-        # PREPRE = before pre-market opens (01:00-04:00 ET) → not tradeable
-        # POSTPOST = very late after-hours → treat same as POST
+        kst = ZoneInfo("Asia/Seoul")
+        et = ZoneInfo("America/New_York")  # DST-aware
+
+        # yfinance raw -> normalized state
+        # PREPRE = before pre-market opens (01:00-04:00 ET) -> not tradeable
+        # POSTPOST = very late after-hours -> treat same as POST
         def _normalize(raw: str) -> str:
             return {"PREPRE": "CLOSED", "POSTPOST": "POST"}.get(raw, raw)
 
         checks = [
-            ("KRX",    "^KS11",  KST),
-            ("NASDAQ", "^IXIC",  ET),
-            ("NYSE",   "^GSPC",  ET),
+            ("KRX",    "^KS11",  kst),
+            ("NASDAQ", "^IXIC",  et),
+            ("NYSE",   "^GSPC",  et),
         ]
         results = []
         for market, sym, tz in checks:
@@ -813,7 +1020,7 @@ def build_agent_tools(
         # Quick exec test in sandbox to catch runtime errors
         test_ns = _make_tool_namespace(trading, market_data, recorder)
         try:
-            exec(code, test_ns)  # noqa: S102
+            exec(code, test_ns)
         except Exception as exc:
             return f"ERR:exec:{exc}"
 

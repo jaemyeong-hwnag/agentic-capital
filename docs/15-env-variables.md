@@ -81,11 +81,15 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LLM_PROVIDER` | **필수** | 기본값은 `local`. `gemini` 또는 `local` 계열만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
 | `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL |
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
+| `LOCAL_AGENT_LLM_MODEL` | local 모드 선택 | CEO/Analyst 등 일반 ReAct agent용 로컬 모델. 기본값 `agentic_capital_react_model`. Trader finance 전용 flow는 `LOCAL_LLM_MODEL`의 finance sidecar 모델들을 단계별로 호출한다 |
 | `LOCAL_EMBEDDING_MODEL` | local 모드 필수 | 기본값 `finance_embedding_model` |
 | `LOCAL_LLM_API_KEY` | 선택 | 로컬 gateway 인증이 있을 때만 사용. 공백이면 Authorization header 미전송 |
 | `LOCAL_LLM_TIMEOUT_SECONDS` | 선택 | 로컬 LLM/RAG 요청 timeout |
 | `LOCAL_LLM_TEMPERATURE` | 선택 | 로컬 chat completion temperature |
 | `LOCAL_LLM_SEND_NATIVE_TOOLS` | 선택 | 기본값 `false`. domain-llm-forge RAG Gateway처럼 OpenAI native tool payload를 받지 않는 서버에는 tool schema를 compact system prompt로만 전달한다. vLLM/llama-server 등 native tool calling을 검증한 서버에서만 `true`로 켠다 |
+| `LOCAL_FINANCE_PIPELINE_ENABLED` | 선택 | 기본값 `true`. local provider + finance model + Trader cycle이면 ReAct 대신 `rag_query -> tool_plan -> tool 결과 -> decision -> risk_guard` 전용 flow 사용 |
+| `LOCAL_FINANCE_DEFAULT_SYMBOL` | 선택 | finance sidecar payload에 symbol이 없을 때 쓰는 기본 종목. 기본값 `005930` |
+| `LOCAL_FINANCE_RISK_PER_TRADE_PCT` | 선택 | finance sidecar용 risk metadata 기본값. 실제 주문 권한은 부여하지 않음 |
 | `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
 | `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |

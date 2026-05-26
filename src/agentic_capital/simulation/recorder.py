@@ -426,6 +426,91 @@ class SimulationRecorder:
         await self._session.flush()
         return soft_context
 
+    async def record_finance_paper_shadow_decision(
+        self,
+        agent_id: uuid.UUID,
+        record: dict[str, Any],
+        *,
+        cycle_number: int | None = None,
+        sidecar_latency_ms: int | float | None = None,
+        evidence_ids: list[str] | None = None,
+        risk_flags: list[str] | None = None,
+    ) -> None:
+        """Persist a local finance paper-shadow decision without creating trades."""
+        action = str(record.get("action") or "")
+        symbol = str(record.get("symbol") or "")
+        evidence = evidence_ids if evidence_ids is not None else record.get("evidence_ids", [])
+        risks = risk_flags if risk_flags is not None else record.get("risk_flags", [])
+        self._session.add(
+            AgentDecisionModel(
+                agent_id=agent_id,
+                simulation_id=self._simulation_id,
+                decision_type="finance_paper_shadow_decision",
+                action=f"{action} {symbol}".strip(),
+                reasoning=str(record.get("reason") or record.get("failure_type") or "finance paper shadow decision"),
+                confidence=float(record.get("confidence") or 0.0),
+                personality_snapshot={},
+                emotion_snapshot={},
+                context_snapshot={
+                    "cycle_number": cycle_number,
+                    "record": record,
+                    "sidecar_latency_ms": sidecar_latency_ms,
+                    "evidence_ids": evidence,
+                    "risk_flags": risks,
+                },
+                outcome={
+                    "record_type": "finance_paper_shadow_decision",
+                    "paper_trade_only": True,
+                    "would_submit_order": False,
+                    "evidence_ids": evidence,
+                    "risk_flags": risks,
+                },
+            )
+        )
+        await self._session.flush()
+
+    async def record_raw_model_failure(
+        self,
+        agent_id: uuid.UUID,
+        failure: dict[str, Any],
+        *,
+        cycle_number: int | None = None,
+        sidecar_latency_ms: int | float | None = None,
+        evidence_ids: list[str] | None = None,
+        risk_flags: list[str] | None = None,
+    ) -> None:
+        """Persist raw finance model failure as eval/retraining material."""
+        failure_type = str(failure.get("failure_type") or "unknown_raw_model_failure")
+        evidence = evidence_ids if evidence_ids is not None else failure.get("evidence_ids", [])
+        risks = risk_flags if risk_flags is not None else failure.get("risk_flags", [])
+        self._session.add(
+            AgentDecisionModel(
+                agent_id=agent_id,
+                simulation_id=self._simulation_id,
+                decision_type="raw_model_failure",
+                action=str(failure.get("action") or "NO_CONTEXT"),
+                reasoning=f"finance local sidecar failure:{failure_type}",
+                confidence=0.0,
+                personality_snapshot={},
+                emotion_snapshot={},
+                context_snapshot={
+                    "cycle_number": cycle_number,
+                    "failure": failure,
+                    "sidecar_latency_ms": sidecar_latency_ms,
+                    "evidence_ids": evidence,
+                    "risk_flags": risks,
+                },
+                outcome={
+                    "record_type": "raw_model_failure",
+                    "failure_type": failure_type,
+                    "retrain_candidate": bool(failure.get("retrain_candidate")),
+                    "evidence_ids": evidence,
+                    "risk_flags": risks,
+                },
+            )
+        )
+        await self._session.flush()
+
     async def record_agent_message(self, message: AgentMessage) -> None:
         """Record LACP protocol message to PostgreSQL for permanent storage."""
         record = AgentMessageModel(

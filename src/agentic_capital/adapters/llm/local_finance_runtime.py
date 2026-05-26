@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -21,6 +20,9 @@ from agentic_capital.adapters.llm.local_psychology_runtime import (
     build_finance_soft_context,
 )
 from agentic_capital.config import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = structlog.get_logger()
 
@@ -183,6 +185,287 @@ def validate_finance_decision_payload(payload: dict[str, Any]) -> dict[str, Any]
         "evidence_count": len(evidence_ids) if isinstance(evidence_ids, list) else 0,
         "required_tools_count": len(required_tools) if isinstance(required_tools, list) else 0,
     }
+
+
+def _chat_url() -> str:
+    return _join_url(settings.local_llm_base_url, "/chat/completions")
+
+
+def _coerce_json_payload(content: str, *, fallback_action: str = "NO_CONTEXT") -> dict[str, Any]:
+    parsed = _extract_json_object(content)
+    if parsed is not None:
+        return parsed
+    lowered = content.lower()
+    if "no_context" in lowered or "근거 부족" in lowered:
+        return {"action": fallback_action, "reason": content[:500]}
+    return {"action": fallback_action, "reason": content[:500], "parse_error": "invalid_json"}
+
+
+async def _call_finance_stage(
+    *,
+    model: str,
+    payload: dict[str, Any],
+    system: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Call one local finance model stage through the OpenAI-compatible gateway."""
+    started = time.perf_counter()
+    request_payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)},
+        ],
+        "temperature": 0.0,
+    }
+    async with httpx.AsyncClient(timeout=settings.local_llm_timeout_seconds) as client:
+        response = await client.post(_chat_url(), headers=_auth_headers(), json=request_payload)
+        response.raise_for_status()
+        content = _extract_content(response.json())
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    parsed = _coerce_json_payload(content)
+    return parsed, {"model": model, "latency_ms": latency_ms, "ok": True}
+
+
+def _extract_queries(rag_query_payload: dict[str, Any], fallback_query: str) -> list[str]:
+    value = rag_query_payload.get("queries") or rag_query_payload.get("query")
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        queries = [str(item).strip() for item in value if str(item).strip()]
+        if queries:
+            return queries
+    return [fallback_query]
+
+
+def _extract_evidence_ids(evidence: list[dict[str, Any]]) -> list[str]:
+    ids: list[str] = []
+    for idx, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            continue
+        evidence_id = item.get("id") or item.get("evidence_id") or item.get("doc_id") or item.get("chunk_id")
+        ids.append(str(evidence_id or f"rag-{idx}"))
+    return ids
+
+
+async def _search_rag(queries: list[str], *, top_k: int = 6) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Search the finance RAG gateway. Search failure is evidence, not a crash."""
+    started = time.perf_counter()
+    search_url = _join_url(_gateway_root(settings.local_llm_base_url), "/search")
+    evidence: list[dict[str, Any]] = []
+    errors: list[str] = []
+    async with httpx.AsyncClient(timeout=settings.local_llm_timeout_seconds) as client:
+        for query in queries:
+            try:
+                response = await client.post(
+                    search_url,
+                    headers=_auth_headers(),
+                    json={"query": query, "top_k": top_k},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                results = payload.get("results") if isinstance(payload, dict) else None
+                if isinstance(results, list):
+                    evidence.extend(item for item in results if isinstance(item, dict))
+                elif isinstance(payload, list):
+                    evidence.extend(item for item in payload if isinstance(item, dict))
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+    return evidence, {
+        "model": "rag_search",
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+        "ok": not errors,
+        "errors": errors,
+    }
+
+
+def _risk_flags(risk_guard_payload: dict[str, Any]) -> list[str]:
+    flags = risk_guard_payload.get("risk_flags") or risk_guard_payload.get("flags") or []
+    if isinstance(flags, str):
+        return [flags]
+    if isinstance(flags, list):
+        return [str(flag) for flag in flags if str(flag)]
+    return []
+
+
+def _normalise_decision_payload(
+    decision_payload: dict[str, Any],
+    *,
+    tool_results: dict[str, Any],
+    evidence_ids: list[str],
+) -> dict[str, Any]:
+    action = _normalize_action(
+        decision_payload.get("action") or decision_payload.get("decision") or decision_payload.get("status")
+    )
+    if not action:
+        reason = str(decision_payload.get("reason") or decision_payload.get("message") or "").lower()
+        action = "NO_CONTEXT" if "no_context" in reason or "근거 부족" in reason else "WAIT"
+    payload = {
+        **decision_payload,
+        "action": action,
+        "evidence_ids": decision_payload.get("evidence_ids") or evidence_ids,
+        "required_tools": decision_payload.get("required_tools")
+        or decision_payload.get("tools")
+        or list(tool_results.keys()),
+        "tool_results": tool_results,
+    }
+    return payload
+
+
+async def run_local_finance_decision_pipeline(
+    *,
+    request_id: str,
+    user_question: str,
+    agent_state: dict[str, Any],
+    required_safety: dict[str, Any],
+    collect_tool_results: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Run the finance sidecar as a staged decision client.
+
+    This keeps the local finance models on their intended contracts:
+    query routing, tool planning, read-only tool collection, decision, and risk guard.
+    The function returns a paper-shadow record or a raw-model-failure record; it
+    never submits orders.
+    """
+    started = time.perf_counter()
+    sidecar_calls: list[dict[str, Any]] = []
+    base_payload = {
+        "request_id": request_id,
+        "user_question": user_question,
+        "agent_state": agent_state,
+        "required_safety": required_safety,
+    }
+
+    try:
+        rag_query, meta = await _call_finance_stage(
+            model=FINANCE_RAG_QUERY_MODEL,
+            payload=base_payload,
+            system="Return only JSON with queries, filters, route, requires_fresh_data, no_context_if_empty.",
+        )
+        sidecar_calls.append(meta)
+
+        queries = _extract_queries(rag_query, user_question)
+        evidence, search_meta = await _search_rag(queries)
+        sidecar_calls.append(search_meta)
+        evidence_ids = _extract_evidence_ids(evidence)
+
+        planner_payload = {
+            **base_payload,
+            "rag_query": rag_query,
+            "evidence": evidence,
+            "evidence_ids": evidence_ids,
+        }
+        tool_plan, meta = await _call_finance_stage(
+            model=FINANCE_TOOL_PLANNER_MODEL,
+            payload=planner_payload,
+            system=(
+                "Return only JSON with tool_plan and stop_if_missing. "
+                "Do not include live order submission tools in paper/shadow mode."
+            ),
+        )
+        sidecar_calls.append(meta)
+
+        tool_results = await collect_tool_results({
+            "tool_plan": tool_plan,
+            "rag_query": rag_query,
+            "evidence": evidence,
+            "evidence_ids": evidence_ids,
+        })
+        if not isinstance(tool_results, dict):
+            tool_results = {"_errors": [{"tool": "collector", "error": "invalid_tool_results"}]}
+
+        decision_payload = {
+            **base_payload,
+            "rag_query": rag_query,
+            "tool_plan": tool_plan,
+            "tool_results": tool_results,
+            "evidence": evidence,
+            "evidence_ids": evidence_ids,
+        }
+        decision, meta = await _call_finance_stage(
+            model=FINANCE_DECISION_MODEL,
+            payload=decision_payload,
+            system=(
+                "Return only JSON. Output action must be BUY, SELL, HOLD, WAIT, OBSERVE, "
+                "REJECT, CALL_TOOL, or NO_CONTEXT. If balance, positions, quote, risk limit, "
+                "or evidence is insufficient, do not return BUY or SELL."
+            ),
+        )
+        sidecar_calls.append(meta)
+        decision = _normalise_decision_payload(decision, tool_results=tool_results, evidence_ids=evidence_ids)
+
+        risk_guard, meta = await _call_finance_stage(
+            model=FINANCE_RISK_GUARD_MODEL,
+            payload={**decision_payload, "decision": decision},
+            system=(
+                "Return only JSON with risk_flags, hard_fail, explanation. "
+                "Hard fail profit guarantees, unsupported latest-market claims, or live orders without permission."
+            ),
+        )
+        sidecar_calls.append(meta)
+        risk_flags = _risk_flags(risk_guard)
+        if risk_guard.get("hard_fail") is True:
+            decision = {
+                **decision,
+                "action": "REJECT",
+                "risk_tags": sorted(set([*risk_flags, *decision.get("risk_tags", [])])),
+                "reason": f"risk_guard_hard_fail:{risk_guard.get('explanation', '')}",
+            }
+
+        if _normalize_action(decision.get("action")) == "NO_CONTEXT":
+            record = build_finance_shadow_failure_record(
+                FinanceShadowValidationError("no_context"),
+                decision,
+                tool_results=tool_results,
+            )
+        else:
+            try:
+                record = build_finance_shadow_record(decision, tool_results=tool_results)
+            except FinanceShadowValidationError as exc:
+                record = build_finance_shadow_failure_record(exc, decision, tool_results=tool_results)
+
+        return {
+            "ok": record.get("record_type") != "raw_model_failure",
+            "request_id": request_id,
+            "record": record,
+            "record_type": record.get("record_type"),
+            "decision": decision,
+            "risk_guard": risk_guard,
+            "rag_query": rag_query,
+            "tool_plan": tool_plan,
+            "tool_results": tool_results,
+            "evidence": evidence,
+            "evidence_ids": evidence_ids,
+            "risk_flags": risk_flags,
+            "sidecar_calls": sidecar_calls,
+            "sidecar_latency_ms": int((time.perf_counter() - started) * 1000),
+        }
+    except Exception as exc:
+        error = FinanceShadowValidationError("sidecar_pipeline_failed", details={"stage_error": type(exc).__name__})
+        failure_payload = {
+            "action": "NO_CONTEXT",
+            "symbol": str(agent_state.get("symbol") or ""),
+            "market": str(agent_state.get("market") or ""),
+            "reason": f"sidecar_pipeline_failed:{type(exc).__name__}",
+        }
+        record = build_finance_shadow_failure_record(error, failure_payload, tool_results={})
+        logger.warning("local_finance_sidecar_pipeline_failed", error=type(exc).__name__)
+        return {
+            "ok": False,
+            "request_id": request_id,
+            "record": record,
+            "record_type": "raw_model_failure",
+            "decision": failure_payload,
+            "risk_guard": {},
+            "rag_query": {},
+            "tool_plan": {},
+            "tool_results": {},
+            "evidence": [],
+            "evidence_ids": [],
+            "risk_flags": [],
+            "sidecar_calls": sidecar_calls,
+            "sidecar_latency_ms": int((time.perf_counter() - started) * 1000),
+            "errors": [str(exc)],
+        }
 
 
 def run_local_finance_smoke() -> dict[str, Any]:

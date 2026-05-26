@@ -8,6 +8,7 @@ The only constraint: capital. The only goal: make money.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +16,8 @@ import structlog
 from langgraph.prebuilt import create_react_agent
 
 from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_run_metadata
-from agentic_capital.core.tools.data_query import build_agent_tools
+from agentic_capital.config import settings
+from agentic_capital.core.tools.data_query import build_agent_tools, collect_finance_decision_tool_results
 from agentic_capital.graph.nodes import record_cycle
 
 if TYPE_CHECKING:
@@ -173,6 +175,226 @@ def _extract_psychology_context(decisions: list[dict]) -> dict | None:
     return None
 
 
+def _should_use_local_finance_flow(agent: BaseAgent) -> bool:
+    """Route Trader cycles to the finance sidecar when local finance LLM is active."""
+    from agentic_capital.adapters.llm.router import is_local_llm_enabled
+
+    agent_class = type(agent).__name__
+    model = settings.local_llm_model.strip().lower()
+    return (
+        bool(settings.local_finance_pipeline_enabled)
+        and is_local_llm_enabled()
+        and "trader" in agent_class.lower()
+        and model.startswith("finance_")
+    )
+
+
+def _finance_cycle_prompt(agent: BaseAgent, cycle_number: int, symbols: list[str] | None) -> str:
+    symbol_text = ",".join(symbols or []) if symbols else ""
+    return (
+        f"cycle:{cycle_number} finance paper-shadow decision. "
+        f"agent:{agent.name}. symbols:{symbol_text or 'unspecified'}. "
+        "Use evidence, balance, positions, quote, market session, and risk limit before any trade action."
+    )
+
+
+async def _run_local_finance_agent_cycle(
+    agent: BaseAgent,
+    cycle_number: int,
+    *,
+    trading: Any = None,
+    market_data: Any = None,
+    symbols: list[str] | None = None,
+    open_markets: list[str] | None = None,
+    recorder: Any = None,
+    capital_limit: float | None = None,
+) -> dict[str, Any]:
+    """Run Trader through the finance-specific sidecar flow instead of ReAct."""
+    from datetime import datetime
+
+    from agentic_capital.adapters.llm.local_finance_runtime import run_local_finance_decision_pipeline
+
+    cycle_started_at = datetime.now()
+    primary_symbol = (symbols or [settings.local_finance_default_symbol])[0]
+    agent_state = {
+        "deployment_mode": "paper" if settings.kis_is_paper else "shadow",
+        "live_order_enabled": False,
+        "account_id": "paper" if settings.kis_is_paper else "shadow",
+        "agent_id": str(agent.agent_id),
+        "agent_name": agent.name,
+        "symbol": primary_symbol,
+        "symbols": symbols or [primary_symbol],
+        "market": "kr_stock",
+        "open_markets": open_markets or [],
+        "capital_limit": capital_limit,
+        "risk_per_trade_pct": settings.local_finance_risk_per_trade_pct,
+    }
+    required_safety = {
+        "no_profit_guarantee": True,
+        "no_live_order_without_permission": True,
+        "require_evidence_ids": True,
+        "stop_on_missing_context": True,
+        "paper_trade_only": True,
+    }
+
+    async def _collect_tool_results(payload: dict[str, Any]) -> dict[str, Any]:
+        return await collect_finance_decision_tool_results(
+            tool_plan_payload=payload.get("tool_plan") if isinstance(payload.get("tool_plan"), dict) else payload,
+            trading=trading,
+            market_data=market_data,
+            symbol=primary_symbol,
+            market="kr_stock",
+            open_markets=open_markets,
+            capital_limit=capital_limit,
+            evidence=payload.get("evidence") if isinstance(payload.get("evidence"), list) else [],
+            evidence_ids=payload.get("evidence_ids") if isinstance(payload.get("evidence_ids"), list) else [],
+        )
+
+    errors: list[str] = []
+    result = await run_local_finance_decision_pipeline(
+        request_id=f"{agent.agent_id}:{cycle_number}",
+        user_question=_finance_cycle_prompt(agent, cycle_number, symbols),
+        agent_state=agent_state,
+        required_safety=required_safety,
+        collect_tool_results=_collect_tool_results,
+    )
+    if result.get("errors"):
+        errors.extend(str(error) for error in result["errors"])
+
+    record = result.get("record") if isinstance(result.get("record"), dict) else {}
+    record_type = str(result.get("record_type") or record.get("record_type") or "")
+    action = str(result.get("decision", {}).get("action") or record.get("action") or "")
+    risk_flags = result.get("risk_flags") if isinstance(result.get("risk_flags"), list) else []
+    evidence_ids = result.get("evidence_ids") if isinstance(result.get("evidence_ids"), list) else []
+    sidecar_latency_ms = result.get("sidecar_latency_ms")
+
+    all_decisions: list[dict[str, Any]] = []
+    if record_type == "finance_paper_shadow_decision" and action.upper() != "NO_CONTEXT":
+        all_decisions.append({
+            "type": "finance_paper_shadow_decision",
+            "action": action,
+            "symbol": record.get("symbol") or primary_symbol,
+            "reason": result.get("decision", {}).get("reason", ""),
+            "confidence": result.get("decision", {}).get("confidence", 0.0),
+            "evidence_ids": evidence_ids,
+            "risk_flags": risk_flags,
+        })
+
+    await record_cycle(
+        agent=agent,
+        cycle_number=cycle_number,
+        decisions=[],
+        messages=[],
+        recorder=recorder,
+    )
+
+    cycle_completed_at = datetime.now()
+    next_cycle_seconds = max(int(settings.simulation_min_cycle_seconds), 1)
+    tool_results = result.get("tool_results") if isinstance(result.get("tool_results"), dict) else {}
+    tool_seq = [
+        {"t": name, "in": "", "out": json.dumps(value, ensure_ascii=False, default=str)[:300]}
+        for name, value in tool_results.items()
+        if not name.startswith("_")
+    ]
+    reasoning = json.dumps(
+        {
+            "record_type": record_type,
+            "action": action,
+            "failure_type": record.get("failure_type"),
+            "risk_flags": risk_flags,
+            "evidence_ids": evidence_ids,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    emotion_snap = {
+        "V": round(agent.emotion.valence, 2),
+        "AR": round(agent.emotion.arousal, 2),
+        "D": round(agent.emotion.dominance, 2),
+        "ST": round(agent.emotion.stress, 2),
+        "CF": round(agent.emotion.confidence, 2),
+    }
+    economics_snapshot = {
+        **llm_run_metadata(),
+        "finance_record_type": record_type,
+        "sidecar_latency_ms": sidecar_latency_ms,
+        "evidence_ids": evidence_ids,
+        "risk_flags": risk_flags,
+        "sidecar_calls": result.get("sidecar_calls", []),
+    }
+    if recorder:
+        try:
+            if record_type == "finance_paper_shadow_decision":
+                await recorder.record_finance_paper_shadow_decision(
+                    agent_id=agent.agent_id,
+                    record=record,
+                    cycle_number=cycle_number,
+                    sidecar_latency_ms=sidecar_latency_ms,
+                    evidence_ids=evidence_ids,
+                    risk_flags=risk_flags,
+                )
+            else:
+                await recorder.record_raw_model_failure(
+                    agent_id=agent.agent_id,
+                    failure=record,
+                    cycle_number=cycle_number,
+                    sidecar_latency_ms=sidecar_latency_ms,
+                    evidence_ids=evidence_ids,
+                    risk_flags=risk_flags,
+                )
+            await recorder.record_agent_cycle(
+                agent_id=agent.agent_id,
+                agent_name=agent.name,
+                cycle_number=cycle_number,
+                tool_sequence=tool_seq,
+                llm_reasoning=reasoning,
+                emotion_snapshot=emotion_snap,
+                economics_snapshot=economics_snapshot,
+                started_at=cycle_started_at,
+                completed_at=cycle_completed_at,
+                decisions_count=len(all_decisions),
+                errors_count=len(errors),
+                next_cycle_seconds=next_cycle_seconds,
+            )
+            await recorder.commit()
+        except Exception:
+            logger.warning("local_finance_cycle_record_failed", agent=agent.name)
+
+    logger.info(
+        "local_finance_agent_cycle_complete",
+        agent=agent.name,
+        cycle=cycle_number,
+        record_type=record_type,
+        action=action,
+        decisions=len(all_decisions),
+        errors=len(errors),
+        sidecar_latency_ms=sidecar_latency_ms,
+    )
+    return {
+        "agent_id": str(agent.agent_id),
+        "agent_name": agent.name,
+        "cycle_number": cycle_number,
+        "decisions": all_decisions,
+        "messages_to_send": [],
+        "errors": errors,
+        "next_cycle_seconds": next_cycle_seconds,
+        "finance_record": record,
+        "finance_record_type": record_type,
+        "finance_no_context": record_type == "raw_model_failure" or action.upper() == "NO_CONTEXT",
+        "sidecar_latency_ms": sidecar_latency_ms,
+        "evidence_ids": evidence_ids,
+        "risk_flags": risk_flags,
+        "emotion": {
+            "valence": agent.emotion.valence,
+            "arousal": agent.emotion.arousal,
+            "dominance": agent.emotion.dominance,
+            "stress": agent.emotion.stress,
+            "confidence": agent.emotion.confidence,
+        },
+    }
+
+
 async def run_agent_cycle(
     agent: BaseAgent,
     cycle_number: int,
@@ -197,6 +419,18 @@ async def run_agent_cycle(
     from langchain_core.messages import HumanMessage
 
     from agentic_capital.core.tools.data_query import _build_dynamic_tool
+
+    if _should_use_local_finance_flow(agent):
+        return await _run_local_finance_agent_cycle(
+            agent,
+            cycle_number,
+            trading=trading,
+            market_data=market_data,
+            symbols=symbols,
+            open_markets=open_markets,
+            recorder=recorder,
+            capital_limit=capital_limit,
+        )
 
     # Load AI-created tools from DB and build StructuredTool instances
     preloaded: list = []

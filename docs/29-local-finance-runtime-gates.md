@@ -53,6 +53,12 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 `agentic-capital`이 질문, 계좌 상태, tool 결과를 sidecar에 보낸 뒤 받은 decision payload는
 `agentic_capital.adapters.llm.local_finance_shadow`로 통과시킨다.
 
+관심사 분리:
+
+- `domain-llm-forge`: finance 모델/RAG sidecar 자체를 제공한다. GGUF, RAG index, eval report, service spec은 이 프로젝트의 책임이다.
+- `agentic-capital`: paper trading 실행 전후로 finance sidecar를 올바른 순서로 호출하고, broker/account/market read-only 결과를 구조화해서 넘기며, shadow decision과 raw failure를 DB에 기록한다.
+- `agentic-capital`은 finance 모델을 일반 ReAct agent LLM처럼 쓰지 않는다. Trader cycle에서 `LOCAL_FINANCE_PIPELINE_ENABLED=true`, `LOCAL_LLM_MODEL=finance_*`, local provider이면 finance 전용 flow로 분기한다.
+
 필수 순서:
 
 1. `finance_rag_query_model`: 질문을 `query`, `symbol`, `market`, `route`, `requires_fresh_data`로 정규화
@@ -60,6 +66,25 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 3. `finance_decision_model`: `BUY | SELL | HOLD | WAIT | OBSERVE | REJECT | CALL_TOOL` 중 하나 반환
 4. `finance_risk_guard_model`: 보장 수익, live 권한 없는 주문, 근거 없는 매매 차단
 5. shadow gate: 주문 실행 없이 `finance_paper_shadow_decision` 또는 `raw_model_failure` record 생성
+
+`agentic-capital` runtime 구현 위치:
+
+- `src/agentic_capital/graph/workflow.py`: Trader cycle을 finance 전용 flow로 분기한다.
+- `src/agentic_capital/adapters/llm/local_finance_runtime.py`: rag query, RAG search, tool planner, decision, risk guard sidecar client를 실행한다.
+- `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다.
+- `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.
+- `src/agentic_capital/simulation/engine.py`: zero-decision guard 실행 전에 finance `no_context`/raw failure가 기록됐는지 로그로 드러낸다.
+
+read-only tool result schema:
+
+- `get_balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`
+- `get_positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`, `current_price`, PnL, `market`, `currency`
+- `get_quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
+- `get_market_session`: `state`, `session`, `is_open`, `regular_session`, `open_markets`
+- `get_risk_limit`: `max_order_value`, `max_trade_value`, `capital_limit`, `paper_trade_only`
+- `search_rag`: `evidence_ids`, `evidence_count`, 상위 evidence
+
+tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_trade` 같은 주문 tool을 요청하면 collector는 실행하지 않고 `_errors`에 `order_tool_blocked_in_shadow`를 남긴다.
 
 `BUY` 또는 `SELL`이 shadow record로만 허용되는 조건:
 
@@ -71,11 +96,12 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - reason/final answer에 수익 보장 표현이 없다.
 
 위 조건 미달이면 주문 대신 `raw_model_failure` record를 만들고, `retrain_candidate=true`로 남겨 raw model failure 학습 루프에 넣는다.
+`NO_CONTEXT` action도 정상 shadow decision으로 세지 않고 `raw_model_failure`로 기록한다.
 
 오프라인 회귀 테스트:
 
 ```bash
-pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py
+pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tests/unit/test_agent_tools.py tests/unit/test_graph.py tests/unit/test_recorder.py
 ```
 
 ## Security Notes

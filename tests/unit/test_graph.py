@@ -224,7 +224,8 @@ class TestRunAgentCycle:
         mock_agent = MagicMock()
         mock_agent.ainvoke = AsyncMock(return_value=self._mock_react_result())
 
-        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+        with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", False), \
+             patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
              patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
             result = await run_agent_cycle(
                 trader, cycle_number=1,
@@ -233,6 +234,62 @@ class TestRunAgentCycle:
             )
 
         assert result["agent_name"] == "Trader"
+
+    @pytest.mark.asyncio
+    async def test_local_finance_trader_uses_sidecar_pipeline(self):
+        trading = _make_trading()
+        market_data = _make_market_data()
+        trader = TraderAgent(
+            profile=_make_profile("Trader"),
+            personality=create_random_personality(42),
+            llm=_make_llm(),
+            trading=trading,
+        )
+        recorder = _make_recorder()
+        recorder.record_finance_paper_shadow_decision = AsyncMock()
+        recorder.record_raw_model_failure = AsyncMock()
+        recorder.record_agent_cycle = AsyncMock()
+
+        pipeline_result = {
+            "record_type": "raw_model_failure",
+            "record": {
+                "record_type": "raw_model_failure",
+                "failure_type": "call_tool_missing_required_tools",
+                "action": "NO_CONTEXT",
+                "evidence_ids": [],
+            },
+            "decision": {"action": "NO_CONTEXT", "reason": "근거 부족"},
+            "tool_results": {"get_balance": {"available": 1000000}},
+            "evidence_ids": [],
+            "risk_flags": ["missing_context"],
+            "sidecar_latency_ms": 12,
+            "sidecar_calls": [],
+        }
+
+        with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
+             patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
+             patch("agentic_capital.adapters.llm.router.settings.llm_provider", "local"), \
+             patch("agentic_capital.graph.workflow.create_react_agent") as mock_react, \
+             patch(
+                 "agentic_capital.adapters.llm.local_finance_runtime.run_local_finance_decision_pipeline",
+                 AsyncMock(return_value=pipeline_result),
+             ) as mock_pipeline:
+            result = await run_agent_cycle(
+                trader,
+                cycle_number=1,
+                trading=trading,
+                market_data=market_data,
+                symbols=["005930"],
+                open_markets=["KRX"],
+                recorder=recorder,
+                capital_limit=1_000_000,
+            )
+
+        mock_react.assert_not_called()
+        mock_pipeline.assert_awaited_once()
+        recorder.record_raw_model_failure.assert_awaited_once()
+        assert result["finance_no_context"] is True
+        assert result["decisions"] == []
 
     @pytest.mark.asyncio
     async def test_handles_react_failure_gracefully(self):

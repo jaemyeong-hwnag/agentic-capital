@@ -373,6 +373,57 @@ class TestSimulationRecorder:
         assert decision.action == "context_only"
 
     @pytest.mark.asyncio
+    async def test_record_finance_paper_shadow_decision(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+
+        await recorder.record_finance_paper_shadow_decision(
+            agent_id=uuid.uuid4(),
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "WAIT",
+                "symbol": "005930",
+                "evidence_ids": ["ev-1"],
+                "risk_flags": ["paper"],
+                "confidence": 0.4,
+            },
+            cycle_number=3,
+            sidecar_latency_ms=42,
+            evidence_ids=["ev-1"],
+            risk_flags=["paper"],
+        )
+
+        decision = recorder._session.add.call_args.args[0]
+        assert isinstance(decision, AgentDecisionModel)
+        assert decision.decision_type == "finance_paper_shadow_decision"
+        assert decision.context_snapshot["sidecar_latency_ms"] == 42
+        assert decision.outcome["would_submit_order"] is False
+
+    @pytest.mark.asyncio
+    async def test_record_raw_model_failure(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+
+        await recorder.record_raw_model_failure(
+            agent_id=uuid.uuid4(),
+            failure={
+                "record_type": "raw_model_failure",
+                "failure_type": "no_context",
+                "action": "NO_CONTEXT",
+                "evidence_ids": [],
+                "retrain_candidate": True,
+            },
+            cycle_number=4,
+            sidecar_latency_ms=99,
+        )
+
+        decision = recorder._session.add.call_args.args[0]
+        assert isinstance(decision, AgentDecisionModel)
+        assert decision.decision_type == "raw_model_failure"
+        assert decision.outcome["failure_type"] == "no_context"
+        assert decision.context_snapshot["sidecar_latency_ms"] == 99
+
+    @pytest.mark.asyncio
     async def test_commit(self):
         recorder = self._make_recorder()
         await recorder.commit()

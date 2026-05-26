@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentic_capital.core.tools.data_query import build_agent_tools
+from agentic_capital.core.tools.data_query import build_agent_tools, collect_finance_decision_tool_results
 
 
 def _make_trading():
@@ -35,8 +35,47 @@ def _make_trading():
 
 def _make_market_data(price: float = 70_000.0):
     market_data = MagicMock()
-    market_data.get_quote = AsyncMock(return_value=MagicMock(price=price))
+    market_data.get_quote = AsyncMock(return_value=MagicMock(
+        symbol="005930",
+        price=price,
+        bid=price - 10,
+        ask=price + 10,
+        volume=100000,
+        market="kr_stock",
+        currency="KRW",
+    ))
     return market_data
+
+
+class TestFinanceDecisionToolCollector:
+    @pytest.mark.asyncio
+    async def test_collects_structured_readonly_payload_for_sidecar(self):
+        result = await collect_finance_decision_tool_results(
+            tool_plan_payload={
+                "tool_plan": [
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote", "symbol": "005930"},
+                    {"tool": "submit_order"},
+                ],
+            },
+            trading=_make_trading(),
+            market_data=_make_market_data(),
+            symbol="005930",
+            market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000,
+            evidence=[{"id": "ev-1", "text": "risk limit policy"}],
+            evidence_ids=["ev-1"],
+        )
+
+        assert result["get_balance"]["available"] == 5_000_000
+        assert result["get_positions"][0]["symbol"] == "005930"
+        assert result["get_quote"]["price"] == 70_000
+        assert result["get_market_session"]["state"] == "regular"
+        assert result["get_risk_limit"]["max_order_value"] == 5_000_000
+        assert result["search_rag"]["evidence_ids"] == ["ev-1"]
+        assert result["_errors"][0]["error"] == "order_tool_blocked_in_shadow"
 
 
 class TestBuildAgentTools:
@@ -233,7 +272,7 @@ class TestBuildAgentTools:
 
     @pytest.mark.asyncio
     async def test_get_market_status_tool(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "get_market_status")
 
@@ -247,14 +286,14 @@ class TestBuildAgentTools:
         assert "KRX" in result
         assert "NASDAQ" in result
         assert "NYSE" in result
-        # POSTPOST is normalized → POST (not tradeable extended hours)
+        # POSTPOST is normalized to POST (not tradeable extended hours)
         assert "POST" in result
         assert "POSTPOST" not in result
 
     @pytest.mark.asyncio
     async def test_get_market_status_prepre_normalized(self):
         """PREPRE (before 04:00 ET) must be normalized to CLOSED."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
         tools, _, _, _ = build_agent_tools()
         tool = next(t for t in tools if t.name == "get_market_status")
 
@@ -274,7 +313,7 @@ class TestBuildAgentTools:
         trading = _make_trading()  # available=8M
         tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=5_000_000)
         tool = next(t for t in tools if t.name == "submit_order")
-        # 100 shares × 70,000 = 7,000,000 > capital_limit 5,000,000
+        # 100 shares x 70,000 = 7,000,000 > capital_limit 5,000,000
         result = await tool.coroutine(
             symbol="005930", side="buy", quantity=100, price=70000.0, market="kr_stock"
         )
@@ -288,7 +327,7 @@ class TestBuildAgentTools:
         trading = _make_trading()  # available=8M
         tools, _, _, _ = build_agent_tools(trading=trading, capital_limit=10_000_000)
         tool = next(t for t in tools if t.name == "submit_order")
-        # 10 shares × 70,000 = 700,000 < capital_limit 10,000,000
+        # 10 shares x 70,000 = 700,000 < capital_limit 10,000,000
         result = await tool.coroutine(
             symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
         )
@@ -443,7 +482,7 @@ class TestBuildAgentTools:
         tools, _, _, _ = build_agent_tools(trading=trading, agent_name="Trader-X")
         submit_tool = next(t for t in tools if t.name == "submit_order")
 
-        # 100 × 70000 = 7_000_000 — exceeds 20% policy but system allows it
+        # 100 x 70000 = 7_000_000; exceeds 20% policy but system allows it
         result = await submit_tool.coroutine(
             symbol="005930", side="buy", quantity=100, price=70000.0, market="kr_stock"
         )
@@ -462,7 +501,7 @@ class TestBuildAgentTools:
         await set_tool.coroutine(max_per_trade_pct=0.20)  # max 1_600_000
 
         submit_tool = next(t for t in tools if t.name == "submit_order")
-        # 10 × 70000 = 700_000 — allowed regardless of policy
+        # 10 x 70000 = 700_000; allowed regardless of policy
         result = await submit_tool.coroutine(
             symbol="005930", side="buy", quantity=10, price=70000.0, market="kr_stock"
         )

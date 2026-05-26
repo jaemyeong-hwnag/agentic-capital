@@ -6,14 +6,16 @@ agent code can stay provider-agnostic.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from agentic_capital.config import settings
-from agentic_capital.ports.llm import LLMPort
 
 logger = structlog.get_logger()
+
+if TYPE_CHECKING:
+    from agentic_capital.ports.llm import LLMPort
 
 
 LOCAL_PROVIDER_NAMES = {"local", "rag", "local_openai", "domain_llm_forge"}
@@ -47,9 +49,10 @@ def build_langchain_chat_model() -> Any:
     if is_local_llm_enabled():
         from agentic_capital.adapters.llm.local_openai import LocalOpenAICompatibleChatModel
 
+        model = settings.local_agent_llm_model.strip() or settings.local_llm_model
         return LocalOpenAICompatibleChatModel(
             base_url=settings.local_llm_base_url,
-            model=settings.local_llm_model,
+            model=model,
             api_key=settings.local_llm_api_key,
             timeout_seconds=settings.local_llm_timeout_seconds,
             temperature=settings.local_llm_temperature,
@@ -73,6 +76,7 @@ def llm_run_metadata() -> dict[str, Any]:
         return {
             "llm_provider": active_llm_provider(),
             "llm_model": settings.local_llm_model,
+            "agent_llm_model": settings.local_agent_llm_model,
             "embedding_model": settings.local_embedding_model,
             "llm_base_url": settings.local_llm_base_url,
         }

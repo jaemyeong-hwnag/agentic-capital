@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )  # gemini | local
     local_llm_base_url: str = "http://127.0.0.1:8080/v1"
     local_llm_model: str = "finance_decision_model"
+    local_agent_llm_model: str = "agentic_capital_react_model"
     local_embedding_model: str = "finance_embedding_model"
     local_llm_api_key: str = ""
     local_llm_timeout_seconds: float = 30.0
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
     local_llm_health_timeout_seconds: float = 5.0
     local_finance_smoke_enabled: bool = True
     local_finance_smoke_timeout_seconds: float = 30.0
+    local_finance_pipeline_enabled: bool = True
+    local_finance_default_symbol: str = "005930"
+    local_finance_risk_per_trade_pct: float = 0.05
     local_psychology_base_url: str = "http://127.0.0.1:19400/v1"
     local_psychology_model: str = "psychology_model_suite"
     local_psychology_expected_health_model: str = ""

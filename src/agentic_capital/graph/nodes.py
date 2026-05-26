@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 PSYCHOLOGY_DECISION_TYPES = {"psychology", "psychology_context", "psychology_evaluation"}
+FINANCE_RECORD_DECISION_TYPES = {"finance_paper_shadow_decision", "raw_model_failure"}
 
 
 async def record_cycle(
@@ -61,6 +62,24 @@ async def record_cycle(
                         source=str(d.get("source") or "psychology_model_suite"),
                         cycle_number=cycle_number,
                     )
+                continue
+
+            if str(decision_type) in FINANCE_RECORD_DECISION_TYPES:
+                await recorder.record_decision(
+                    agent_id=agent_id,
+                    personality=agent.personality,
+                    emotion=agent.emotion,
+                    decision_type=str(decision_type),
+                    action=d.get("action", "WAIT"),
+                    reasoning=d.get("reason", d.get("failure_type", "")),
+                    confidence=float(d.get("confidence", 0.5)),
+                    context_snapshot=d,
+                    outcome={
+                        "record_type": decision_type,
+                        "paper_trade_only": True,
+                        "would_submit_order": False,
+                    },
+                )
                 continue
 
             if decision_type in ("trade", "BUY", "SELL", "HOLD", "buy", "sell", "hold") or (

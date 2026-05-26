@@ -266,6 +266,7 @@ class SimulationEngine:
         delays = [r.get("next_cycle_seconds", 0) for r in cycle_results if r]
         requested_delay = min(delays) if delays else 0
         total_decisions = sum(len(r.get("decisions", [])) for r in cycle_results)
+        self._log_finance_failures_before_guards(cycle_results)
         next_delay = self._apply_cycle_guards(requested_delay=requested_delay, total_decisions=total_decisions)
 
         logger.info(
@@ -278,6 +279,27 @@ class SimulationEngine:
         )
 
         return next_delay
+
+    def _log_finance_failures_before_guards(self, cycle_results: list[dict]) -> None:
+        """Surface no-context finance failures before zero-decision stopping logic."""
+        failures = [
+            {
+                "agent": result.get("agent_name"),
+                "failure_type": (result.get("finance_record") or {}).get("failure_type"),
+                "evidence_ids": result.get("evidence_ids", []),
+                "risk_flags": result.get("risk_flags", []),
+                "sidecar_latency_ms": result.get("sidecar_latency_ms"),
+            }
+            for result in cycle_results
+            if result and result.get("finance_no_context")
+        ]
+        if failures:
+            logger.warning(
+                "finance_raw_model_failures_recorded_before_zero_guard",
+                cycle=self._cycle_count,
+                count=len(failures),
+                failures=failures,
+            )
 
     def _apply_cycle_guards(self, *, requested_delay: int | float | None, total_decisions: int) -> int:
         """Clamp unsafe pacing and stop repeated no-decision loops."""
