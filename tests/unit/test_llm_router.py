@@ -378,6 +378,90 @@ async def test_local_finance_decision_pipeline_blocks_buy_over_risk_limit():
 
 
 @pytest.mark.asyncio
+async def test_local_finance_decision_pipeline_blocks_buy_over_available_cash():
+    async def collect_tool_results(payload):
+        return {
+            "get_balance": {"available": 100_000, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+            "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
+            "get_risk_limit": {"max_order_value": 1_000_000},
+            "search_rag": {
+                "evidence_ids": payload["evidence_ids"],
+                "evidence_count": len(payload["evidence"]),
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {
+                "query": "005930 현금보다 많이 매수?",
+                "queries": ["005930 현금보다 많이 매수?"],
+                "symbol": "005930",
+                "market": "kr_stock",
+                "route": "rag_and_fresh_quote",
+                "requires_fresh_data": True,
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_risk_limit"},
+                ],
+                "forbidden_tools": ["submit_order"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            return {
+                "action": "BUY",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "quantity": 3,
+                "required_tools": [
+                    "search_rag",
+                    "get_balance",
+                    "get_positions",
+                    "get_quote",
+                    "get_market_session",
+                    "get_risk_limit",
+                ],
+                "evidence_ids": ["cash_policy.md"],
+                "reason": "paper shadow candidate only",
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": [], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=(
+            [{"doc_id": "cash_policy.md", "text": "buy notional must not exceed available cash"}],
+            {"model": "rag_search", "latency_ms": 1, "ok": True},
+        )),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-cash",
+            user_question="005930 현금보다 많이 매수?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True, "cash_available_required": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["ok"] is False
+    assert result["record_type"] == "raw_model_failure"
+    assert result["record"]["failure_type"] == "trade_exceeds_available_cash"
+    assert result["record"]["retrain_candidate"] is True
+    assert result["record"]["details"]["available_cash"] == 100_000
+    assert result["record"]["details"]["notional"] == 210_000
+    assert result["record"]["action"] == "BUY"
+    assert result["record"]["evidence_ids"] == ["cash_policy.md"]
+
+
+@pytest.mark.asyncio
 async def test_local_finance_decision_pipeline_records_risk_guard_hard_fail_as_raw_failure():
     async def collect_tool_results(payload):
         return {

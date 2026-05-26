@@ -180,6 +180,24 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `retrain_candidate=true`
 - 주문 실행 없음
 
+## 2026-05-27 Available Cash Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY` 후보를 반환하고,
+- RAG evidence, quote, position, market session, risk limit tool 결과가 모두 존재해도,
+- `quantity * quote.price`가 `get_balance.available`을 넘으면
+- `trade_exceeds_risk_limit`으로 뭉뚱그리지 않고 `raw_model_failure`를 기록한다.
+
+기대 record:
+
+- `failure_type=trade_exceeds_available_cash`
+- 원본 `action=BUY` 유지
+- `available_cash`, `notional` 기록
+- `evidence_ids` 유지
+- `retrain_candidate=true`
+- 주문 실행 없음
+
 ## Security Notes
 
 - `.env` 값은 실행 시 settings로만 읽고 로그에 출력하지 않는다.

@@ -103,12 +103,11 @@ def validate_finance_shadow_payload(
         notional = _trade_notional(payload, merged_tool_results)
         if notional <= 0:
             raise FinanceShadowValidationError("trade_missing_notional")
-        within_risk_limit = _is_within_risk_limit(action, notional, merged_tool_results)
-        if not within_risk_limit:
-            raise FinanceShadowValidationError(
-                "trade_exceeds_risk_limit",
-                details={"action": action, "notional": notional},
-            )
+        limit_violation = _trade_limit_violation(action, notional, merged_tool_results)
+        within_risk_limit = limit_violation is None
+        if limit_violation is not None:
+            code, details = limit_violation
+            raise FinanceShadowValidationError(code, details=details)
         if action == "SELL":
             quantity = _trade_quantity(payload)
             if quantity <= 0:
@@ -180,6 +179,7 @@ def build_finance_shadow_failure_record(
             "trade_missing_tool_results",
             "trade_missing_evidence_ids",
             "trade_exceeds_risk_limit",
+            "trade_exceeds_available_cash",
             "trade_missing_position_quantity",
             "trade_exceeds_position",
             "trade_when_market_closed",
@@ -274,7 +274,7 @@ def _owned_position_quantity(payload: dict[str, Any], tool_results: dict[str, An
     return owned
 
 
-def _is_within_risk_limit(action: str, notional: float, tool_results: dict[str, Any]) -> bool:
+def _trade_limit_violation(action: str, notional: float, tool_results: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     risk = tool_results.get("get_risk_limit")
     balance = tool_results.get("get_balance")
     max_order_value = _first_float(
@@ -285,12 +285,20 @@ def _is_within_risk_limit(action: str, notional: float, tool_results: dict[str, 
         "max_notional",
     )
     if max_order_value > 0 and notional > max_order_value:
-        return False
+        return "trade_exceeds_risk_limit", {
+            "action": action,
+            "notional": notional,
+            "max_order_value": max_order_value,
+        }
     if action == "BUY":
         available = _first_float(balance, "available", "available_cash", "cash")
         if available > 0 and notional > available:
-            return False
-    return True
+            return "trade_exceeds_available_cash", {
+                "action": action,
+                "notional": notional,
+                "available_cash": available,
+            }
+    return None
 
 
 def _market_session_is_open(tool_results: dict[str, Any]) -> bool:
