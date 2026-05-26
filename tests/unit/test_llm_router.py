@@ -1,5 +1,6 @@
 """Tests for LLM provider router."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -169,3 +170,128 @@ async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context
     assert result["record"]["failure_type"] == "no_context"
     assert result["decision"]["action"] == "NO_CONTEXT"
     assert result["risk_flags"] == ["missing_context"]
+
+
+@pytest.mark.asyncio
+async def test_call_finance_stage_parses_structured_gateway_repair_payload():
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({
+                                "action": "CALL_TOOL",
+                                "symbol": "005930",
+                                "required_tools": ["get_quote"],
+                                "evidence_ids": ["source_reference.md"],
+                            })
+                        }
+                    }
+                ]
+            }
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            self.requests = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, *args, **kwargs):
+            self.requests.append((args, kwargs))
+            return _Response()
+
+    with patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.AsyncClient", _Client), \
+         patch.object(local_finance_runtime.settings, "local_llm_base_url", "http://127.0.0.1:8080/v1"), \
+         patch.object(local_finance_runtime.settings, "local_llm_api_key", ""):
+        payload, meta = await local_finance_runtime._call_finance_stage(
+            model=local_finance_runtime.FINANCE_DECISION_MODEL,
+            payload={"user_question": "005930 지금 매수?"},
+            system="Return JSON.",
+        )
+
+    assert payload["action"] == "CALL_TOOL"
+    assert payload["symbol"] == "005930"
+    assert payload["evidence_ids"] == ["source_reference.md"]
+    assert meta["model"] == local_finance_runtime.FINANCE_DECISION_MODEL
+
+
+@pytest.mark.asyncio
+async def test_local_finance_pipeline_records_call_tool_shadow_from_gateway_repair():
+    async def collect_tool_results(payload):
+        return {
+            "search_rag": {
+                "evidence_ids": payload["evidence_ids"],
+                "evidence_count": len(payload["evidence"]),
+            }
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {
+                "query": "005930 지금 매수?",
+                "queries": ["005930 지금 매수?"],
+                "symbol": "005930",
+                "market": "kr_stock",
+                "route": "rag_and_fresh_quote",
+                "requires_fresh_data": True,
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_risk_limit"},
+                ],
+                "forbidden_tools": ["submit_order"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            return {
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "required_tools": [
+                    "search_rag",
+                    "get_balance",
+                    "get_positions",
+                    "get_quote",
+                    "get_market_session",
+                    "get_risk_limit",
+                ],
+                "evidence_ids": ["source_reference.md"],
+                "risk_tags": ["missing_tool_results", "paper_shadow_only"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": ["missing_tool_results"], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=(
+            [{"doc_id": "source_reference.md", "text": "decision contract"}],
+            {"model": "rag_search", "latency_ms": 1, "ok": True},
+        )),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-2",
+            user_question="005930 지금 매수?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["record"]["action"] == "CALL_TOOL"
+    assert result["record"]["would_submit_order"] is False
+    assert "get_quote" in result["record"]["missing_tool_results"]
