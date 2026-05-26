@@ -109,6 +109,22 @@ tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_tra
 pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tests/unit/test_agent_tools.py tests/unit/test_graph.py tests/unit/test_recorder.py
 ```
 
+## 2026-05-27 Shadow Risk-Limit Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY`를 반환하고,
+- RAG evidence, quote, balance, position, market session, risk limit tool 결과가 모두 존재해도,
+- `quantity * quote.price`가 `get_risk_limit.max_order_value`를 넘으면
+- `finance_paper_shadow_decision`으로 세지 않고 `raw_model_failure`를 기록한다.
+
+기대 record:
+
+- `failure_type=trade_exceeds_risk_limit`
+- `retrain_candidate=true`
+- `evidence_ids` 유지
+- 주문 실행 없음
+
 ## Security Notes
 
 - `.env` 값은 실행 시 settings로만 읽고 로그에 출력하지 않는다.
