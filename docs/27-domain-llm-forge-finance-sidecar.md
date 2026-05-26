@@ -13,6 +13,12 @@
 
 이 문서는 원본 문서를 대체하지 않는다. `Agentic Capital`에서 sidecar를 호출하는 운영 계약, 안전 모드, 모의투자 테스트 순서를 정의한다.
 
+## 역할 경계
+
+Finance 모델군은 매매 의사결정용 sidecar다. `Agentic Capital`이 질문, agent state, tool 결과, RAG evidence를 보내면 매매 판단에 필요한 구조화 결과를 돌려준다. 단, finance 모델도 주문 실행자가 아니다. 실제 주문 여부와 수량 집행은 `Agentic Capital`의 trading adapter, paper/live permission, deterministic risk guard가 최종 통제한다.
+
+Psychology 모델군은 finance 판단을 대체하지 않는다. psychology 결과는 감정, drift, 행동 편향 같은 보조 signal로만 `finance_risk_guard_model` 또는 recorder에 전달할 수 있다.
+
 ## 현재 준비 상태
 
 2026-05-26 기준 로컬 확인 결과:
@@ -22,11 +28,20 @@
 | finance service spec | 10개 서비스 디렉터리 존재 | 서비스 계약과 workflow 골격 사용 가능 |
 | finance config | 10개 YAML 존재 | sidecar 서비스명별 실행 가능 |
 | RAG raw/index | 10개 모두 `finance_service_reference.jsonl`, `chunks.jsonl`, `bm25.pkl` 존재 | RAG search 우선 연동 가능 |
-| finance GGUF | 현재 `data/models/finance_*/*.gguf` 미확인 | 모델 추론은 GGUF 생성/다운로드 후 가능 |
-| full eval report | finance report 미확인 | production gate blocker |
+| finance GGUF | 현재 main tree의 `data/models/finance_*/*.gguf` 없음 | 모델 추론은 GGUF 생성/다운로드 후 가능 |
+| full eval report | current 30-case finance report 없음 또는 stale | production gate blocker |
+| convert preflight | readiness gate가 `convert_free_gb`, `convert_disk_preflight_ok`를 기록 | preflight green일 때만 비용 큰 convert 허용 |
 | 권장 운영 모드 | readonly, paper, shadow | live 주문 금지 |
 
 따라서 지금 붙일 1차 방식은 **RAG search sidecar + deterministic guard + paper/shadow decision 기록**이다. GGUF 모델 서버는 파일 존재와 eval 통과 후 활성화한다.
+
+다음 GGUF 확보 우선순위는 다음 3개다.
+
+1. `finance_tool_planner_model`
+2. `finance_decision_model`
+3. `finance_risk_guard_model`
+
+`finance_rag_query_model`은 runtime priority 모델이지만 현재는 RAG search 경로를 먼저 사용한다. 별도 GGUF가 준비되면 사용자/agent 질문을 `query`, `symbol`, `market`, `route`, `requires_fresh_data`로 구조화하는 전단 모델로 승격한다.
 
 ## 환경변수 사용 규칙
 
@@ -72,6 +87,23 @@ user_question
  -> finance_risk_guard_model
  -> deterministic postprocess / 기록
 ```
+
+핵심 runtime 모델:
+
+| 모델 | runtime 역할 | 필수 출력/행동 |
+|---|---|---|
+| `finance_rag_query_model` | 질문을 검색 가능한 query, symbol, market, route로 변환 | `requires_fresh_data`, `facets`, `confidence`, `uncertainty` |
+| `finance_tool_planner_model` | 매매 전 필요한 tool 호출 계획 생성 | `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` |
+| `finance_decision_model` | 최종 action 제안 | `BUY`, `SELL`, `HOLD`, `WAIT`, `OBSERVE`, `REJECT`, `CALL_TOOL`; 주문 실행 금지 |
+| `finance_risk_guard_model` | decision/final answer 위험 검사 | profit guarantee, live 권한 없는 주문, 근거 없는 BUY/SELL 차단 |
+
+RAG 품질 보조 모델:
+
+| 모델 | 역할 |
+|---|---|
+| `finance_embedding_model` | 검색 embedding |
+| `finance_reranker_model` | 검색 결과 재정렬 |
+| `finance_evidence_summarizer_model` | evidence id와 숫자를 보존한 근거 압축 |
 
 offline 전용 모델:
 
@@ -119,6 +151,17 @@ offline 전용 모델:
   }
 }
 ```
+
+BUY 또는 SELL은 다음 조건을 모두 만족할 때만 허용한다.
+
+| 조건 | 실패 시 action |
+|---|---|
+| 최신 quote/session 확인 | `CALL_TOOL` 또는 `WAIT` |
+| balance/position 확인 | `CALL_TOOL` |
+| risk limit 확인 | `CALL_TOOL` 또는 `REJECT` |
+| RAG evidence ids 존재 | `OBSERVE` 또는 `REJECT` |
+| profit guarantee 없음 | `REJECT` |
+| live order 권한 오해 없음 | `REJECT` |
 
 최종 decision contract:
 
@@ -258,6 +301,15 @@ cd /Users/tpirates/workspace-hjm/domain-llm-forge
 5. decision 직후 `finance_risk_guard_model`과 deterministic guard를 모두 실행한다.
 6. `KIS_IS_PAPER=true`에서 paper order 또는 shadow decision만 기록한다.
 7. `simulation_runs.config`, `agent_cycles.economics_snapshot`, `tool_sequence`에 provider, model, evidence ids, latency, fallback 여부를 기록한다.
+
+## 다음 검증 루프
+
+1. disk preflight가 green인지 확인한 뒤 convert/train 재실행 여부를 결정한다.
+2. `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model` 순서로 GGUF를 확보한다.
+3. 각 모델에 대해 gateway health/search/chat smoke를 실행한다.
+4. paper trading shadow에서 decision record가 남는지 확인한다.
+5. decision 0 반복, BUY/SELL 근거 누락, risk limit 초과, profit guarantee 표현을 회귀 테스트로 고정한다.
+6. trade가 생성되더라도 risk limit을 넘지 않는지 `tests/unit/test_trading_paper.py` 계층에서 확인한다.
 
 ## 모의투자 테스트 기준
 

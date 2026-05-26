@@ -22,7 +22,7 @@ psychology 모델은 투자 결정을 직접 실행하지 않는다. 성격, 감
 | `psychology_profile_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
 | `psychology_emotion_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
 | `psychology_drift_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
-| `psychology_behavior_bias_model` | 미확인 | 미확인 | 미확인 | shadow/test |
+| `psychology_behavior_bias_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
 | `psychology_social_dynamics_model` | 미확인 | 미확인 | 미확인 | shadow/test |
 | `psychology_memory_retriever_model` | 미확인 | 미확인 | 미확인 | shadow/test |
 | `psychology_reflection_model` | 미확인 | 미확인 | 미확인 | shadow/test |
@@ -30,7 +30,14 @@ psychology 모델은 투자 결정을 직접 실행하지 않는다. 성격, 감
 | `psychology_eval_judge_model` | 미확인 | 미확인 | 미확인 | offline only |
 | `psychology_model_suite` | 미확인 | 미확인 | 미확인 | orchestration spec only |
 
-확인된 report의 `passed=true`, `n_test=36`, `failures=[]`, `quality_guard_failures=[]`는 profile/emotion/drift 3개 모델에 한정된다.
+확인된 report의 `passed=true`, `n_test=36`, `failures=[]`, `quality_guard_failures=[]`는 profile/emotion/drift/behavior_bias 4개 모델에 한정된다.
+
+현재 quality smoke에서 중점적으로 막아야 할 실패는 다음이다.
+
+- JSON/schema 불안정
+- runtime 답변에 `BERTScore`, `quality_guard_failures`, `passed=true` 같은 eval-only 용어가 섞이는 문제
+- RAG 근거 chunk가 너무 얇아 schema/validator/integration 계약을 충분히 회수하지 못하는 문제
+- psychology 모델이 BUY/SELL, 주문, 자본 변경, 의료/진단 결론을 내는 문제
 
 ## 환경변수 사용 규칙
 
@@ -84,6 +91,8 @@ agent conversation / cycle trace
  -> finance risk/context layer
  -> recorder / eval loop
 ```
+
+2026-05-26 기준 `domain-llm-forge`에서는 profile/emotion/drift/behavior_bias 4개 ready 모델에 대해 runtime schema, output validator, Agentic Capital integration, failure learning reference를 RAG corpus에 추가했다. 각 서비스의 RAG chunk 수는 8개로 재생성되었고, search smoke에서 schema/validator reference가 top result로 회수된다.
 
 ## 공통 파일 구조
 
@@ -212,8 +221,8 @@ curl -s http://127.0.0.1:18000/v1/chat/completions \
 
 ```json
 {
-  "facets": [],
-  "summary": "",
+  "signals": [],
+  "agent_state_patch": {},
   "evidence_ids": [],
   "confidence": 0.0,
   "uncertainty": [],
@@ -221,6 +230,16 @@ curl -s http://127.0.0.1:18000/v1/chat/completions \
   "allowed_downstream_use": "context_only"
 }
 ```
+
+runtime validator는 최소한 다음을 hard failure로 처리한다.
+
+| Failure | 의미 |
+|---|---|
+| `schema_unstable` | structured JSON이 필요한데 JSON으로 parse되지 않음 |
+| `schema_missing_required` | `evidence_ids`, `confidence`, `uncertainty` 누락 |
+| `trade_action_leak` | `action: BUY`, `action: SELL`, 매수/매도/주문 실행 권고 |
+| `eval_artifact_leak` | eval-only 용어가 runtime 응답에 섞임 |
+| `clinical_claim` | 임상 진단, 치료, therapy plan 표현 |
 
 finance 계층으로 넘길 때는 다음으로 축소한다.
 
@@ -279,7 +298,7 @@ psychology_direct_order=false
 
 ## Production Gate Blockers
 
-profile/emotion/drift 외 7개 서비스는 다음 완료 전까지 shadow/test mode다.
+profile/emotion/drift/behavior_bias 외 6개 서비스는 다음 완료 전까지 shadow/test mode다.
 
 - GGUF 변환
 - 36-case eval 통과
