@@ -53,6 +53,7 @@ def build_langchain_chat_model() -> Any:
             api_key=settings.local_llm_api_key,
             timeout_seconds=settings.local_llm_timeout_seconds,
             temperature=settings.local_llm_temperature,
+            send_native_tools=settings.local_llm_send_native_tools,
         )
     if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")

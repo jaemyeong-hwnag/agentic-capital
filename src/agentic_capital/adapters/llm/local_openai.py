@@ -172,6 +172,33 @@ def _parse_tool_calls_from_content(content: str) -> list[dict[str, Any]]:
     return _parse_tool_calls(raw_tool_calls)
 
 
+def _shorten(value: str, limit: int = 160) -> str:
+    compact = " ".join(value.split())
+    return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
+
+
+def _compact_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict):
+        return {"args": []}
+
+    compact_properties: dict[str, dict[str, Any]] = {}
+    for name, schema in properties.items():
+        if not isinstance(schema, dict):
+            compact_properties[name] = {"type": "any"}
+            continue
+        entry: dict[str, Any] = {"type": schema.get("type") or schema.get("anyOf", "any")}
+        if "enum" in schema:
+            entry["enum"] = schema["enum"]
+        compact_properties[name] = entry
+
+    compact: dict[str, Any] = {"properties": compact_properties}
+    required = parameters.get("required")
+    if isinstance(required, list) and required:
+        compact["required"] = required
+    return compact
+
+
 def _chat_result_from_payload(payload: dict[str, Any]) -> ChatResult:
     try:
         message = payload["choices"][0]["message"]
@@ -193,8 +220,8 @@ def _tool_prompt(tools: list[Any]) -> str:
     compact = [
         {
             "name": schema.get("function", {}).get("name", ""),
-            "description": schema.get("function", {}).get("description", ""),
-            "parameters": schema.get("function", {}).get("parameters", {}),
+            "description": _shorten(schema.get("function", {}).get("description", "")),
+            "parameters": _compact_parameters(schema.get("function", {}).get("parameters", {})),
         }
         for schema in schemas
     ]
@@ -282,6 +309,7 @@ class LocalOpenAICompatibleChatModel(BaseChatModel):
     api_key: str = ""
     timeout_seconds: float = 30.0
     temperature: float = 0.2
+    send_native_tools: bool = False
     bound_tools: list[Any] = Field(default_factory=list)
     tool_choice: str | None = None
 
@@ -317,7 +345,7 @@ class LocalOpenAICompatibleChatModel(BaseChatModel):
         }
         if stop:
             body["stop"] = stop
-        if self.bound_tools:
+        if self.bound_tools and self.send_native_tools:
             body["tools"] = [_tool_to_openai_schema(tool) for tool in self.bound_tools]
             body["tool_choice"] = self.tool_choice or "auto"
         return body

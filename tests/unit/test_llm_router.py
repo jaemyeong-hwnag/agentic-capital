@@ -19,11 +19,13 @@ def test_router_builds_local_langchain_model():
          patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
          patch.object(router.settings, "local_llm_api_key", ""), \
          patch.object(router.settings, "local_llm_timeout_seconds", 10.0), \
-         patch.object(router.settings, "local_llm_temperature", 0.2):
+         patch.object(router.settings, "local_llm_temperature", 0.2), \
+         patch.object(router.settings, "local_llm_send_native_tools", False):
         model = router.build_langchain_chat_model()
 
     assert model.model == "finance_decision_model"
     assert model.base_url == "http://127.0.0.1:8080/v1"
+    assert model.send_native_tools is False
 
 
 def test_router_uses_gemini_only_when_explicitly_configured():

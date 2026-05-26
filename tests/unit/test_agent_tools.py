@@ -149,6 +149,19 @@ class TestBuildAgentTools:
         assert result.startswith("ERR:")
 
     @pytest.mark.asyncio
+    async def test_submit_order_blocks_overseas_in_kis_paper_mode(self):
+        trading = _make_trading()
+        with patch("agentic_capital.core.tools.data_query.settings.kis_is_paper", True):
+            tools, decisions, _, _ = build_agent_tools(trading=trading, agent_name="Trader-1")
+            tool = next(t for t in tools if t.name == "submit_order")
+
+            result = await tool.coroutine(symbol="AAPL", side="buy", quantity=1, market="us_stock")
+
+        assert "ERR:paper_no_overseas" in result
+        trading.submit_order.assert_not_awaited()
+        assert decisions == []
+
+    @pytest.mark.asyncio
     async def test_cancel_order_tool(self):
         trading = _make_trading()
         tools, _, _, _ = build_agent_tools(trading=trading)

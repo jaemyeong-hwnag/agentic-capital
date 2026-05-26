@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     local_llm_api_key: str = ""
     local_llm_timeout_seconds: float = 30.0
     local_llm_temperature: float = 0.2
+    local_llm_send_native_tools: bool = False
     local_llm_readiness_required: bool = True
     local_llm_expected_health_model: str = ""
     local_llm_health_timeout_seconds: float = 5.0

@@ -130,8 +130,33 @@ def test_local_chat_model_parses_tool_calls(monkeypatch):
 
     assert message.tool_calls[0]["name"] == "get_balance"
     assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
-    assert _FakeSyncClient.last_request["json"]["tool_choice"] == "auto"
+    assert "tools" not in _FakeSyncClient.last_request["json"]
+    assert "tool_choice" not in _FakeSyncClient.last_request["json"]
     assert "tool_calls" in _FakeSyncClient.last_request["json"]["messages"][0]["content"]
+
+
+def test_local_chat_model_can_opt_into_native_tool_payload(monkeypatch):
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _FakeSyncClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:8080/v1",
+        model="finance_tool_planner_model",
+        timeout_seconds=5,
+        send_native_tools=True,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_balance",
+                "description": "paper account balance",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ])
+
+    model.invoke([HumanMessage(content="잔고 확인")])
+
+    assert _FakeSyncClient.last_request["json"]["tool_choice"] == "auto"
+    assert _FakeSyncClient.last_request["json"]["tools"][0]["function"]["name"] == "get_balance"
 
 
 def test_local_chat_model_parses_textual_tool_call(monkeypatch):

@@ -16,6 +16,7 @@ class TestConfig:
         assert s.llm_provider == "local"
         assert s.local_llm_model == "finance_decision_model"
         assert s.local_embedding_model == "finance_embedding_model"
+        assert s.local_llm_send_native_tools is False
         assert s.local_llm_readiness_required is True
         assert s.local_finance_smoke_enabled is True
         assert s.local_psychology_base_url == "http://127.0.0.1:19400/v1"

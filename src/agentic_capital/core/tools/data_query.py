@@ -14,6 +14,8 @@ import structlog
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
 
+from agentic_capital.config import settings
+
 logger = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
@@ -390,6 +392,11 @@ def build_agent_tools(
             # Position policy is AI-decided and informational only (not enforced here)
             side_l = side.lower()
             market_l = market.lower()
+            if settings.kis_is_paper and market_l in {"us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}:
+                return (
+                    "ERR:paper_no_overseas|KIS_IS_PAPER=true blocks overseas orders|"
+                    "use kr_stock or futures paper tools, or switch to explicit real mode"
+                )
             if side_l == "sell" and market_l in {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}:
                 positions = await trading.get_positions()
                 owned_qty = sum(
@@ -874,6 +881,7 @@ def build_agent_tools(
             name="submit_order",
             description=(
                 "Submit a buy or sell order. You decide market, symbol, quantity, and price. "
+                "In KIS paper mode, overseas stock markets are blocked; use kr_stock or futures paper tools. "
                 "If cash is insufficient, first use evaluate_reallocation to compare HOLD vs SELL+BUY; "
                 "spot sell orders are limited to owned quantity."
             ),
