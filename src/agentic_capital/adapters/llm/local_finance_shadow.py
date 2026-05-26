@@ -109,6 +109,20 @@ def validate_finance_shadow_payload(
                 "trade_exceeds_risk_limit",
                 details={"action": action, "notional": notional},
             )
+        if action == "SELL":
+            quantity = _trade_quantity(payload)
+            if quantity <= 0:
+                raise FinanceShadowValidationError("trade_missing_position_quantity")
+            owned_quantity = _owned_position_quantity(payload, merged_tool_results)
+            if quantity > owned_quantity:
+                raise FinanceShadowValidationError(
+                    "trade_exceeds_position",
+                    details={
+                        "symbol": str(payload.get("symbol") or payload.get("ticker") or ""),
+                        "requested_quantity": quantity,
+                        "owned_quantity": owned_quantity,
+                    },
+                )
         if not _market_session_is_open(merged_tool_results):
             raise FinanceShadowValidationError("trade_when_market_closed")
 
@@ -166,6 +180,8 @@ def build_finance_shadow_failure_record(
             "trade_missing_tool_results",
             "trade_missing_evidence_ids",
             "trade_exceeds_risk_limit",
+            "trade_missing_position_quantity",
+            "trade_exceeds_position",
             "trade_when_market_closed",
             "profit_guarantee_expression",
             "risk_guard_hard_fail",
@@ -229,9 +245,33 @@ def _trade_notional(payload: dict[str, Any], tool_results: dict[str, Any]) -> fl
     explicit = _float(payload.get("notional") or payload.get("order_value"))
     if explicit > 0:
         return explicit
-    quantity = _float(payload.get("quantity") or payload.get("qty") or _nested(payload, "order", "quantity"))
+    quantity = _trade_quantity(payload)
     price = _float(payload.get("price") or _nested(tool_results, "get_quote", "price"))
     return quantity * price
+
+
+def _trade_quantity(payload: dict[str, Any]) -> float:
+    return _float(payload.get("quantity") or payload.get("qty") or _nested(payload, "order", "quantity"))
+
+
+def _owned_position_quantity(payload: dict[str, Any], tool_results: dict[str, Any]) -> float:
+    positions = tool_results.get("get_positions")
+    if not isinstance(positions, list):
+        return 0.0
+    symbol = str(payload.get("symbol") or payload.get("ticker") or "").strip()
+    market = str(payload.get("market") or "").strip().lower()
+    owned = 0.0
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        position_symbol = str(position.get("symbol") or position.get("ticker") or "").strip()
+        position_market = str(position.get("market") or "").strip().lower()
+        if symbol and position_symbol and position_symbol != symbol:
+            continue
+        if market and position_market and position_market != market:
+            continue
+        owned += _float(position.get("quantity") or position.get("qty"))
+    return owned
 
 
 def _is_within_risk_limit(action: str, notional: float, tool_results: dict[str, Any]) -> bool:
