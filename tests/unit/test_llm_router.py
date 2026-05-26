@@ -166,6 +166,91 @@ def test_local_finance_stage_base_urls_route_to_individual_sidecars():
         )
 
 
+def test_local_finance_pipeline_health_skips_unconfigured_stage_urls():
+    with patch.object(local_finance_runtime.settings, "local_finance_rag_query_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_tool_planner_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_decision_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_risk_guard_base_url", ""), \
+         patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.get") as mock_get:
+        result = local_finance_runtime.check_local_finance_pipeline_health()
+
+    assert result == {"ok": True, "checked": 0, "stages": {}}
+    mock_get.assert_not_called()
+
+
+def test_local_finance_pipeline_health_checks_configured_stage_sidecars():
+    def fake_get(url, timeout):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "ok": True,
+            "model": {
+                "http://127.0.0.1:18101/healthz": local_finance_runtime.FINANCE_RAG_QUERY_MODEL,
+                "http://127.0.0.1:18102/healthz": local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL,
+                "http://127.0.0.1:18104/healthz": local_finance_runtime.FINANCE_RISK_GUARD_MODEL,
+            }[url],
+            "llama_reachable": True,
+        }
+        return response
+
+    with patch.object(local_finance_runtime.settings, "local_finance_rag_query_base_url", "http://127.0.0.1:18101/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_tool_planner_base_url", "http://127.0.0.1:18102/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_decision_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_risk_guard_base_url", "http://127.0.0.1:18104/v1"), \
+         patch.object(local_finance_runtime.settings, "local_llm_health_timeout_seconds", 2.0), \
+         patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.get", side_effect=fake_get) as mock_get:
+        result = local_finance_runtime.check_local_finance_pipeline_health()
+
+    assert result["ok"] is True
+    assert result["checked"] == 3
+    assert set(result["stages"]) == {
+        local_finance_runtime.FINANCE_RAG_QUERY_MODEL,
+        local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL,
+        local_finance_runtime.FINANCE_RISK_GUARD_MODEL,
+    }
+    assert mock_get.call_count == 3
+
+
+def test_local_finance_pipeline_health_rejects_mismatched_stage_model():
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "ok": True,
+        "model": local_finance_runtime.FINANCE_DECISION_MODEL,
+        "llama_reachable": True,
+    }
+
+    with patch.object(local_finance_runtime.settings, "local_finance_rag_query_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_tool_planner_base_url", "http://127.0.0.1:18102/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_decision_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_risk_guard_base_url", ""), \
+         patch("agentic_capital.adapters.llm.local_finance_runtime.httpx.get", return_value=response), \
+         pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="local_llm_model_mismatch"):
+        local_finance_runtime.check_local_finance_pipeline_health()
+
+
+def test_validate_local_finance_runtime_reports_pipeline_health():
+    with patch.object(local_finance_runtime.settings, "local_llm_readiness_required", True), \
+         patch.object(local_finance_runtime.settings, "local_finance_smoke_enabled", False), \
+         patch(
+             "agentic_capital.adapters.llm.local_finance_runtime.check_local_finance_health",
+             return_value={"actual_model": local_finance_runtime.FINANCE_DECISION_MODEL, "ok": True},
+         ), \
+         patch(
+             "agentic_capital.adapters.llm.local_finance_runtime.check_local_finance_pipeline_health",
+             return_value={
+                 "ok": True,
+                 "checked": 1,
+                 "stages": {local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL: {"ok": True}},
+             },
+         ):
+        result = local_finance_runtime.validate_local_finance_runtime()
+
+    assert result["ok"] is True
+    assert result["pipeline_health"]["checked"] == 1
+    assert result["smoke"] == {"skipped": True}
+
+
 @pytest.mark.asyncio
 async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context():
     async def collect_tool_results(payload):

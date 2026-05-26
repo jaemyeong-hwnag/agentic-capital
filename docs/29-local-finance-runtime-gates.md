@@ -20,6 +20,9 @@ agentic-capital-finance-smoke
 - 기대 모델이 `finance_` 계열인데 실제 model이 `psychology_` 또는 `health` 계열이면 시작 실패다.
 - `llama_reachable=false` 또는 `ok=false`면 시작 실패다.
 - smoke query에서 근거 없는 `BUY`/`SELL`이 나오면 시작 실패다.
+- `LOCAL_FINANCE_*_BASE_URL`이 설정된 stage는 각 gateway root의 `/healthz`를 추가로 호출하고,
+  응답 model이 해당 stage 모델명과 정확히 일치해야 한다.
+  예를 들어 `LOCAL_FINANCE_TOOL_PLANNER_BASE_URL`이 `finance_decision_model`을 가리키면 시작 실패다.
 
 ## Smoke/Eval Rule
 
@@ -59,6 +62,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `agentic-capital`: paper trading 실행 전후로 finance sidecar를 올바른 순서로 호출하고, broker/account/market read-only 결과를 구조화해서 넘기며, shadow decision과 raw failure를 DB에 기록한다.
 - `agentic-capital`은 finance 모델을 일반 ReAct agent LLM처럼 쓰지 않는다. Trader cycle에서 `LOCAL_FINANCE_PIPELINE_ENABLED=true`, `LOCAL_LLM_MODEL=finance_*`, local provider이면 finance 전용 flow로 분기한다.
 - `domain-llm-forge` RAG Gateway는 프로세스 시작 시 `RAG_SERVICE`가 고정된다. 실사용 paper-shadow에서는 `finance_rag_query_model`, `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model`을 각각 다른 gateway URL로 띄우고 `LOCAL_FINANCE_*_BASE_URL`로 연결한다. 비워두면 호환성을 위해 `LOCAL_LLM_BASE_URL` 하나를 사용하지만, 이는 smoke/단일 sidecar 검증용이다.
+- stage별 URL을 설정하면 startup gate 결과에 `pipeline_health.checked`와 stage별 `health_url`, `expected_model`, `actual_model`이 포함되어 sidecar 배선 이력을 남긴다.
 
 필수 순서:
 

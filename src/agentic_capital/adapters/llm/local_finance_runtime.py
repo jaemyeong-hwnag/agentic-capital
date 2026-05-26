@@ -92,10 +92,8 @@ def _validate_health_payload(payload: dict[str, Any], expected_model: str) -> st
     return actual_model
 
 
-def check_local_finance_health() -> dict[str, Any]:
-    """Check `/healthz` and verify that it is the expected finance service."""
-    expected_model = _expected_model()
-    health_url = _join_url(_gateway_root(settings.local_llm_base_url), "/healthz")
+def _check_finance_health(*, base_url: str, expected_model: str) -> dict[str, Any]:
+    health_url = _join_url(_gateway_root(base_url), "/healthz")
     try:
         response = httpx.get(health_url, timeout=settings.local_llm_health_timeout_seconds)
         response.raise_for_status()
@@ -112,6 +110,29 @@ def check_local_finance_health() -> dict[str, Any]:
         "actual_model": actual_model,
         "ok": True,
     }
+
+
+def check_local_finance_health() -> dict[str, Any]:
+    """Check `/healthz` and verify that it is the expected finance service."""
+    return _check_finance_health(base_url=settings.local_llm_base_url, expected_model=_expected_model())
+
+
+def _configured_stage_base_urls() -> dict[str, str]:
+    configured: dict[str, str] = {}
+    for model, setting_name in FINANCE_STAGE_BASE_URL_SETTINGS.items():
+        base_url = str(getattr(settings, setting_name, "") or "").strip()
+        if base_url:
+            configured[model] = base_url
+    return configured
+
+
+def check_local_finance_pipeline_health() -> dict[str, Any]:
+    """Check explicitly configured finance stage sidecars before paper trading."""
+    stages = {
+        model: _check_finance_health(base_url=base_url, expected_model=model)
+        for model, base_url in _configured_stage_base_urls().items()
+    }
+    return {"ok": True, "checked": len(stages), "stages": stages}
 
 
 def _auth_headers() -> dict[str, str]:
@@ -543,10 +564,12 @@ def validate_local_finance_runtime() -> dict[str, Any]:
         return {"ok": True, "skipped": "local_llm_readiness_required_false"}
 
     health = check_local_finance_health()
+    pipeline_health = check_local_finance_pipeline_health()
     smoke = run_local_finance_smoke() if settings.local_finance_smoke_enabled else {"skipped": True}
     logger.info(
         "local_finance_runtime_ready",
         model=health["actual_model"],
+        stage_sidecars_checked=pipeline_health["checked"],
         smoke_action=smoke.get("action"),
     )
-    return {"ok": True, "health": health, "smoke": smoke}
+    return {"ok": True, "health": health, "pipeline_health": pipeline_health, "smoke": smoke}
