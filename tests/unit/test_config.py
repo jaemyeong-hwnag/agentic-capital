@@ -18,6 +18,10 @@ class TestConfig:
         assert s.local_embedding_model == "finance_embedding_model"
         assert s.local_llm_readiness_required is True
         assert s.local_finance_smoke_enabled is True
+        assert s.local_psychology_base_url == "http://127.0.0.1:19400/v1"
+        assert s.local_psychology_model == "psychology_model_suite"
+        assert s.local_psychology_readiness_required is False
+        assert s.local_psychology_smoke_enabled is True
         assert s.simulation_zero_decision_max_cycles == 5
         assert s.simulation_min_cycle_seconds == 60
 

@@ -19,18 +19,18 @@ psychology 모델은 투자 결정을 직접 실행하지 않는다. 성격, 감
 
 | Service | GGUF | RAG index | eval report | 운영 권장 |
 |---|---:|---:|---:|---|
-| `psychology_profile_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
-| `psychology_emotion_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
-| `psychology_drift_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
-| `psychology_behavior_bias_model` | 있음 | 있음 | 36-case 통과 | RAG gateway smoke 후 사용 |
-| `psychology_social_dynamics_model` | 미확인 | 미확인 | 미확인 | shadow/test |
-| `psychology_memory_retriever_model` | 미확인 | 미확인 | 미확인 | shadow/test |
-| `psychology_reflection_model` | 미확인 | 미확인 | 미확인 | shadow/test |
-| `psychology_qa_generator_model` | 미확인 | 미확인 | 미확인 | offline only |
-| `psychology_eval_judge_model` | 미확인 | 미확인 | 미확인 | offline only |
-| `psychology_model_suite` | 미확인 | 미확인 | 미확인 | orchestration spec only |
+| `psychology_profile_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_emotion_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_drift_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_behavior_bias_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_social_dynamics_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_memory_retriever_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_reflection_model` | 있음 | 있음 | 36-case 통과 | runtime sidecar |
+| `psychology_qa_generator_model` | 미확인 | 있음 | 미확인 | offline QA only |
+| `psychology_eval_judge_model` | 미확인 | 있음 | 미확인 | offline eval only |
+| `psychology_model_suite` | 있음 | 있음 | 36-case 통과 | runtime orchestration |
 
-확인된 report의 `passed=true`, `n_test=36`, `failures=[]`, `quality_guard_failures=[]`는 profile/emotion/drift/behavior_bias 4개 모델에 한정된다.
+확인된 runtime report의 `passed=true`, `n_test=36`, `quality_guard_failures=0`는 profile/emotion/drift/behavior_bias/social_dynamics/memory_retriever/reflection/model_suite 8개 모델에 적용된다.
 
 현재 quality smoke에서 중점적으로 막아야 할 실패는 다음이다.
 
@@ -92,7 +92,7 @@ agent conversation / cycle trace
  -> recorder / eval loop
 ```
 
-2026-05-26 기준 `domain-llm-forge`에서는 profile/emotion/drift/behavior_bias 4개 ready 모델에 대해 runtime schema, output validator, Agentic Capital integration, failure learning reference를 RAG corpus에 추가했다. 각 서비스의 RAG chunk 수는 8개로 재생성되었고, search smoke에서 schema/validator reference가 top result로 회수된다.
+2026-05-26 기준 `domain-llm-forge`에서는 runtime psychology sidecar 7개와 `psychology_model_suite`에 대해 runtime schema, output validator, Agentic Capital integration, failure learning reference를 RAG corpus에 추가했다. search/gateway smoke에서 schema/validator/integration reference가 회수되고, suite는 QA/eval-only 모델을 runtime route로 쓰지 않도록 검증한다.
 
 ## 공통 파일 구조
 
@@ -194,6 +194,26 @@ curl -s http://127.0.0.1:18000/v1/chat/completions \
 ```
 
 ## Agentic Capital 연동 방식
+
+로컬 실행 보조 스크립트:
+
+```bash
+cd /Users/tpirates/workspace-hjm/agentic-capital
+DOMAIN_LLM_FORGE_ROOT=/Users/tpirates/workspace-hjm/domain-llm-forge \
+RAG_SERVICE=psychology_model_suite \
+PORT=19400 \
+./scripts/run_local_psychology_sidecar.sh
+```
+
+Agentic Capital smoke:
+
+```bash
+cd /Users/tpirates/workspace-hjm/agentic-capital
+LOCAL_PSYCHOLOGY_READINESS_REQUIRED=true \
+LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:19400/v1 \
+LOCAL_PSYCHOLOGY_MODEL=psychology_model_suite \
+agentic-capital-psychology-smoke
+```
 
 권장 payload:
 
@@ -298,13 +318,12 @@ psychology_direct_order=false
 
 ## Production Gate Blockers
 
-profile/emotion/drift/behavior_bias 외 6개 서비스는 다음 완료 전까지 shadow/test mode다.
+runtime psychology sidecar 7개와 `psychology_model_suite`는 로컬 readiness 기준을 통과했다. 남은 blocker는 runtime 사용 권한이 아니라 통합 운영 검증이다.
 
-- GGUF 변환
-- 36-case eval 통과
-- RAG retrieval smoke
-- RAG gateway live smoke
-- evidence coverage verifier 통과
-- finance integration hard fail 0
+- `agentic-capital` cycle trace 기반 integration smoke 반복
+- paper trading shadow에서 psychology 결과가 주문 수량/권한/BUY/SELL을 직접 바꾸지 않는지 확인
+- 실패 case를 `domain-llm-forge` eval regression에 계속 추가
+
+`psychology_qa_generator_model`과 `psychology_eval_judge_model`은 offline QA/eval 도구로 유지한다. 별도 GGUF 산출물을 만들 수는 있지만, runtime agent-state route나 trading route로 승격하지 않는다.
 
 psychology 모델은 gate 통과 후에도 직접 주문, 직접 자본 배분, 직접 HR 실행 권한을 갖지 않는다.

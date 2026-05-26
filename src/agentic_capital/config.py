@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     local_llm_health_timeout_seconds: float = 5.0
     local_finance_smoke_enabled: bool = True
     local_finance_smoke_timeout_seconds: float = 30.0
+    local_psychology_base_url: str = "http://127.0.0.1:19400/v1"
+    local_psychology_model: str = "psychology_model_suite"
+    local_psychology_expected_health_model: str = ""
+    local_psychology_api_key: str = ""
+    local_psychology_readiness_required: bool = False
+    local_psychology_smoke_enabled: bool = True
+    local_psychology_timeout_seconds: float = 30.0
 
     # Database
     database_url: str = "postgresql+asyncpg://agent:agent_dev_password@localhost:5432/agentic_capital"
