@@ -6,9 +6,9 @@
 # ============================================================
 # LLM API
 # ============================================================
-GEMINI_API_KEY=                    # Google AI Studio API Key (Gemini 2.5 Flash)
+GEMINI_API_KEY=                    # Google AI Studio API Key (LLM_PROVIDER=gemini일 때만)
 OPENAI_API_KEY=                    # OpenAI API Key (text-embedding-3-large) — 임베딩용, 선택
-LLM_PROVIDER=gemini                # gemini | local. LOCAL_LLM_PROVIDER alias도 지원
+LLM_PROVIDER=local                 # local | gemini. LOCAL_LLM_PROVIDER alias도 지원
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
@@ -77,7 +77,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | 변수 | 필수 | 설명 |
 |------|------|------|
 | `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때 에이전트 reasoning provider |
-| `LLM_PROVIDER` | **필수** | `gemini` 또는 `local`. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
+| `LLM_PROVIDER` | **필수** | 기본값은 `local`. `gemini` 또는 `local` 계열만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
 | `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL |
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
 | `LOCAL_EMBEDDING_MODEL` | local 모드 필수 | 기본값 `finance_embedding_model` |
