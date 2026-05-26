@@ -97,6 +97,7 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 
 - `evidence_ids`가 비어 있지 않다.
 - `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있다.
+- `evidence_ids`는 `search_rag.evidence_ids` 또는 반환 evidence의 id/doc_id/chunk_id에서 나온 값이어야 한다.
 - 주문 계획에 `submit_order`, `submit_paper_order`, `submit_futures_order`, `place_order`, `execute_trade`가 없다.
 - `quantity * quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
 - `SELL`은 `get_positions`의 보유 수량을 넘지 않는다.
@@ -213,6 +214,22 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `failure_type=order_tool_in_shadow_plan`
 - `forbidden_tools`와 원본 planned tool 유지
 - `evidence_ids` 유지
+- `retrain_candidate=true`
+- 주문 실행 없음
+
+## 2026-05-27 RAG Evidence Coverage Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY`/`SELL` 후보와 `evidence_ids`를 반환해도,
+- 실제 `search_rag` 결과에 대응되는 evidence id가 없으면
+- `finance_paper_shadow_decision`으로 세지 않고 `raw_model_failure`를 기록한다.
+
+기대 record:
+
+- `failure_type=trade_missing_rag_evidence` 또는 `trade_uncovered_evidence_ids`
+- 원본 `action` 유지
+- 조작/미커버 `evidence_ids` 유지
 - `retrain_candidate=true`
 - 주문 실행 없음
 

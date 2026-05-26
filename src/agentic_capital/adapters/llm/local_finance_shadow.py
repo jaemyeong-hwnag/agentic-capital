@@ -99,6 +99,18 @@ def validate_finance_shadow_payload(
             )
         if not evidence_ids:
             raise FinanceShadowValidationError("trade_missing_evidence_ids")
+        rag_evidence_ids = _search_rag_evidence_ids(merged_tool_results)
+        if not rag_evidence_ids:
+            raise FinanceShadowValidationError("trade_missing_rag_evidence")
+        uncovered_evidence_ids = sorted(set(evidence_ids) - set(rag_evidence_ids))
+        if uncovered_evidence_ids:
+            raise FinanceShadowValidationError(
+                "trade_uncovered_evidence_ids",
+                details={
+                    "uncovered_evidence_ids": uncovered_evidence_ids,
+                    "rag_evidence_ids": sorted(rag_evidence_ids),
+                },
+            )
 
         notional = _trade_notional(payload, merged_tool_results)
         if notional <= 0:
@@ -178,6 +190,8 @@ def build_finance_shadow_failure_record(
             "order_tool_in_shadow_plan",
             "trade_missing_tool_results",
             "trade_missing_evidence_ids",
+            "trade_missing_rag_evidence",
+            "trade_uncovered_evidence_ids",
             "trade_exceeds_risk_limit",
             "trade_exceeds_available_cash",
             "trade_missing_position_quantity",
@@ -272,6 +286,25 @@ def _owned_position_quantity(payload: dict[str, Any], tool_results: dict[str, An
             continue
         owned += _float(position.get("quantity") or position.get("qty"))
     return owned
+
+
+def _search_rag_evidence_ids(tool_results: dict[str, Any]) -> list[str]:
+    rag = tool_results.get("search_rag")
+    if not isinstance(rag, dict):
+        return []
+    ids = _string_list(rag.get("evidence_ids") or [])
+    if ids:
+        return ids
+    evidence = rag.get("evidence")
+    if not isinstance(evidence, list):
+        return []
+    extracted: list[str] = []
+    for idx, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            continue
+        evidence_id = item.get("id") or item.get("evidence_id") or item.get("doc_id") or item.get("chunk_id")
+        extracted.append(str(evidence_id or f"rag-{idx}"))
+    return extracted
 
 
 def _trade_limit_violation(action: str, notional: float, tool_results: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:

@@ -102,6 +102,29 @@ def test_buy_over_available_cash_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_with_fabricated_evidence_id_is_blocked_and_learnable() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 1,
+        "evidence_ids": ["fabricated-evidence"],
+    }
+    tool_results = {
+        **_complete_tool_results(),
+        "search_rag": {"evidence_ids": ["ev-samsung-risk-001"]},
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=tool_results)
+
+    assert exc_info.value.code == "trade_uncovered_evidence_ids"
+    assert exc_info.value.details["uncovered_evidence_ids"] == ["fabricated-evidence"]
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=tool_results)
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
 def test_trade_when_market_closed_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",
