@@ -78,6 +78,28 @@ def test_trade_over_risk_limit_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_when_market_closed_is_blocked_and_learnable() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 1,
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+    tool_results = {
+        **_complete_tool_results(),
+        "get_market_session": {"is_open": False, "regular_session": False, "state": "closed"},
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=tool_results)
+
+    assert exc_info.value.code == "trade_when_market_closed"
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=tool_results)
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
 def test_small_trade_with_evidence_tools_and_risk_limit_is_record_only() -> None:
     record = build_finance_shadow_record(
         {

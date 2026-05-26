@@ -166,6 +166,7 @@ def build_finance_shadow_failure_record(
             "trade_missing_tool_results",
             "trade_missing_evidence_ids",
             "trade_exceeds_risk_limit",
+            "trade_when_market_closed",
             "profit_guarantee_expression",
             "risk_guard_hard_fail",
         },
