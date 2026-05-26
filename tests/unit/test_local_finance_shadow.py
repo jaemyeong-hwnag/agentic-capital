@@ -1,0 +1,117 @@
+"""Offline paper-shadow tests for local finance model decisions."""
+
+import pytest
+
+from agentic_capital.adapters.llm.local_finance_shadow import (
+    FinanceShadowValidationError,
+    build_finance_shadow_failure_record,
+    build_finance_shadow_record,
+    validate_finance_shadow_payload,
+)
+
+
+def _complete_tool_results() -> dict:
+    return {
+        "get_balance": {"available": 1_000_000, "total": 1_000_000, "currency": "KRW"},
+        "get_positions": [],
+        "get_quote": {"symbol": "005930", "price": 70_000, "market": "kr_stock"},
+        "get_market_session": {"is_open": True, "state": "regular"},
+        "get_risk_limit": {"max_order_value": 300_000},
+        "search_rag": {"evidence_ids": ["ev-samsung-risk-001"]},
+    }
+
+
+def test_call_tool_record_is_allowed_without_market_context() -> None:
+    record = build_finance_shadow_record(
+        {
+            "action": "CALL_TOOL",
+            "symbol": "005930",
+            "market": "kr_stock",
+            "required_tools": ["get_balance", "get_positions", "get_quote", "get_market_session", "get_risk_limit", "search_rag"],
+        }
+    )
+
+    assert record["record_type"] == "finance_paper_shadow_decision"
+    assert record["paper_trade_only"] is True
+    assert record["would_submit_order"] is False
+    assert "get_quote" in record["missing_tool_results"]
+
+
+def test_trade_without_required_tool_results_is_blocked() -> None:
+    with pytest.raises(FinanceShadowValidationError, match="trade_missing_tool_results"):
+        validate_finance_shadow_payload(
+            {
+                "action": "BUY",
+                "symbol": "005930",
+                "quantity": 1,
+                "evidence_ids": ["ev-1"],
+            }
+        )
+
+
+def test_order_tools_are_forbidden_in_shadow_plan() -> None:
+    with pytest.raises(FinanceShadowValidationError, match="order_tool_in_shadow_plan"):
+        validate_finance_shadow_payload(
+            {
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "required_tools": ["get_quote", "submit_paper_order"],
+            }
+        )
+
+
+def test_trade_over_risk_limit_is_blocked_and_learnable() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 10,
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=_complete_tool_results())
+
+    assert exc_info.value.code == "trade_exceeds_risk_limit"
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=_complete_tool_results())
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
+def test_small_trade_with_evidence_tools_and_risk_limit_is_record_only() -> None:
+    record = build_finance_shadow_record(
+        {
+            "action": "BUY",
+            "symbol": "005930",
+            "market": "kr_stock",
+            "quantity": 2,
+            "evidence_ids": ["ev-samsung-risk-001"],
+            "reason": "risk-limited paper shadow decision",
+        },
+        tool_results=_complete_tool_results(),
+    )
+
+    assert record["action"] == "BUY"
+    assert record["notional"] == 140_000
+    assert record["within_risk_limit"] is True
+    assert record["paper_trade_only"] is True
+    assert record["would_submit_order"] is False
+    assert set(record["tool_result_names"]) == {
+        "get_balance",
+        "get_positions",
+        "get_quote",
+        "get_market_session",
+        "get_risk_limit",
+        "search_rag",
+    }
+
+
+def test_profit_guarantee_expression_is_blocked() -> None:
+    with pytest.raises(FinanceShadowValidationError, match="profit_guarantee_expression"):
+        validate_finance_shadow_payload(
+            {
+                "action": "HOLD",
+                "symbol": "005930",
+                "reason": "This is a guaranteed profit with no downside.",
+            }
+        )

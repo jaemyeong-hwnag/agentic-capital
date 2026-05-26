@@ -41,6 +41,37 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 
 기본값은 zero-decision 5 cycles, minimum pacing 60 seconds다.
 
+## Paper Shadow Gate
+
+paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance model 출력만 deterministic하게 검사한다.
+`agentic-capital`이 질문, 계좌 상태, tool 결과를 sidecar에 보낸 뒤 받은 decision payload는
+`agentic_capital.adapters.llm.local_finance_shadow`로 통과시킨다.
+
+필수 순서:
+
+1. `finance_rag_query_model`: 질문을 `query`, `symbol`, `market`, `route`, `requires_fresh_data`로 정규화
+2. `finance_tool_planner_model`: `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 계획
+3. `finance_decision_model`: `BUY | SELL | HOLD | WAIT | OBSERVE | REJECT | CALL_TOOL` 중 하나 반환
+4. `finance_risk_guard_model`: 보장 수익, live 권한 없는 주문, 근거 없는 매매 차단
+5. shadow gate: 주문 실행 없이 `finance_paper_shadow_decision` 또는 `raw_model_failure` record 생성
+
+`BUY` 또는 `SELL`이 shadow record로만 허용되는 조건:
+
+- `evidence_ids`가 비어 있지 않다.
+- `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있다.
+- 주문 계획에 `submit_order`, `submit_paper_order`, `submit_futures_order`, `place_order`, `execute_trade`가 없다.
+- `quantity * quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
+- market session이 open/regular 상태다.
+- reason/final answer에 수익 보장 표현이 없다.
+
+위 조건 미달이면 주문 대신 `raw_model_failure` record를 만들고, `retrain_candidate=true`로 남겨 raw model failure 학습 루프에 넣는다.
+
+오프라인 회귀 테스트:
+
+```bash
+pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py
+```
+
 ## Security Notes
 
 - `.env` 값은 실행 시 settings로만 읽고 로그에 출력하지 않는다.
