@@ -342,7 +342,9 @@ def _market_session_is_open(tool_results: dict[str, Any]) -> bool:
     if session.get("is_open") is False or session.get("regular_session") is False:
         return False
     state = str(session.get("state") or session.get("session") or "").lower()
-    return state in {"", "open", "regular", "regular_open"}
+    if state in {"open", "regular", "regular_open"}:
+        return True
+    return session.get("is_open") is True or session.get("regular_session") is True
 
 
 def _nested(mapping: Any, *keys: str) -> Any:
