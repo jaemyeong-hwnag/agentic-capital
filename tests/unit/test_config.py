@@ -23,6 +23,10 @@ class TestConfig:
         assert s.local_finance_pipeline_enabled is True
         assert s.local_finance_default_symbol == "005930"
         assert s.local_finance_risk_per_trade_pct == 0.05
+        assert s.local_finance_rag_query_base_url == ""
+        assert s.local_finance_tool_planner_base_url == ""
+        assert s.local_finance_decision_base_url == ""
+        assert s.local_finance_risk_guard_base_url == ""
         assert s.local_psychology_base_url == "http://127.0.0.1:19400/v1"
         assert s.local_psychology_model == "psychology_model_suite"
         assert s.local_psychology_readiness_required is False

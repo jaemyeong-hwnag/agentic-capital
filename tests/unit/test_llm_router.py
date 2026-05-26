@@ -130,6 +130,42 @@ def test_finance_smoke_cli_returns_one_on_runtime_error(capsys):
     assert "local_llm_model_mismatch" in output
 
 
+def test_local_finance_stage_base_urls_default_to_primary_base_url():
+    with patch.object(local_finance_runtime.settings, "local_llm_base_url", "http://127.0.0.1:8080/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_rag_query_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_tool_planner_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_decision_base_url", ""), \
+         patch.object(local_finance_runtime.settings, "local_finance_risk_guard_base_url", ""):
+        assert (
+            local_finance_runtime._chat_url(local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL)
+            == "http://127.0.0.1:8080/v1/chat/completions"
+        )
+
+
+def test_local_finance_stage_base_urls_route_to_individual_sidecars():
+    with patch.object(local_finance_runtime.settings, "local_llm_base_url", "http://127.0.0.1:8080/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_rag_query_base_url", "http://127.0.0.1:18101/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_tool_planner_base_url", "http://127.0.0.1:18102/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_decision_base_url", "http://127.0.0.1:18103/v1"), \
+         patch.object(local_finance_runtime.settings, "local_finance_risk_guard_base_url", "http://127.0.0.1:18104/v1"):
+        assert (
+            local_finance_runtime._chat_url(local_finance_runtime.FINANCE_RAG_QUERY_MODEL)
+            == "http://127.0.0.1:18101/v1/chat/completions"
+        )
+        assert (
+            local_finance_runtime._chat_url(local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL)
+            == "http://127.0.0.1:18102/v1/chat/completions"
+        )
+        assert (
+            local_finance_runtime._chat_url(local_finance_runtime.FINANCE_DECISION_MODEL)
+            == "http://127.0.0.1:18103/v1/chat/completions"
+        )
+        assert (
+            local_finance_runtime._chat_url(local_finance_runtime.FINANCE_RISK_GUARD_MODEL)
+            == "http://127.0.0.1:18104/v1/chat/completions"
+        )
+
+
 @pytest.mark.asyncio
 async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context():
     async def collect_tool_results(payload):

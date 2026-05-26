@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     local_finance_pipeline_enabled: bool = True
     local_finance_default_symbol: str = "005930"
     local_finance_risk_per_trade_pct: float = 0.05
+    local_finance_rag_query_base_url: str = ""
+    local_finance_tool_planner_base_url: str = ""
+    local_finance_decision_base_url: str = ""
+    local_finance_risk_guard_base_url: str = ""
     local_psychology_base_url: str = "http://127.0.0.1:19400/v1"
     local_psychology_model: str = "psychology_model_suite"
     local_psychology_expected_health_model: str = ""

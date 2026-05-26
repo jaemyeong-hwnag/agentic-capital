@@ -90,6 +90,10 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_FINANCE_PIPELINE_ENABLED` | 선택 | 기본값 `true`. local provider + finance model + Trader cycle이면 ReAct 대신 `rag_query -> tool_plan -> tool 결과 -> decision -> risk_guard` 전용 flow 사용 |
 | `LOCAL_FINANCE_DEFAULT_SYMBOL` | 선택 | finance sidecar payload에 symbol이 없을 때 쓰는 기본 종목. 기본값 `005930` |
 | `LOCAL_FINANCE_RISK_PER_TRADE_PCT` | 선택 | finance sidecar용 risk metadata 기본값. 실제 주문 권한은 부여하지 않음 |
+| `LOCAL_FINANCE_RAG_QUERY_BASE_URL` | 선택 | `finance_rag_query_model` 전용 OpenAI-compatible gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
+| `LOCAL_FINANCE_TOOL_PLANNER_BASE_URL` | 선택 | `finance_tool_planner_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
+| `LOCAL_FINANCE_DECISION_BASE_URL` | 선택 | `finance_decision_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용. `search_rag`도 기본적으로 이 gateway의 `/search`를 사용 |
+| `LOCAL_FINANCE_RISK_GUARD_BASE_URL` | 선택 | `finance_risk_guard_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
 | `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
 | `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
@@ -141,6 +145,15 @@ bash scripts/run_local_finance_sidecar.sh
 ```
 
 이 스크립트는 기본적으로 `finance_decision_model` RAG Gateway를 `127.0.0.1:8080`에 띄운다. 포트를 바꾸려면 `PORT=18000 bash scripts/run_local_finance_sidecar.sh`처럼 실행하고, 앱 쪽은 `LOCAL_LLM_BASE_URL=http://127.0.0.1:18000/v1`로 맞춘다.
+
+Trader finance pipeline을 실사용하려면 core stage를 같은 gateway에 몰아넣지 말고 각 sidecar URL을 분리한다. 예:
+
+```bash
+LOCAL_FINANCE_RAG_QUERY_BASE_URL=http://127.0.0.1:18101/v1
+LOCAL_FINANCE_TOOL_PLANNER_BASE_URL=http://127.0.0.1:18102/v1
+LOCAL_FINANCE_DECISION_BASE_URL=http://127.0.0.1:18103/v1
+LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18104/v1
+```
 
 ### 선물 단타 모드
 ```

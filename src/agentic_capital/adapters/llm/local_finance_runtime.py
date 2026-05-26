@@ -32,6 +32,12 @@ FINANCE_RAG_QUERY_MODEL = "finance_rag_query_model"
 FINANCE_TOOL_PLANNER_MODEL = "finance_tool_planner_model"
 FINANCE_DECISION_MODEL = "finance_decision_model"
 FINANCE_RISK_GUARD_MODEL = "finance_risk_guard_model"
+FINANCE_STAGE_BASE_URL_SETTINGS = {
+    FINANCE_RAG_QUERY_MODEL: "local_finance_rag_query_base_url",
+    FINANCE_TOOL_PLANNER_MODEL: "local_finance_tool_planner_base_url",
+    FINANCE_DECISION_MODEL: "local_finance_decision_base_url",
+    FINANCE_RISK_GUARD_MODEL: "local_finance_risk_guard_base_url",
+}
 
 
 class LocalFinanceRuntimeError(RuntimeError):
@@ -187,8 +193,14 @@ def validate_finance_decision_payload(payload: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _chat_url() -> str:
-    return _join_url(settings.local_llm_base_url, "/chat/completions")
+def _base_url_for_model(model: str) -> str:
+    specific_setting = FINANCE_STAGE_BASE_URL_SETTINGS.get(model, "")
+    specific = str(getattr(settings, specific_setting, "") or "").strip() if specific_setting else ""
+    return specific or settings.local_llm_base_url
+
+
+def _chat_url(model: str = "") -> str:
+    return _join_url(_base_url_for_model(model), "/chat/completions")
 
 
 def _coerce_json_payload(content: str, *, fallback_action: str = "NO_CONTEXT") -> dict[str, Any]:
@@ -218,7 +230,7 @@ async def _call_finance_stage(
         "temperature": 0.0,
     }
     async with httpx.AsyncClient(timeout=settings.local_llm_timeout_seconds) as client:
-        response = await client.post(_chat_url(), headers=_auth_headers(), json=request_payload)
+        response = await client.post(_chat_url(model), headers=_auth_headers(), json=request_payload)
         response.raise_for_status()
         content = _extract_content(response.json())
     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -247,10 +259,15 @@ def _extract_evidence_ids(evidence: list[dict[str, Any]]) -> list[str]:
     return ids
 
 
-async def _search_rag(queries: list[str], *, top_k: int = 6) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+async def _search_rag(
+    queries: list[str],
+    *,
+    top_k: int = 6,
+    base_url: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Search the finance RAG gateway. Search failure is evidence, not a crash."""
     started = time.perf_counter()
-    search_url = _join_url(_gateway_root(settings.local_llm_base_url), "/search")
+    search_url = _join_url(_gateway_root(base_url or _base_url_for_model(FINANCE_DECISION_MODEL)), "/search")
     evidence: list[dict[str, Any]] = []
     errors: list[str] = []
     async with httpx.AsyncClient(timeout=settings.local_llm_timeout_seconds) as client:
@@ -344,7 +361,7 @@ async def run_local_finance_decision_pipeline(
         sidecar_calls.append(meta)
 
         queries = _extract_queries(rag_query, user_question)
-        evidence, search_meta = await _search_rag(queries)
+        evidence, search_meta = await _search_rag(queries, base_url=_base_url_for_model(FINANCE_DECISION_MODEL))
         sidecar_calls.append(search_meta)
         evidence_ids = _extract_evidence_ids(evidence)
 

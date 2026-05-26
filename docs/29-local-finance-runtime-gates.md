@@ -58,6 +58,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `domain-llm-forge`: finance 모델/RAG sidecar 자체를 제공한다. GGUF, RAG index, eval report, service spec은 이 프로젝트의 책임이다.
 - `agentic-capital`: paper trading 실행 전후로 finance sidecar를 올바른 순서로 호출하고, broker/account/market read-only 결과를 구조화해서 넘기며, shadow decision과 raw failure를 DB에 기록한다.
 - `agentic-capital`은 finance 모델을 일반 ReAct agent LLM처럼 쓰지 않는다. Trader cycle에서 `LOCAL_FINANCE_PIPELINE_ENABLED=true`, `LOCAL_LLM_MODEL=finance_*`, local provider이면 finance 전용 flow로 분기한다.
+- `domain-llm-forge` RAG Gateway는 프로세스 시작 시 `RAG_SERVICE`가 고정된다. 실사용 paper-shadow에서는 `finance_rag_query_model`, `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model`을 각각 다른 gateway URL로 띄우고 `LOCAL_FINANCE_*_BASE_URL`로 연결한다. 비워두면 호환성을 위해 `LOCAL_LLM_BASE_URL` 하나를 사용하지만, 이는 smoke/단일 sidecar 검증용이다.
 
 필수 순서:
 
