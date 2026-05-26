@@ -223,6 +223,24 @@ duplicate engine -> stop duplicate immediately
 
 ## QA 상세 계획
 
+### 0. 고정 QA/RAG 데이터 명세
+
+로컬 에이전트 전환은 먼저 deterministic QA suite로 시작한다.
+
+| 산출물 | 위치 | 용도 |
+|--------|------|------|
+| QA/eval case registry | `src/agentic_capital/core/local_ai/datasets.py` | 로컬 모델 승격 전 tool/schema/capital 제약 검증 |
+| QA 수집 recipe | `qa_collection_recipes()` | `agent_cycles`, `trades`, `positions`, memory에서 SFT/eval record 수집 |
+| RAG 데이터 요구사항 | `rag_data_requirements()` | metadata-aware retrieval, reranking, hard negative 구성 |
+| 단위 테스트 | `tests/unit/test_local_ai_datasets.py` | QA case coverage와 manifest invariant 보장 |
+
+세부 전략은 `docs/24-local-agent-data-strategy.md`에 둔다.
+
+심리/personality 계층은 finance 판단 모델과 분리한다. 모델별 명세와 절대경로는
+`docs/local-psychology-models/10-psychology-model-suite.md`에 둔다. psychology 모델은
+personality, emotion, drift, social dynamics, reflection, eval을 담당하지만 직접 주문,
+직접 HR action, 자본 제약 변경은 하지 않는다.
+
 ### 1. Unit QA
 
 | 테스트 | 목적 |

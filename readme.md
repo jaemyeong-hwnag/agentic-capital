@@ -95,6 +95,11 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [21 - Design Validation](docs/21-design-validation.md) | Paper-based DB/dataset AI-friendliness audit |
 | [22 - AI Quant Reality Application](docs/22-ai-quant-reality-application.md) | Cost-aware realistic operating model |
 | [23 - Local LLM Roadmap](docs/23-local-llm-roadmap.md) | Local LLM migration milestones, training, QA, and live-readiness criteria |
+| [24 - Local Agent Data Strategy](docs/24-local-agent-data-strategy.md) | Local-agent QA/RAG dataset strategy |
+| [25 - Local Agent Service Onboarding](docs/25-local-agent-service-onboarding.md) | Runtime/provider/eval/deployment gate spec for local agents |
+| [26 - Local Finance Model Onboarding](docs/26-local-finance-model-onboarding.md) | Finance local model service contracts |
+| [27 - Finance Sidecar Runbook](docs/27-domain-llm-forge-finance-sidecar.md) | domain-llm-forge finance RAG/model sidecar integration |
+| [28 - Psychology Sidecar Runbook](docs/28-domain-llm-forge-psychology-sidecar.md) | domain-llm-forge psychology RAG/model sidecar integration |
 
 ## Key Papers
 
