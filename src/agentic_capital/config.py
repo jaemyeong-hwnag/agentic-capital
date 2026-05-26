@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -9,6 +10,16 @@ class Settings(BaseSettings):
     # LLM
     gemini_api_key: str = ""
     openai_api_key: str = ""
+    llm_provider: str = Field(
+        default="gemini",
+        validation_alias=AliasChoices("LLM_PROVIDER", "LOCAL_LLM_PROVIDER"),
+    )  # gemini | local
+    local_llm_base_url: str = "http://127.0.0.1:8080/v1"
+    local_llm_model: str = "finance_decision_model"
+    local_embedding_model: str = "finance_embedding_model"
+    local_llm_api_key: str = ""
+    local_llm_timeout_seconds: float = 30.0
+    local_llm_temperature: float = 0.2
 
     # Database
     database_url: str = "postgresql+asyncpg://agent:agent_dev_password@localhost:5432/agentic_capital"

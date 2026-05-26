@@ -48,10 +48,17 @@ class TestSimulationRecorder:
     async def test_start_simulation(self):
         recorder = self._make_recorder()
         sim_id = await recorder.start_simulation(
-            seed=42, initial_capital=10_000_000, config={"test": True}
+            seed=42,
+            initial_capital=10_000_000,
+            config={"test": True},
+            llm_model="finance_decision_model",
+            embedding_model="finance_embedding_model",
         )
         assert sim_id is not None
         assert recorder._simulation_id is not None
+        run = recorder._session.add.call_args.args[0]
+        assert run.llm_model == "finance_decision_model"
+        assert run.embedding_model == "finance_embedding_model"
 
     @pytest.mark.asyncio
     async def test_record_agent(self):
@@ -283,6 +290,27 @@ class TestSimulationRecorder:
         assert record.net_pnl_krw == 300.0
         assert record.decision_roi == 2.0
         assert record.economics_snapshot["cost_basis"]["fixed_cycle_krw"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_record_agent_cycle_preserves_llm_metadata(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+
+        await recorder.record_agent_cycle(
+            agent_id=uuid.uuid4(),
+            agent_name="Trader-Gamma",
+            cycle_number=8,
+            tool_sequence=[],
+            llm_reasoning="hold",
+            emotion_snapshot={"CF": 0.5},
+            started_at=datetime(2026, 1, 1, 9, 0, 0),
+            completed_at=datetime(2026, 1, 1, 9, 0, 1),
+            economics_snapshot={"llm_provider": "local", "llm_model": "finance_decision_model"},
+        )
+
+        record = recorder._session.add.call_args.args[0]
+        assert record.economics_snapshot["llm_provider"] == "local"
+        assert record.economics_snapshot["llm_model"] == "finance_decision_model"
 
     @pytest.mark.asyncio
     async def test_commit(self):

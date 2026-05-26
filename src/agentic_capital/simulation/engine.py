@@ -51,10 +51,10 @@ class SimulationEngine:
         """Initialize all adapters and tracing from settings."""
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
-        from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
+        from agentic_capital.adapters.llm.router import build_llm_adapter
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
 
-        self._llm = GeminiLLMAdapter()
+        self._llm = build_llm_adapter()
         kis_session = KISSession()
         self._trading = KISTradingAdapter(session=kis_session)
         from agentic_capital.adapters.market_data.yfinance_adapter import YFinanceMarketDataAdapter
@@ -109,16 +109,22 @@ class SimulationEngine:
         """Initialize DB recorder if database is available."""
         try:
             from agentic_capital.infra.database import async_session
+            from agentic_capital.adapters.llm.router import llm_run_metadata
             from agentic_capital.simulation.recorder import SimulationRecorder
 
             session = async_session()
             self._recorder = SimulationRecorder(session)
+            metadata = llm_run_metadata()
             sim_id = await self._recorder.start_simulation(
                 seed=settings.simulation_seed,
                 initial_capital=settings.initial_capital,
                 config={
                     "agents": [a.name for a in self._agents],
+                    "llm_provider": metadata["llm_provider"],
+                    "llm_base_url": metadata.get("llm_base_url"),
                 },
+                llm_model=metadata["llm_model"],
+                embedding_model=metadata["embedding_model"],
             )
 
             for agent in self._agents:

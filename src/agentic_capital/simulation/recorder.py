@@ -69,14 +69,17 @@ class SimulationRecorder:
         seed: int,
         initial_capital: float,
         config: dict,
+        *,
+        llm_model: str = "gemini-2.5-flash",
+        embedding_model: str = "text-embedding-004",
     ) -> uuid.UUID:
         """Create a simulation run record."""
         sim_id = uuid.uuid4()
         run = SimulationRunModel(
             id=sim_id,
             seed=seed,
-            llm_model="gemini-2.5-flash",
-            embedding_model="text-embedding-004",
+            llm_model=llm_model,
+            embedding_model=embedding_model,
             config=config,
             initial_capital=initial_capital,
             status="running",
@@ -310,6 +313,7 @@ class SimulationRecorder:
         errors_count: int = 0,
         next_cycle_seconds: float = 0,
         net_pnl_krw: float | None = None,
+        economics_snapshot: dict | None = None,
     ) -> None:
         """Record full LLM cycle: tool call chain + final reasoning + timing.
 
@@ -323,6 +327,10 @@ class SimulationRecorder:
             tool_calls_count=len(tool_sequence),
             net_pnl_krw=net_pnl_krw,
         )
+        compact_economics = economics.to_compact_dict()
+        if economics_snapshot:
+            compact_economics = {**compact_economics, **economics_snapshot}
+
         record = AgentCycleModel(
             simulation_id=self._simulation_id,
             agent_id=agent_id,
@@ -341,7 +349,7 @@ class SimulationRecorder:
             ai_cost_krw=economics.ai_cost_krw,
             net_pnl_krw=economics.net_pnl_krw,
             decision_roi=economics.decision_roi,
-            economics_snapshot=economics.to_compact_dict(),
+            economics_snapshot=compact_economics,
         )
         self._session.add(record)
         await self._session.flush()

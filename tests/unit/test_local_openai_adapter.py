@@ -1,0 +1,133 @@
+"""Tests for local OpenAI-compatible LLM adapters."""
+
+from __future__ import annotations
+
+import pytest
+from langchain_core.messages import HumanMessage
+
+from agentic_capital.adapters.llm.local_openai import (
+    LocalOpenAICompatibleAdapter,
+    LocalOpenAICompatibleChatModel,
+)
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    last_request = {}
+
+    def __init__(self, *, timeout):
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def post(self, url, *, headers, json):
+        _FakeAsyncClient.last_request = {"url": url, "headers": headers, "json": json}
+        if url.endswith("/embeddings"):
+            return _FakeResponse({"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+        return _FakeResponse({"choices": [{"message": {"content": "local answer"}}]})
+
+
+class _FakeSyncClient:
+    last_request = {}
+
+    def __init__(self, *, timeout):
+        self.timeout = timeout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return None
+
+    def post(self, url, *, headers, json):
+        _FakeSyncClient.last_request = {"url": url, "headers": headers, "json": json}
+        return _FakeResponse({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_balance",
+                            "arguments": '{"market": "kr_stock"}',
+                        },
+                    }],
+                },
+            }],
+        })
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_generate_posts_chat_completion(monkeypatch):
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.AsyncClient", _FakeAsyncClient)
+    adapter = LocalOpenAICompatibleAdapter(
+        base_url="http://127.0.0.1:8080/v1/",
+        model="finance_decision_model",
+        embedding_model="finance_embedding_model",
+        api_key="",
+        timeout_seconds=5,
+    )
+
+    result = await adapter.generate("005930 매수 가능?", system="paper mode only")
+
+    assert result == "local answer"
+    assert _FakeAsyncClient.last_request["url"] == "http://127.0.0.1:8080/v1/chat/completions"
+    assert _FakeAsyncClient.last_request["json"]["model"] == "finance_decision_model"
+    assert _FakeAsyncClient.last_request["json"]["messages"][0]["role"] == "system"
+    assert "Authorization" not in _FakeAsyncClient.last_request["headers"]
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_embed_posts_embedding_request(monkeypatch):
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.AsyncClient", _FakeAsyncClient)
+    adapter = LocalOpenAICompatibleAdapter(
+        base_url="http://127.0.0.1:8080/v1",
+        model="finance_decision_model",
+        embedding_model="finance_embedding_model",
+        timeout_seconds=5,
+    )
+
+    result = await adapter.embed("risk limit evidence")
+
+    assert result == [0.1, 0.2, 0.3]
+    assert _FakeAsyncClient.last_request["url"] == "http://127.0.0.1:8080/v1/embeddings"
+    assert _FakeAsyncClient.last_request["json"]["model"] == "finance_embedding_model"
+
+
+def test_local_chat_model_parses_tool_calls(monkeypatch):
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _FakeSyncClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:8080/v1",
+        model="finance_tool_planner_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_balance",
+                "description": "paper account balance",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="잔고 확인")])
+
+    assert message.tool_calls[0]["name"] == "get_balance"
+    assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
+    assert _FakeSyncClient.last_request["json"]["tool_choice"] == "auto"

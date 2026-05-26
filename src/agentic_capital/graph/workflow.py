@@ -14,7 +14,7 @@ from typing import Any
 import structlog
 from langgraph.prebuilt import create_react_agent  # noqa: F401 — imported at module level for testability
 
-from agentic_capital.config import settings
+from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_run_metadata
 from agentic_capital.core.agents.base import BaseAgent
 from agentic_capital.core.tools.data_query import build_agent_tools
 from agentic_capital.graph.nodes import record_cycle
@@ -83,15 +83,10 @@ def _cycle_error_backoff_seconds(errors: list[str]) -> int:
 
 
 def _get_langchain_llm():
-    """Lazy-init LangChain-compatible Gemini LLM (shared across agents)."""
+    """Lazy-init the configured LangChain-compatible LLM."""
     global _langchain_llm
     if _langchain_llm is None:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        _langchain_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=settings.gemini_api_key,
-            temperature=0.7,
-        )
+        _langchain_llm = build_langchain_chat_model()
     return _langchain_llm
 
 
@@ -275,6 +270,7 @@ async def run_agent_cycle(
                 tool_sequence=tool_seq,
                 llm_reasoning=reasoning,
                 emotion_snapshot=emotion_snap,
+                economics_snapshot=llm_run_metadata(),
                 started_at=cycle_started_at,
                 completed_at=cycle_completed_at,
                 decisions_count=len(all_decisions),

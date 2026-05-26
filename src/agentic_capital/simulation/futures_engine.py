@@ -79,13 +79,22 @@ class FuturesEngine:
         """Initialize recorder and return simulation_id. Falls back to random UUID on error."""
         try:
             from agentic_capital.infra.database import async_session
+            from agentic_capital.adapters.llm.router import llm_run_metadata
             from agentic_capital.simulation.recorder import SimulationRecorder
             from agentic_capital.config import settings
             self._recorder = SimulationRecorder(session=async_session())
+            metadata = llm_run_metadata()
             sim_id = await self._recorder.start_simulation(
                 seed=settings.simulation_seed,
                 initial_capital=self._capital_limit,
-                config={"mode": "futures_scalping"},
+                config={
+                    "mode": "futures_scalping",
+                    "paper_trading": settings.kis_is_paper,
+                    "llm_provider": metadata["llm_provider"],
+                    "llm_base_url": metadata.get("llm_base_url"),
+                },
+                llm_model=metadata["llm_model"],
+                embedding_model=metadata["embedding_model"],
             )
             await self._recorder.commit()
             return sim_id
@@ -285,15 +294,11 @@ class FuturesEngine:
             f"{MANDATE_FUTURES}"
         )
 
-        from langchain_google_genai import ChatGoogleGenerativeAI
+        from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_run_metadata
         from langchain_core.messages import HumanMessage
         from langgraph.prebuilt import create_react_agent
 
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=settings.gemini_api_key,
-            temperature=0.7,
-        )
+        llm = build_langchain_chat_model()
         react_agent = create_react_agent(llm, tools, prompt=system_prompt)
 
         from datetime import datetime
@@ -351,6 +356,7 @@ class FuturesEngine:
                     tool_sequence=tool_seq,
                     llm_reasoning=reasoning,
                     emotion_snapshot=emotion_snap,
+                    economics_snapshot=llm_run_metadata(),
                     started_at=started_at,
                     completed_at=completed_at,
                     decisions_count=len(decisions_sink),
