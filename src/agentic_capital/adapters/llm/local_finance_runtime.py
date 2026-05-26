@@ -325,6 +325,22 @@ def _risk_flags(risk_guard_payload: dict[str, Any]) -> list[str]:
     return []
 
 
+def _blocked_order_tools(tool_results: dict[str, Any]) -> list[str]:
+    errors = tool_results.get("_errors")
+    if not isinstance(errors, list):
+        return []
+    blocked: list[str] = []
+    for item in errors:
+        if not isinstance(item, dict) or item.get("error") != "order_tool_blocked_in_shadow":
+            continue
+        tools = item.get("tools") or []
+        if isinstance(tools, str):
+            tools = [tools]
+        if isinstance(tools, list):
+            blocked.extend(str(tool) for tool in tools if str(tool))
+    return sorted(set(blocked))
+
+
 def _normalise_decision_payload(
     decision_payload: dict[str, Any],
     *,
@@ -430,6 +446,7 @@ async def run_local_finance_decision_pipeline(
         )
         sidecar_calls.append(meta)
         decision = _normalise_decision_payload(decision, tool_results=tool_results, evidence_ids=evidence_ids)
+        blocked_order_tools = _blocked_order_tools(tool_results)
 
         risk_guard, meta = await _call_finance_stage(
             model=FINANCE_RISK_GUARD_MODEL,
@@ -448,7 +465,22 @@ async def run_local_finance_decision_pipeline(
                 "reason": f"risk_guard_hard_fail:{risk_guard.get('explanation', '')}",
             }
 
-        if risk_guard.get("hard_fail") is True:
+        if blocked_order_tools:
+            record = build_finance_shadow_failure_record(
+                FinanceShadowValidationError(
+                    "order_tool_in_shadow_plan",
+                    details={"forbidden_tools": blocked_order_tools},
+                ),
+                {
+                    **decision,
+                    "tool_plan": tool_plan.get("tool_plan") if isinstance(tool_plan, dict) else tool_plan,
+                    "risk_tags": sorted(
+                        set(["order_tool_blocked_in_shadow", *risk_flags, *decision.get("risk_tags", [])])
+                    ),
+                },
+                tool_results=tool_results,
+            )
+        elif risk_guard.get("hard_fail") is True:
             record = build_finance_shadow_failure_record(
                 FinanceShadowValidationError(
                     "risk_guard_hard_fail",

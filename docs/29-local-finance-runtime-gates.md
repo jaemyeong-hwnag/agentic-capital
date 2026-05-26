@@ -90,6 +90,8 @@ read-only tool result schema:
 - `search_rag`: `evidence_ids`, `evidence_count`, 상위 evidence
 
 tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_trade` 같은 주문 tool을 요청하면 collector는 실행하지 않고 `_errors`에 `order_tool_blocked_in_shadow`를 남긴다.
+pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않고
+`raw_model_failure(failure_type=order_tool_in_shadow_plan)`로 기록한다.
 
 `BUY` 또는 `SELL`이 shadow record로만 허용되는 조건:
 
@@ -194,6 +196,22 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `failure_type=trade_exceeds_available_cash`
 - 원본 `action=BUY` 유지
 - `available_cash`, `notional` 기록
+- `evidence_ids` 유지
+- `retrain_candidate=true`
+- 주문 실행 없음
+
+## 2026-05-27 Order Tool Planner Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_tool_planner_model`이 `submit_order` 같은 주문 tool을 계획에 포함하면,
+- collector는 해당 tool을 실행하지 않고 `_errors.error=order_tool_blocked_in_shadow`를 남기며,
+- runtime은 후속 decision이 안전한 `CALL_TOOL`이어도 이를 shadow decision으로 세지 않는다.
+
+기대 record:
+
+- `failure_type=order_tool_in_shadow_plan`
+- `forbidden_tools`와 원본 planned tool 유지
 - `evidence_ids` 유지
 - `retrain_candidate=true`
 - 주문 실행 없음
