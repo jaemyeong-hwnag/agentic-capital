@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     local_llm_api_key: str = ""
     local_llm_timeout_seconds: float = 30.0
     local_llm_temperature: float = 0.2
+    local_llm_readiness_required: bool = True
+    local_llm_expected_health_model: str = ""
+    local_llm_health_timeout_seconds: float = 5.0
+    local_finance_smoke_enabled: bool = True
+    local_finance_smoke_timeout_seconds: float = 30.0
 
     # Database
     database_url: str = "postgresql+asyncpg://agent:agent_dev_password@localhost:5432/agentic_capital"
@@ -65,6 +70,9 @@ class Settings(BaseSettings):
     simulation_seed: int = 42
     initial_capital: int = 1_000_000
     log_level: str = "INFO"
+    simulation_zero_decision_max_cycles: int = 5
+    simulation_min_cycle_seconds: int = 60
+    simulation_stop_when_market_closed: bool = False
 
     # Cost-aware evaluation
     ai_daily_op_cost_krw: float = 10_000.0

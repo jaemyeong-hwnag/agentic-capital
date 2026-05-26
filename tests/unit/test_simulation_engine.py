@@ -41,6 +41,28 @@ class TestSimulationEngine:
         engine.stop()
         assert engine._running is False
 
+    def test_startup_gate_validates_local_finance_runtime(self):
+        engine = SimulationEngine()
+        with patch("agentic_capital.adapters.llm.router.is_local_llm_enabled", return_value=True), \
+             patch("agentic_capital.adapters.llm.local_finance_runtime.validate_local_finance_runtime") as mock_validate:
+            engine._validate_startup_gate()
+        mock_validate.assert_called_once()
+
+    def test_cycle_guard_clamps_zero_delay(self):
+        engine = SimulationEngine()
+        result = engine._apply_cycle_guards(requested_delay=0, total_decisions=1)
+        assert result == 60
+        assert engine._running is False
+
+    def test_zero_decision_guard_stops_after_threshold(self):
+        engine = SimulationEngine()
+        engine._running = True
+        with patch("agentic_capital.simulation.engine.settings.simulation_zero_decision_max_cycles", 2):
+            engine._apply_cycle_guards(requested_delay=60, total_decisions=0)
+            engine._apply_cycle_guards(requested_delay=60, total_decisions=0)
+        assert engine._running is False
+        assert engine._stop_reason == "zero_decision_guard"
+
     def test_init_agents(self):
         engine = SimulationEngine()
         llm = _make_llm()

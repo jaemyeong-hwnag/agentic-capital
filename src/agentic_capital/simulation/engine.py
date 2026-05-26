@@ -46,9 +46,22 @@ class SimulationEngine:
         self._market_data = None
         self._recorder = None
         self._capital_limit: float = float(settings.initial_capital)
+        self._zero_decision_streak = 0
+        self._stop_reason: str | None = None
+
+    def _validate_startup_gate(self) -> None:
+        """Block paper trading unless the finance local LLM is ready."""
+        from agentic_capital.adapters.llm.router import is_local_llm_enabled
+
+        if not is_local_llm_enabled():
+            return
+        from agentic_capital.adapters.llm.local_finance_runtime import validate_local_finance_runtime
+
+        validate_local_finance_runtime()
 
     def _init_adapters(self) -> None:
         """Initialize all adapters and tracing from settings."""
+        self._validate_startup_gate()
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.llm.router import build_llm_adapter
@@ -192,7 +205,7 @@ class SimulationEngine:
             if self._recorder:
                 await self._recorder.end_simulation("stopped")
                 await self._recorder.commit()
-            logger.info("simulation_stopped", total_cycles=self._cycle_count)
+            logger.info("simulation_stopped", total_cycles=self._cycle_count, reason=self._stop_reason)
 
     def stop(self) -> None:
         """Signal the simulation to stop."""
@@ -251,17 +264,56 @@ class SimulationEngine:
 
         # Collect agent-requested delays — use minimum (most urgent wins)
         delays = [r.get("next_cycle_seconds", 0) for r in cycle_results if r]
-        next_delay = min(delays) if delays else 0
+        requested_delay = min(delays) if delays else 0
+        total_decisions = sum(len(r.get("decisions", [])) for r in cycle_results)
+        next_delay = self._apply_cycle_guards(requested_delay=requested_delay, total_decisions=total_decisions)
 
         logger.info(
             "cycle_complete",
             cycle=self._cycle_count,
             agents_count=len(self._agents),
-            total_decisions=sum(len(r.get("decisions", [])) for r in cycle_results),
+            total_decisions=total_decisions,
             next_cycle_in=f"{next_delay}s",
+            zero_decision_streak=self._zero_decision_streak,
         )
 
         return next_delay
+
+    def _apply_cycle_guards(self, *, requested_delay: int | float | None, total_decisions: int) -> int:
+        """Clamp unsafe pacing and stop repeated no-decision loops."""
+        max_zero_cycles = max(int(settings.simulation_zero_decision_max_cycles), 0)
+        if total_decisions <= 0:
+            self._zero_decision_streak += 1
+        else:
+            self._zero_decision_streak = 0
+
+        if max_zero_cycles and self._zero_decision_streak >= max_zero_cycles:
+            self._stop_reason = "zero_decision_guard"
+            self._running = False
+            logger.warning(
+                "zero_decision_guard_triggered",
+                streak=self._zero_decision_streak,
+                max_cycles=max_zero_cycles,
+            )
+
+        try:
+            delay = int(requested_delay or 0)
+        except (TypeError, ValueError):
+            delay = 0
+
+        min_delay = max(int(settings.simulation_min_cycle_seconds), 1)
+        if delay <= 0:
+            if settings.simulation_stop_when_market_closed and not is_market_open():
+                self._stop_reason = self._stop_reason or "market_closed_zero_delay"
+                self._running = False
+                logger.warning("cycle_pacing_market_closed_stop", requested_delay=delay)
+                return 0
+            logger.warning("cycle_pacing_clamped", requested_delay=delay, min_cycle_seconds=min_delay)
+            return min_delay
+        if delay < min_delay:
+            logger.warning("cycle_pacing_clamped", requested_delay=delay, min_cycle_seconds=min_delay)
+            return min_delay
+        return delay
 
     async def _process_org_actions(self, agent: BaseAgent, result: dict) -> None:
         """Process organizational actions from any agent's decisions.

@@ -16,6 +16,10 @@ class TestConfig:
         assert s.llm_provider == "local"
         assert s.local_llm_model == "finance_decision_model"
         assert s.local_embedding_model == "finance_embedding_model"
+        assert s.local_llm_readiness_required is True
+        assert s.local_finance_smoke_enabled is True
+        assert s.simulation_zero_decision_max_cycles == 5
+        assert s.simulation_min_cycle_seconds == 60
 
     def test_database_url_default(self) -> None:
         s = Settings(_env_file=None)

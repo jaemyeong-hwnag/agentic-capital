@@ -48,8 +48,21 @@ class FuturesEngine:
         self._deadman_max_errors: int = settings.futures_deadman_max_errors
         self._deadman_cooldown_secs: int = settings.futures_deadman_cooldown_secs
         self._consecutive_errors: int = 0
+        self._zero_decision_streak: int = 0
+        self._stop_reason: str | None = None
+
+    def _validate_startup_gate(self) -> None:
+        """Block futures paper trading unless the finance local LLM is ready."""
+        from agentic_capital.adapters.llm.router import is_local_llm_enabled
+
+        if not is_local_llm_enabled():
+            return
+        from agentic_capital.adapters.llm.local_finance_runtime import validate_local_finance_runtime
+
+        validate_local_finance_runtime()
 
     def _init_adapters(self) -> None:
+        self._validate_startup_gate()
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
@@ -327,6 +340,10 @@ class FuturesEngine:
             result_messages = []
 
         completed_at = datetime.now()
+        next_secs = self._apply_cycle_guards(
+            requested_delay=wakeup_sink[-1] if wakeup_sink else _DEFAULT_CYCLE_SECONDS,
+            total_decisions=len(decisions_sink),
+        )
 
         # Record cycle to DB
         if self._recorder:
@@ -361,20 +378,49 @@ class FuturesEngine:
                     completed_at=completed_at,
                     decisions_count=len(decisions_sink),
                     errors_count=0,
-                    next_cycle_seconds=wakeup_sink[-1] if wakeup_sink else 0,
+                    next_cycle_seconds=next_secs,
                 )
                 await self._recorder.commit()
             except Exception:
                 logger.warning("futures_cycle_record_failed")
 
-        next_secs = wakeup_sink[-1] if wakeup_sink else _DEFAULT_CYCLE_SECONDS
         logger.info(
             "futures_cycle_complete",
             cycle=self._cycle_count,
             decisions=len(decisions_sink),
             next_secs=next_secs,
+            zero_decision_streak=self._zero_decision_streak,
         )
         return float(next_secs)
+
+    def _apply_cycle_guards(self, *, requested_delay: int | float | None, total_decisions: int) -> int:
+        max_zero_cycles = max(int(settings.simulation_zero_decision_max_cycles), 0)
+        if total_decisions <= 0:
+            self._zero_decision_streak += 1
+        else:
+            self._zero_decision_streak = 0
+
+        if max_zero_cycles and self._zero_decision_streak >= max_zero_cycles:
+            self._stop_reason = "zero_decision_guard"
+            self._running = False
+            logger.warning(
+                "futures_zero_decision_guard_triggered",
+                streak=self._zero_decision_streak,
+                max_cycles=max_zero_cycles,
+            )
+
+        try:
+            delay = int(requested_delay or 0)
+        except (TypeError, ValueError):
+            delay = 0
+        min_delay = max(int(settings.simulation_min_cycle_seconds), 1)
+        if delay <= 0:
+            logger.warning("futures_cycle_pacing_clamped", requested_delay=delay, min_cycle_seconds=min_delay)
+            return min_delay
+        if delay < min_delay:
+            logger.warning("futures_cycle_pacing_clamped", requested_delay=delay, min_cycle_seconds=min_delay)
+            return min_delay
+        return delay
 
     async def start(self) -> None:
         """Start the futures scalping loop."""
@@ -404,6 +450,7 @@ class FuturesEngine:
                 await asyncio.sleep(next_delay)
             except KeyboardInterrupt:
                 logger.info("futures_engine_stopped_by_user")
+                self._stop_reason = "keyboard_interrupt"
                 self._running = False
             except Exception:
                 logger.exception("futures_engine_cycle_error")

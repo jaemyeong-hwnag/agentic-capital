@@ -72,6 +72,7 @@ dev = [
 [project.scripts]
 agentic-capital = "agentic_capital.main:main"
 agentic-capital-futures = "agentic_capital.futures:main"
+agentic-capital-finance-smoke = "agentic_capital.local_finance_smoke:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_capital"]
