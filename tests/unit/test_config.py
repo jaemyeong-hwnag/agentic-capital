@@ -13,7 +13,7 @@ class TestConfig:
         assert s.initial_capital == 1_000_000
         assert s.log_level == "INFO"
         assert s.kis_is_paper is True
-        assert s.llm_provider == "gemini"
+        assert s.llm_provider == "local"
         assert s.local_llm_model == "finance_decision_model"
         assert s.local_embedding_model == "finance_embedding_model"
 

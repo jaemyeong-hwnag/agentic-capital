@@ -131,3 +131,38 @@ def test_local_chat_model_parses_tool_calls(monkeypatch):
     assert message.tool_calls[0]["name"] == "get_balance"
     assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
     assert _FakeSyncClient.last_request["json"]["tool_choice"] == "auto"
+    assert "tool_calls" in _FakeSyncClient.last_request["json"]["messages"][0]["content"]
+
+
+def test_local_chat_model_parses_textual_tool_call(monkeypatch):
+    class _TextToolClient(_FakeSyncClient):
+        def post(self, url, *, headers, json):
+            return _FakeResponse({
+                "choices": [{
+                    "message": {
+                        "content": '{"tool_calls":[{"name":"get_positions","args":{"market":"kr_stock"},"id":"call_2"}]}',
+                    },
+                }],
+            })
+
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _TextToolClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:18000/v1",
+        model="finance_decision_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_positions",
+                "description": "paper positions",
+                "parameters": {"type": "object", "properties": {"market": {"type": "string"}}},
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="포지션 확인")])
+
+    assert message.content == ""
+    assert message.tool_calls[0]["name"] == "get_positions"
+    assert message.tool_calls[0]["args"] == {"market": "kr_stock"}

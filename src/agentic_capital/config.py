@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     llm_provider: str = Field(
-        default="gemini",
+        default="local",
         validation_alias=AliasChoices("LLM_PROVIDER", "LOCAL_LLM_PROVIDER"),
     )  # gemini | local
     local_llm_base_url: str = "http://127.0.0.1:8080/v1"

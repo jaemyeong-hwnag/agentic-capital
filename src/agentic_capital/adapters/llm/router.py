@@ -17,6 +17,7 @@ logger = structlog.get_logger()
 
 
 LOCAL_PROVIDER_NAMES = {"local", "rag", "local_openai", "domain_llm_forge"}
+HOSTED_PROVIDER_NAMES = {"gemini"}
 
 
 def active_llm_provider() -> str:
@@ -33,6 +34,8 @@ def build_llm_adapter() -> LLMPort:
         from agentic_capital.adapters.llm.local_openai import LocalOpenAICompatibleAdapter
 
         return LocalOpenAICompatibleAdapter()
+    if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
+        raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
 
     from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
 
@@ -51,6 +54,8 @@ def build_langchain_chat_model() -> Any:
             timeout_seconds=settings.local_llm_timeout_seconds,
             temperature=settings.local_llm_temperature,
         )
+    if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
+        raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 

@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentic_capital.adapters.llm import router
 
 
@@ -23,9 +25,15 @@ def test_router_builds_local_langchain_model():
     assert model.base_url == "http://127.0.0.1:8080/v1"
 
 
-def test_router_keeps_gemini_as_default_provider():
+def test_router_uses_gemini_only_when_explicitly_configured():
     with patch.object(router.settings, "llm_provider", "gemini"), \
          patch("langchain_google_genai.ChatGoogleGenerativeAI", return_value=MagicMock()) as mock_cls:
         router.build_langchain_chat_model()
 
     mock_cls.assert_called_once()
+
+
+def test_router_rejects_unknown_provider_instead_of_falling_back_to_gemini():
+    with patch.object(router.settings, "llm_provider", "gemni"):
+        with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
+            router.build_langchain_chat_model()

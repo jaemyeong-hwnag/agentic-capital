@@ -123,7 +123,7 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
     for index, raw in enumerate(raw_tool_calls):
         function = raw.get("function", {}) if isinstance(raw, dict) else {}
         name = function.get("name") or raw.get("name") if isinstance(raw, dict) else ""
-        arguments = function.get("arguments") or raw.get("arguments") if isinstance(raw, dict) else {}
+        arguments = function.get("arguments") or raw.get("arguments") or raw.get("args") if isinstance(raw, dict) else {}
         if isinstance(arguments, str):
             try:
                 args = json.loads(arguments) if arguments else {}
@@ -141,6 +141,37 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
     return parsed
 
 
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = [line for line in stripped.splitlines() if not line.strip().startswith("```")]
+        stripped = "\n".join(lines).strip()
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            parsed = json.loads(stripped[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_tool_calls_from_content(content: str) -> list[dict[str, Any]]:
+    parsed = _extract_json_object(content)
+    if not parsed:
+        return []
+    raw_tool_calls = parsed.get("tool_calls")
+    if raw_tool_calls is None and parsed.get("tool_call"):
+        raw_tool_calls = [parsed["tool_call"]]
+    return _parse_tool_calls(raw_tool_calls)
+
+
 def _chat_result_from_payload(payload: dict[str, Any]) -> ChatResult:
     try:
         message = payload["choices"][0]["message"]
@@ -149,8 +180,30 @@ def _chat_result_from_payload(payload: dict[str, Any]) -> ChatResult:
 
     content = message.get("content") or ""
     tool_calls = _parse_tool_calls(message.get("tool_calls"))
+    if not tool_calls and isinstance(content, str):
+        tool_calls = _parse_tool_calls_from_content(content)
+        if tool_calls:
+            content = ""
     ai_message = AIMessage(content=content, tool_calls=tool_calls)
     return ChatResult(generations=[ChatGeneration(message=ai_message)])
+
+
+def _tool_prompt(tools: list[Any]) -> str:
+    schemas = [_tool_to_openai_schema(tool) for tool in tools]
+    compact = [
+        {
+            "name": schema.get("function", {}).get("name", ""),
+            "description": schema.get("function", {}).get("description", ""),
+            "parameters": schema.get("function", {}).get("parameters", {}),
+        }
+        for schema in schemas
+    ]
+    return (
+        "도구 호출이 필요하면 일반 답변 대신 JSON object만 출력하세요. "
+        "형식: {\"tool_calls\":[{\"name\":\"tool_name\",\"args\":{},\"id\":\"call_1\"}]}. "
+        "필요한 도구가 없거나 최종 답변이면 일반 텍스트로 답하세요. "
+        f"사용 가능한 도구: {json.dumps(compact, ensure_ascii=False)}"
+    )
 
 
 class LocalOpenAICompatibleAdapter(LLMPort):
@@ -249,9 +302,17 @@ class LocalOpenAICompatibleChatModel(BaseChatModel):
         })
 
     def _body(self, messages: list[BaseMessage], stop: list[str] | None = None) -> dict[str, Any]:
+        openai_messages = [_message_to_openai(message) for message in messages]
+        if self.bound_tools:
+            tool_instruction = _tool_prompt(self.bound_tools)
+            if openai_messages and openai_messages[0].get("role") == "system":
+                openai_messages[0]["content"] = f"{openai_messages[0].get('content', '')}\n\n{tool_instruction}"
+            else:
+                openai_messages.insert(0, {"role": "system", "content": tool_instruction})
+
         body: dict[str, Any] = {
             "model": self.model,
-            "messages": [_message_to_openai(message) for message in messages],
+            "messages": openai_messages,
             "temperature": self.temperature,
         }
         if stop:
