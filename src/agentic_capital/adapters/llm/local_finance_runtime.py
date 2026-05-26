@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -10,7 +12,13 @@ import structlog
 
 from agentic_capital.adapters.llm.local_finance_shadow import (
     FinanceShadowValidationError,
+    build_finance_shadow_failure_record,
+    build_finance_shadow_record,
     validate_finance_shadow_payload,
+)
+from agentic_capital.adapters.llm.local_psychology_runtime import (
+    LocalPsychologyRuntimeError,
+    build_finance_soft_context,
 )
 from agentic_capital.config import settings
 
@@ -18,6 +26,10 @@ logger = structlog.get_logger()
 
 SAFE_NO_CONTEXT_ACTIONS = {"CALL_TOOL", "WAIT", "REJECT", "NO_CONTEXT", "OBSERVE", "HOLD"}
 TRADE_ACTIONS = {"BUY", "SELL"}
+FINANCE_RAG_QUERY_MODEL = "finance_rag_query_model"
+FINANCE_TOOL_PLANNER_MODEL = "finance_tool_planner_model"
+FINANCE_DECISION_MODEL = "finance_decision_model"
+FINANCE_RISK_GUARD_MODEL = "finance_risk_guard_model"
 
 
 class LocalFinanceRuntimeError(RuntimeError):
@@ -137,6 +149,13 @@ def _normalize_action(value: Any) -> str:
 
 def validate_finance_decision_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate a local finance decision response before paper trading starts."""
+    psychology_context = payload.get("psychology_context")
+    if isinstance(psychology_context, dict):
+        try:
+            payload = {**payload, "psychology_context": build_finance_soft_context(psychology_context)}
+        except LocalPsychologyRuntimeError as exc:
+            raise LocalFinanceRuntimeError(f"local_finance_psychology_context_unsafe: {exc}") from exc
+
     action = _normalize_action(payload.get("action") or payload.get("decision") or payload.get("status"))
     if not action:
         reason = str(payload.get("reason") or payload.get("message") or "").lower()

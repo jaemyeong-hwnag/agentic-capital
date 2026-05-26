@@ -8,6 +8,9 @@ import pytest
 
 from agentic_capital.core.decision.pipeline import TradingDecision
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
+from agentic_capital.infra.models.agent import AgentDecisionModel
+from agentic_capital.infra.models.cycle import AgentCycleModel
+from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
 from agentic_capital.simulation.recorder import SimulationRecorder, _emotion_to_dict, _personality_to_dict
 
 
@@ -311,6 +314,63 @@ class TestSimulationRecorder:
         record = recorder._session.add.call_args.args[0]
         assert record.economics_snapshot["llm_provider"] == "local"
         assert record.economics_snapshot["llm_model"] == "finance_decision_model"
+
+    @pytest.mark.asyncio
+    async def test_record_agent_cycle_stores_psychology_as_soft_context(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+
+        await recorder.record_agent_cycle(
+            agent_id=uuid.uuid4(),
+            agent_name="Trader-Gamma",
+            cycle_number=9,
+            tool_sequence=[],
+            llm_reasoning="hold",
+            emotion_snapshot={"CF": 0.5},
+            started_at=datetime(2026, 1, 1, 9, 0, 0),
+            completed_at=datetime(2026, 1, 1, 9, 0, 1),
+            psychology_context={
+                "agent_state_patch": {"attention": "risk_review"},
+                "evidence_ids": ["memory-1"],
+                "confidence": 0.72,
+                "uncertainty": ["requires finance tools before trade"],
+                "risk_tags": ["overconfidence_risk"],
+                "allowed_downstream_use": "context_only",
+            },
+        )
+
+        record = recorder._session.add.call_args.args[0]
+        assert isinstance(record, AgentCycleModel)
+        context = record.economics_snapshot["psychology_context"]
+        assert context["use_as"] == "soft_risk_context_not_alpha"
+        assert "trade_action" in context["forbidden_use"]
+
+    @pytest.mark.asyncio
+    async def test_record_psychology_context_persists_memory_and_eval_record(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+
+        result = await recorder.record_psychology_context(
+            agent_id=uuid.uuid4(),
+            cycle_number=9,
+            source="psychology_behavior_bias_model",
+            psychology_context={
+                "agent_state_patch": {"attention": "risk_review"},
+                "evidence_ids": ["memory-1"],
+                "confidence": 0.72,
+                "uncertainty": ["requires finance tools before trade"],
+                "risk_tags": ["overconfidence_risk"],
+                "allowed_downstream_use": "context_only",
+            },
+        )
+
+        added = [call.args[0] for call in recorder._session.add.call_args_list]
+        assert result["use_as"] == "soft_risk_context_not_alpha"
+        assert any(isinstance(item, MemoryModel) for item in added)
+        assert any(isinstance(item, EpisodicDetailModel) for item in added)
+        decision = next(item for item in added if isinstance(item, AgentDecisionModel))
+        assert decision.decision_type == "psychology_evaluation"
+        assert decision.action == "context_only"
 
     @pytest.mark.asyncio
     async def test_commit(self):

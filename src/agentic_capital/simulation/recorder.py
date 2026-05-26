@@ -6,9 +6,10 @@ No exceptions. Roles, permissions, messages, decisions, emotions, positions — 
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -314,6 +315,7 @@ class SimulationRecorder:
         next_cycle_seconds: float = 0,
         net_pnl_krw: float | None = None,
         economics_snapshot: dict | None = None,
+        psychology_context: dict | None = None,
     ) -> None:
         """Record full LLM cycle: tool call chain + final reasoning + timing.
 
@@ -330,6 +332,10 @@ class SimulationRecorder:
         compact_economics = economics.to_compact_dict()
         if economics_snapshot:
             compact_economics = {**compact_economics, **economics_snapshot}
+        if psychology_context:
+            from agentic_capital.adapters.llm.local_psychology_runtime import build_finance_soft_context
+
+            compact_economics["psychology_context"] = build_finance_soft_context(psychology_context)
 
         record = AgentCycleModel(
             simulation_id=self._simulation_id,
@@ -353,6 +359,72 @@ class SimulationRecorder:
         )
         self._session.add(record)
         await self._session.flush()
+
+    async def record_psychology_context(
+        self,
+        agent_id: uuid.UUID,
+        psychology_context: dict[str, Any],
+        *,
+        source: str = "psychology_model_suite",
+        cycle_number: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist psychology output as record/memory/evaluation context only.
+
+        This never creates trade records and never changes order permissions,
+        sizing, capital allocation, or finance decisions.
+        """
+        from agentic_capital.adapters.llm.local_psychology_runtime import build_finance_soft_context
+        from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
+
+        soft_context = build_finance_soft_context(psychology_context)
+        risk_tags = soft_context.get("risk_tags", [])
+        evidence_ids = soft_context.get("evidence_ids", [])
+        confidence = float(soft_context.get("confidence", 0.0))
+        context_text = json.dumps(soft_context, ensure_ascii=False, sort_keys=True)
+
+        memory = MemoryModel(
+            agent_id=agent_id,
+            simulation_id=self._simulation_id,
+            memory_type="episodic",
+            context=f"psychology_context:{context_text}",
+            keywords=["psychology", "risk_context", source],
+            tags=["psychology_context", "soft_context", *[str(tag) for tag in risk_tags]],
+            links=[],
+            q_value=min(max(confidence, 0.0), 1.0),
+            importance=0.6,
+        )
+        self._session.add(memory)
+        await self._session.flush()
+
+        self._session.add(
+            EpisodicDetailModel(
+                memory_id=memory.id,
+                observation=f"psychology_context evidence_ids={','.join(map(str, evidence_ids))}",
+                action="record_psychology_context",
+                outcome="context_only",
+                reflection=context_text,
+            )
+        )
+        self._session.add(
+            AgentDecisionModel(
+                agent_id=agent_id,
+                simulation_id=self._simulation_id,
+                decision_type="psychology_evaluation",
+                action="context_only",
+                reasoning=f"{source} soft context only; not alpha, not order authority",
+                confidence=confidence,
+                personality_snapshot={},
+                emotion_snapshot={},
+                context_snapshot={
+                    "source": source,
+                    "cycle_number": cycle_number,
+                    "psychology_context": soft_context,
+                },
+                outcome={"allowed_downstream_use": "record_risk_state_evaluation_only"},
+            )
+        )
+        await self._session.flush()
+        return soft_context
 
     async def record_agent_message(self, message: AgentMessage) -> None:
         """Record LACP protocol message to PostgreSQL for permanent storage."""

@@ -6,11 +6,16 @@ Agents don't control this — it happens automatically after every cycle.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import structlog
 
-from agentic_capital.core.agents.base import BaseAgent
+if TYPE_CHECKING:
+    from agentic_capital.core.agents.base import BaseAgent
 
 logger = structlog.get_logger()
+
+PSYCHOLOGY_DECISION_TYPES = {"psychology", "psychology_context", "psychology_evaluation"}
 
 
 async def record_cycle(
@@ -47,6 +52,16 @@ async def record_cycle(
                 continue
 
             decision_type = d.get("type", d.get("decision_type", "general"))
+
+            if str(decision_type) in PSYCHOLOGY_DECISION_TYPES:
+                if hasattr(recorder, "record_psychology_context"):
+                    await recorder.record_psychology_context(
+                        agent_id=agent_id,
+                        psychology_context=d.get("psychology_context", d),
+                        source=str(d.get("source") or "psychology_model_suite"),
+                        cycle_number=cycle_number,
+                    )
+                continue
 
             if decision_type in ("trade", "BUY", "SELL", "HOLD", "buy", "sell", "hold") or (
                 d.get("action") in ("BUY", "SELL", "buy", "sell") and d.get("symbol")

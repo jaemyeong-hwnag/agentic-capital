@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentic_capital import local_psychology_smoke
-from agentic_capital.adapters.llm import local_psychology_runtime
+from agentic_capital.adapters.llm import local_finance_runtime, local_psychology_runtime
 
 
 def test_local_psychology_health_accepts_expected_model() -> None:
@@ -51,6 +51,52 @@ def test_psychology_payload_accepts_context_only_schema() -> None:
 
     assert result["evidence_count"] == 1
     assert result["allowed_downstream_use"] == "context_only"
+
+
+def test_psychology_payload_rejects_order_mutation_fields() -> None:
+    with pytest.raises(local_psychology_runtime.LocalPsychologyRuntimeError, match="order_mutation_key"):
+        local_psychology_runtime.validate_psychology_context_payload({
+            "signals": [],
+            "agent_state_patch": {"order_permission": True},
+            "evidence_ids": ["memory-1"],
+            "confidence": 0.72,
+            "uncertainty": ["psychology context cannot mutate order authority"],
+            "risk_tags": ["impulsivity_risk"],
+            "allowed_downstream_use": "context_only",
+        })
+
+
+def test_build_finance_soft_context_strips_non_soft_psychology_fields() -> None:
+    result = local_psychology_runtime.build_finance_soft_context({
+        "signals": [{"name": "overconfidence"}],
+        "agent_state_patch": {"attention": "risk_review"},
+        "evidence_ids": ["memory-1"],
+        "confidence": 0.72,
+        "uncertainty": ["needs finance tools before any trade"],
+        "risk_tags": ["overconfidence_risk"],
+        "allowed_downstream_use": "risk_context_not_alpha",
+    })
+
+    assert result["use_as"] == "soft_risk_context_not_alpha"
+    assert "trade_action" in result["forbidden_use"]
+    assert "signals" not in result
+    assert "action" not in result
+
+
+def test_finance_decision_rejects_unsafe_psychology_context() -> None:
+    with pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="psychology_context_unsafe"):
+        local_finance_runtime.validate_finance_decision_payload({
+            "action": "HOLD",
+            "evidence_ids": [],
+            "required_tools": [],
+            "psychology_context": {
+                "action": "BUY",
+                "evidence_ids": ["memory-1"],
+                "confidence": 0.7,
+                "uncertainty": ["unsafe action leak"],
+                "allowed_downstream_use": "context_only",
+            },
+        })
 
 
 @pytest.mark.parametrize(

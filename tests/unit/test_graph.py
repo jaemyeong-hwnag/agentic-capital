@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import pytest
 
+from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.base import AgentProfile
 from agentic_capital.core.agents.ceo import CEOAgent
-from agentic_capital.core.agents.analyst import AnalystAgent
-from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.core.agents.factory import create_random_personality
+from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
-from agentic_capital.graph.workflow import _error_retry_seconds, run_agent_cycle
+from agentic_capital.graph.workflow import _error_retry_seconds, _extract_psychology_context, run_agent_cycle
 from agentic_capital.ports.llm import LLMPort
 
 
@@ -50,6 +50,7 @@ def _make_recorder():
     recorder = MagicMock()
     recorder.record_emotion = AsyncMock()
     recorder.record_decision = AsyncMock()
+    recorder.record_psychology_context = AsyncMock()
     recorder.record_hr_event = AsyncMock()
     recorder.record_agent_message = AsyncMock()
     recorder.record_position_snapshot = AsyncMock()
@@ -102,6 +103,27 @@ class TestRecordCycle:
         recorder.record_decision.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_records_psychology_context_without_decision_route(self):
+        ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
+        recorder = _make_recorder()
+        decisions = [{
+            "type": "psychology_context",
+            "source": "psychology_behavior_bias_model",
+            "psychology_context": {
+                "agent_state_patch": {"attention": "risk_review"},
+                "evidence_ids": ["memory-1"],
+                "confidence": 0.72,
+                "uncertainty": ["requires finance tools before trade"],
+                "risk_tags": ["overconfidence_risk"],
+                "allowed_downstream_use": "context_only",
+            },
+        }]
+        await record_cycle(ceo, 1, decisions=decisions, messages=[], recorder=recorder)
+
+        recorder.record_psychology_context.assert_called_once()
+        recorder.record_decision.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_records_messages(self):
         ceo = CEOAgent(profile=_make_profile(), personality=create_random_personality(42), llm=_make_llm())
         recorder = _make_recorder()
@@ -128,6 +150,25 @@ class TestStateBackwardCompat:
             "errors": [],
         }
         assert state["agent_name"] == "TestAgent"
+
+
+class TestPsychologyContextExtraction:
+    def test_extracts_first_psychology_context_for_cycle_record(self):
+        context = {
+            "evidence_ids": ["memory-1"],
+            "confidence": 0.72,
+            "uncertainty": ["requires finance tools"],
+            "allowed_downstream_use": "context_only",
+        }
+        result = _extract_psychology_context([
+            {"type": "strategy", "detail": "observe"},
+            {"type": "psychology_context", "psychology_context": context},
+        ])
+
+        assert result == context
+
+    def test_ignores_non_psychology_decisions(self):
+        assert _extract_psychology_context([{"type": "trade", "action": "HOLD"}]) is None
 
 
 # ─── run_agent_cycle tests (mocked LLM) ───

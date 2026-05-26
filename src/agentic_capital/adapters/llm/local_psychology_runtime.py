@@ -18,7 +18,26 @@ logger = structlog.get_logger()
 REQUIRED_FIELDS = {"evidence_ids", "confidence", "uncertainty"}
 TRADE_ACTIONS = {"BUY", "SELL", "ORDER", "SUBMIT_ORDER", "PLACE_ORDER"}
 DISALLOWED_DOWNSTREAM = {"trade_decision", "order_execution", "alpha_signal"}
+ALLOWED_DOWNSTREAM = {"context_only", "record_only", "risk_context_not_alpha", "agent_state_context"}
 CLINICAL_TERMS = ("diagnosis", "treatment", "therapy", "prescription", "진단", "치료", "처방")
+ORDER_MUTATION_KEYS = {
+    "quantity",
+    "qty",
+    "order_quantity",
+    "position_size",
+    "position_size_pct",
+    "order_permission",
+    "live_order_enabled",
+    "live_orders_enabled",
+    "capital",
+    "capital_delta",
+    "capital_allocation",
+    "risk_limit",
+    "risk_limit_override",
+    "max_order_value",
+    "target_weight",
+}
+SOFT_CONTEXT_KEYS = {"risk_tags", "confidence", "uncertainty", "evidence_ids", "agent_state_patch"}
 
 
 class LocalPsychologyRuntimeError(RuntimeError):
@@ -194,13 +213,28 @@ def _reject_trade_action_leak(payload: dict[str, Any]) -> None:
             raise LocalPsychologyRuntimeError("local_psychology_order_instruction_leak")
 
 
+def _reject_order_mutation(payload: dict[str, Any]) -> None:
+    def walk(value: Any, path: str = "") -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                key_text = str(key)
+                if key_text in ORDER_MUTATION_KEYS:
+                    raise LocalPsychologyRuntimeError(f"local_psychology_order_mutation_key: {path}{key_text}")
+                walk(nested, f"{path}{key_text}.")
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                walk(nested, f"{path}{index}.")
+
+    walk(payload)
+
+
 def _reject_clinical_claim(payload: dict[str, Any]) -> None:
     for value in _walk_values(payload):
         if isinstance(value, str) and any(term in value.lower() for term in CLINICAL_TERMS):
             raise LocalPsychologyRuntimeError("local_psychology_clinical_claim")
 
 
-def validate_psychology_context_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def normalize_psychology_context(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate a psychology sidecar response before it can affect agent state."""
     missing = sorted(REQUIRED_FIELDS - set(payload))
     if missing:
@@ -219,14 +253,53 @@ def validate_psychology_context_payload(payload: dict[str, Any]) -> dict[str, An
     downstream_use = str(payload.get("allowed_downstream_use", "context_only")).lower()
     if downstream_use in DISALLOWED_DOWNSTREAM:
         raise LocalPsychologyRuntimeError(f"local_psychology_disallowed_downstream_use: {downstream_use}")
+    if downstream_use not in ALLOWED_DOWNSTREAM:
+        downstream_use = "context_only"
 
     _reject_trade_action_leak(payload)
+    _reject_order_mutation(payload)
     _reject_clinical_claim(payload)
+
+    risk_tags = payload.get("risk_tags") or []
+    if not isinstance(risk_tags, list):
+        risk_tags = [str(risk_tags)]
+    agent_state_patch = payload.get("agent_state_patch") or {}
+    if not isinstance(agent_state_patch, dict):
+        agent_state_patch = {}
+
     return {
-        "evidence_count": len(evidence_ids),
+        "signals": [],
+        "agent_state_patch": agent_state_patch,
+        "evidence_ids": evidence_ids,
         "confidence": float(confidence),
-        "uncertainty_count": len(uncertainty),
+        "uncertainty": uncertainty,
+        "risk_tags": [str(tag) for tag in risk_tags if str(tag)],
         "allowed_downstream_use": downstream_use,
+        "use_as": "psychology_context_not_alpha",
+    }
+
+
+def validate_psychology_context_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate and summarize a psychology sidecar response."""
+    normalized = normalize_psychology_context(payload)
+    return {
+        "evidence_count": len(normalized["evidence_ids"]),
+        "confidence": normalized["confidence"],
+        "uncertainty_count": len(normalized["uncertainty"]),
+        "allowed_downstream_use": normalized["allowed_downstream_use"],
+    }
+
+
+def build_finance_soft_context(payload: dict[str, Any]) -> dict[str, Any]:
+    """Reduce psychology output to a finance-safe soft risk context."""
+    normalized = normalize_psychology_context(payload)
+    return {
+        key: normalized[key]
+        for key in SOFT_CONTEXT_KEYS
+        if normalized.get(key) not in (None, [], {})
+    } | {
+        "use_as": "soft_risk_context_not_alpha",
+        "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
     }
 
 

@@ -9,15 +9,17 @@ The only constraint: capital. The only goal: make money.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from langgraph.prebuilt import create_react_agent  # noqa: F401 — imported at module level for testability
+from langgraph.prebuilt import create_react_agent
 
 from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_run_metadata
-from agentic_capital.core.agents.base import BaseAgent
 from agentic_capital.core.tools.data_query import build_agent_tools
 from agentic_capital.graph.nodes import record_cycle
+
+if TYPE_CHECKING:
+    from agentic_capital.core.agents.base import BaseAgent
 
 logger = structlog.get_logger()
 
@@ -153,10 +155,22 @@ def _extract_llm_reasoning(messages: list) -> str:
     """Extract final AI reasoning — last AIMessage with text content (no tool calls)."""
     for msg in reversed(messages):
         content = getattr(msg, "content", None)
-        if content and isinstance(content, str) and content.strip():
-            if not getattr(msg, "tool_calls", None):
-                return content[:2000]
+        if content and isinstance(content, str) and content.strip() and not getattr(msg, "tool_calls", None):
+            return content[:2000]
     return ""
+
+
+def _extract_psychology_context(decisions: list[dict]) -> dict | None:
+    """Return the first psychology context decision for cycle-level auditing."""
+    psychology_types = {"psychology", "psychology_context", "psychology_evaluation"}
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        decision_type = str(decision.get("type") or decision.get("decision_type") or "")
+        if decision_type in psychology_types:
+            context = decision.get("psychology_context", decision)
+            return context if isinstance(context, dict) else None
+    return None
 
 
 async def run_agent_cycle(
@@ -179,7 +193,9 @@ async def run_agent_cycle(
         dict with 'decisions', 'messages', 'errors' for the engine to process.
     """
     from datetime import datetime
+
     from langchain_core.messages import HumanMessage
+
     from agentic_capital.core.tools.data_query import _build_dynamic_tool
 
     # Load AI-created tools from DB and build StructuredTool instances
@@ -236,6 +252,7 @@ async def run_agent_cycle(
     org_decisions = _extract_org_decisions(result_messages)
 
     all_decisions = decisions_sink + org_decisions
+    psychology_context = _extract_psychology_context(all_decisions)
 
     # Record decisions/emotions/messages to DB
     await record_cycle(
@@ -276,6 +293,7 @@ async def run_agent_cycle(
                 decisions_count=len(all_decisions),
                 errors_count=len(errors),
                 next_cycle_seconds=next_cycle_seconds,
+                psychology_context=psychology_context,
             )
             await recorder.commit()
         except Exception:

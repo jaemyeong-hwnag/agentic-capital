@@ -266,14 +266,26 @@ finance 계층으로 넘길 때는 다음으로 축소한다.
 ```json
 {
   "psychology_context": {
-    "agent_id": "CEO-Alpha",
     "risk_tags": ["overconfidence_risk"],
     "evidence_ids": ["memory-123"],
     "confidence": 0.72,
-    "use_as": "risk_context_not_alpha"
+    "uncertainty": ["requires finance tools before any trade"],
+    "agent_state_patch": {"attention": "risk_review"},
+    "use_as": "soft_risk_context_not_alpha",
+    "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"]
   }
 }
 ```
+
+Agentic Capital 쪽 recorder 경로는 세 곳에 남긴다.
+
+| 저장 위치 | 내용 | 목적 |
+|---|---|---|
+| `agent_cycles.economics_snapshot.psychology_context` | soft context 축소본 | cycle audit와 비용/행동 추적 |
+| `memories` + `episodic_details` | psychology context memory | 이후 drift/bias/RAG 회수 |
+| `agent_decisions.decision_type=psychology_evaluation` | `action=context_only` evaluation record | eval/회귀/실패 학습 기록 |
+
+`record_cycle`은 `psychology`, `psychology_context`, `psychology_evaluation` 타입을 trade/general decision route로 보내지 않고 `record_psychology_context`로만 보낸다. finance decision payload에 psychology가 섞여도 runtime validator가 `build_finance_soft_context`로 축소하고, BUY/SELL, 수량, 주문 권한, 자본 배분 필드는 deterministic hard failure로 차단한다.
 
 ## 안전 경계
 
