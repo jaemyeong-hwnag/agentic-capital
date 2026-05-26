@@ -102,6 +102,23 @@ def test_buy_over_available_cash_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_missing_notional_is_blocked_and_learnable() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=_complete_tool_results())
+
+    assert exc_info.value.code == "trade_missing_notional"
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=_complete_tool_results())
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
 def test_trade_with_fabricated_evidence_id_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",

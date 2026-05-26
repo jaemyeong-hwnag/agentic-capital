@@ -192,6 +192,7 @@ def build_finance_shadow_failure_record(
             "trade_missing_evidence_ids",
             "trade_missing_rag_evidence",
             "trade_uncovered_evidence_ids",
+            "trade_missing_notional",
             "trade_exceeds_risk_limit",
             "trade_exceeds_available_cash",
             "trade_missing_position_quantity",

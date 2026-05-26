@@ -100,6 +100,7 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 - `evidence_ids`는 `search_rag.evidence_ids` 또는 반환 evidence의 id/doc_id/chunk_id에서 나온 값이어야 한다.
 - 주문 계획에 `submit_order`, `submit_paper_order`, `submit_futures_order`, `place_order`, `execute_trade`가 없다.
 - `quantity * quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
+- `quantity`, `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
 - `SELL`은 `get_positions`의 보유 수량을 넘지 않는다.
 - market session이 open/regular 상태다.
 - reason/final answer에 수익 보장 표현이 없다.
@@ -197,6 +198,23 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `failure_type=trade_exceeds_available_cash`
 - 원본 `action=BUY` 유지
 - `available_cash`, `notional` 기록
+- `evidence_ids` 유지
+- `retrain_candidate=true`
+- 주문 실행 없음
+
+## 2026-05-27 Missing Notional Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY`/`SELL` 후보와 실제 RAG evidence id를 반환하고,
+- balance, position, quote, market session, risk limit tool 결과가 모두 존재해도,
+- `quantity`, `price`, 또는 명시적 `notional`이 없어 주문 규모를 계산할 수 없으면
+- `finance_paper_shadow_decision`으로 세지 않고 `raw_model_failure`를 기록한다.
+
+기대 record:
+
+- `failure_type=trade_missing_notional`
+- 원본 `action` 유지
 - `evidence_ids` 유지
 - `retrain_candidate=true`
 - 주문 실행 없음
