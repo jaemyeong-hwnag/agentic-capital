@@ -86,9 +86,16 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `src/agentic_capital/graph/workflow.py`: Trader cycle을 finance 전용 flow로 분기한다.
 - `src/agentic_capital/adapters/llm/router.py`: CEO/Analyst 일반 ReAct agent는 `LOCAL_AGENT_LLM_BASE_URL`/`LOCAL_AGENT_LLM_MODEL`을 사용한다. `LOCAL_LLM_MODEL=finance_*`인데 agent base URL이 없으면 finance sidecar를 일반 LLM으로 오용하지 않도록 시작 실패한다.
 - `src/agentic_capital/adapters/llm/local_finance_runtime.py`: rag query, RAG search, tool planner, decision, risk guard sidecar client를 실행한다.
-- `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다.
+- `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다. 일반 ReAct agent tool은 role별로 노출하며, CEO/Analyst에는 주문 실행/취소/fill/reallocation tool을 노출하지 않는다.
 - `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.
 - `src/agentic_capital/simulation/engine.py`: zero-decision guard 실행 전에 finance `no_context`/raw failure가 기록됐는지 로그로 드러낸다.
+
+agent role tool boundary:
+
+- Trader: `LOCAL_FINANCE_PIPELINE_ENABLED=true`와 `LOCAL_LLM_MODEL=finance_*`이면 ReAct가 아니라 finance sidecar flow를 사용한다. legacy/non-finance Trader ReAct 실행에서만 주문 도구를 보유할 수 있다.
+- CEO/Analyst: 조직 운영, 분석, memory, market/account read-only 조회, 메시지 도구를 사용할 수 있다. `submit_order`, `cancel_order`, `get_fills`, `evaluate_reallocation`, `set_position_policy`는 ReAct tool list에서 제거된다.
+- CEO/Analyst가 주문 의도나 리밸런싱 아이디어를 낼 때는 직접 실행하지 않고 `send_message`로 Trader에게 지시 또는 분석을 전달한다.
+- HR/message tool은 `target_name`, `reason`, `to_agent`, `content` 같은 placeholder 값을 runtime 결정으로 기록하지 않고 `ERR:placeholder_*`로 거절한다.
 
 read-only tool result schema:
 

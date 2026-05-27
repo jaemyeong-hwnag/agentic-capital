@@ -65,6 +65,31 @@ def _float_or_none(value: Any) -> float | None:
         return None
 
 
+_PLACEHOLDER_TEXT = {
+    "",
+    "agent",
+    "agent_name",
+    "content",
+    "description",
+    "name",
+    "order_id",
+    "permissions",
+    "reason",
+    "role",
+    "role_name",
+    "symbol",
+    "target",
+    "target_name",
+    "to_agent",
+    "type",
+}
+
+
+def _is_placeholder_text(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return text in _PLACEHOLDER_TEXT or text.startswith("<") or text.endswith("_here")
+
+
 def _extract_finance_tool_names(tool_plan_payload: dict[str, Any]) -> set[str]:
     names: set[str] = set()
     candidates = [
@@ -878,6 +903,9 @@ def build_agent_tools(
         content: compact k:v pairs e.g. "sym:005930,act:BUY,cf:0.87,why:RSI_OS"
         Full wire format: TYPE|FROM|TO|TS|content
         """
+        if _is_placeholder_text(to_agent) or _is_placeholder_text(type) or _is_placeholder_text(content):
+            return "ERR:placeholder_message"
+
         from agentic_capital.formats.compact import msg_encode
         wire = msg_encode(type, agent_name, to_agent, content)
         msg = {
@@ -1007,6 +1035,9 @@ def build_agent_tools(
         personality: dict | None = None,
     ) -> str:
         """Hire a new agent. CEO decides role, name, capital allocation, philosophy."""
+        if _is_placeholder_text(role) or _is_placeholder_text(name):
+            return "ERR:placeholder_hr_decision"
+
         decision = {
             "type": "hire",
             "role": role,
@@ -1021,6 +1052,9 @@ def build_agent_tools(
 
     async def fire_agent(target_name: str, reason: str) -> str:
         """Fire an existing agent by name. CEO decides who and why."""
+        if _is_placeholder_text(target_name) or _is_placeholder_text(reason):
+            return "ERR:placeholder_hr_decision"
+
         decision = {
             "type": "fire",
             "target": target_name,
@@ -1032,6 +1066,11 @@ def build_agent_tools(
 
     async def create_role(role_name: str, description: str, permissions: list[str] | None = None) -> str:
         """Create a new organizational role with defined permissions."""
+        if _is_placeholder_text(role_name) or _is_placeholder_text(description):
+            return "ERR:placeholder_hr_decision"
+        if any(_is_placeholder_text(permission) for permission in (permissions or [])):
+            return "ERR:placeholder_hr_decision"
+
         decision = {
             "type": "create_role",
             "detail": role_name,

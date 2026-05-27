@@ -210,6 +210,24 @@ class TestBuildAgentTools:
         assert "ORDER123" in result
 
     @pytest.mark.asyncio
+    async def test_hr_tools_reject_placeholder_decisions(self):
+        tools, decisions, messages, _ = build_agent_tools(agent_name="CEO-Alpha")
+
+        fire = next(t for t in tools if t.name == "fire_agent")
+        send = next(t for t in tools if t.name == "send_message")
+        create_role = next(t for t in tools if t.name == "create_role")
+
+        assert await fire.coroutine(target_name="target_name", reason="reason") == "ERR:placeholder_hr_decision"
+        assert await send.coroutine(to_agent="to_agent", type="type", content="content") == "ERR:placeholder_message"
+        assert await create_role.coroutine(
+            role_name="role_name",
+            description="description",
+            permissions=["permissions"],
+        ) == "ERR:placeholder_hr_decision"
+        assert decisions == []
+        assert messages == []
+
+    @pytest.mark.asyncio
     async def test_save_and_search_memory(self):
         memory = {}
         tools, _, _, _ = build_agent_tools(agent_memory=memory)

@@ -12,7 +12,12 @@ from agentic_capital.core.agents.factory import create_random_personality
 from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
-from agentic_capital.graph.workflow import _error_retry_seconds, _extract_psychology_context, run_agent_cycle
+from agentic_capital.graph.workflow import (
+    _error_retry_seconds,
+    _extract_psychology_context,
+    _filter_tools_for_agent,
+    run_agent_cycle,
+)
 from agentic_capital.ports.llm import LLMPort
 
 
@@ -44,6 +49,12 @@ def _make_market_data():
     md.get_ohlcv = AsyncMock(return_value=[])
     md.get_order_book = AsyncMock(side_effect=NotImplementedError)
     return md
+
+
+def _tool(name: str):
+    tool = MagicMock()
+    tool.name = name
+    return tool
 
 
 def _make_recorder():
@@ -198,6 +209,43 @@ class TestPsychologyContextExtraction:
 
     def test_ignores_non_psychology_decisions(self):
         assert _extract_psychology_context([{"type": "trade", "action": "HOLD"}]) is None
+
+
+class TestAgentToolFiltering:
+    def test_ceo_does_not_receive_trade_execution_tools(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        tools = [
+            _tool("get_balance"),
+            _tool("get_fills"),
+            _tool("submit_order"),
+            _tool("cancel_order"),
+            _tool("evaluate_reallocation"),
+            _tool("send_message"),
+        ]
+
+        names = {tool.name for tool in _filter_tools_for_agent(ceo, tools)}
+
+        assert "get_balance" in names
+        assert "send_message" in names
+        assert "submit_order" not in names
+        assert "cancel_order" not in names
+        assert "evaluate_reallocation" not in names
+        assert "get_fills" not in names
+
+    def test_trader_keeps_trade_tools_for_legacy_react_runs(self):
+        trader = TraderAgent(
+            profile=_make_profile("Trader"),
+            personality=create_random_personality(42),
+            llm=_make_llm(),
+            trading=_make_trading(),
+        )
+        tools = [_tool("submit_order"), _tool("cancel_order"), _tool("get_fills")]
+
+        assert {tool.name for tool in _filter_tools_for_agent(trader, tools)} == {
+            "submit_order",
+            "cancel_order",
+            "get_fills",
+        }
 
 
 # ─── run_agent_cycle tests (mocked LLM) ───

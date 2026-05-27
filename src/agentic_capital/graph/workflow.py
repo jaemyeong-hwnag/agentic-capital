@@ -37,6 +37,14 @@ _QUOTA_ERROR_MARKERS = (
     "please retry",
 )
 
+_NON_TRADER_BLOCKED_TOOL_NAMES = frozenset({
+    "cancel_order",
+    "evaluate_reallocation",
+    "get_fills",
+    "set_position_policy",
+    "submit_order",
+})
+
 
 def _parse_retry_delay_seconds(message: str) -> int | None:
     """Parse provider retry hints into seconds."""
@@ -114,6 +122,14 @@ def _build_system_prompt(agent: BaseAgent) -> str:
         role = "trader"
 
     mandate = MANDATE + (MANDATE_CEO_HR if role == "CEO" else "") + MANDATE_RISK
+    if role != "trader":
+        mandate += (
+            "\n<role_boundary>"
+            "Only Trader may enter the finance sidecar trading flow. "
+            "CEO/analyst agents must not submit, cancel, or directly execute orders; "
+            "send instructions or analysis to Trader instead."
+            "</role_boundary>"
+        )
 
     return (
         f"{LEGEND}\n"
@@ -123,6 +139,39 @@ def _build_system_prompt(agent: BaseAgent) -> str:
         f"</agent>\n"
         f"{mandate}"
     )
+
+
+def _agent_tool_role(agent: BaseAgent) -> str:
+    agent_class = type(agent).__name__.lower()
+    if "trader" in agent_class:
+        return "trader"
+    if "ceo" in agent_class:
+        return "ceo"
+    return "analyst"
+
+
+def _filter_tools_for_agent(agent: BaseAgent, tools: list[Any]) -> list[Any]:
+    """Keep CEO/Analyst out of order/fill execution tools.
+
+    Trader uses the finance sidecar when local finance is enabled, so ReAct
+    order tools should only exist for legacy/non-finance Trader runs.
+    """
+    if _agent_tool_role(agent) == "trader":
+        return tools
+
+    filtered = [
+        tool for tool in tools
+        if str(getattr(tool, "name", "")) not in _NON_TRADER_BLOCKED_TOOL_NAMES
+    ]
+    removed = len(tools) - len(filtered)
+    if removed:
+        logger.info(
+            "agent_trade_tools_filtered",
+            agent=agent.name,
+            role=_agent_tool_role(agent),
+            removed=removed,
+        )
+    return filtered
 
 
 def _extract_tool_sequence(messages: list) -> list[dict]:
@@ -661,6 +710,7 @@ async def run_agent_cycle(
         preloaded_tools=preloaded,
         capital_limit=capital_limit,
     )
+    tools = _filter_tools_for_agent(agent, tools)
 
     system_prompt = _build_system_prompt(agent)
     llm = _get_langchain_llm()
