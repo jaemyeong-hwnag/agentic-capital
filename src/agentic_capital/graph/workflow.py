@@ -185,26 +185,44 @@ def _extract_tool_sequence(messages: list) -> list[dict]:
 
     Format per call: {"t": tool_name, "in": compact_args, "out": result}
     """
-    outputs: dict[str, str] = {}
-    for msg in messages:
-        call_id = getattr(msg, "tool_call_id", None)
-        if call_id:
-            outputs[call_id] = str(getattr(msg, "content", ""))[:400]
-
-    sequence = []
+    sequence: list[dict] = []
+    pending: list[dict] = []
     for msg in messages:
         tool_calls = getattr(msg, "tool_calls", None)
-        if not tool_calls:
-            continue
-        for tc in tool_calls:
-            args = tc.get("args", {})
-            args_str = ",".join(f"{k}:{v}" for k, v in args.items() if v not in (None, "", []))
-            call_id = tc.get("id", "")
-            sequence.append({
-                "t": tc.get("name", ""),
-                "in": args_str[:200],
-                "out": outputs.get(call_id, "")[:300],
-            })
+        if tool_calls:
+            for tc in tool_calls:
+                args = tc.get("args", {})
+                args_str = ",".join(f"{k}:{v}" for k, v in args.items() if v not in (None, "", []))
+                item = {
+                    "t": tc.get("name", ""),
+                    "in": args_str[:200],
+                    "out": "",
+                    "_id": tc.get("id", ""),
+                }
+                pending.append(item)
+                sequence.append(item)
+
+        call_id = getattr(msg, "tool_call_id", None)
+        if call_id:
+            content = str(getattr(msg, "content", ""))[:300]
+            tool_name = str(getattr(msg, "name", "") or "")
+            match = next(
+                (
+                    item for item in pending
+                    if not item.get("out")
+                    and (item.get("_id") == call_id or (tool_name and item.get("t") == tool_name))
+                ),
+                None,
+            )
+            if match is None:
+                match = {"t": tool_name or str(call_id), "in": "", "out": "", "_id": call_id}
+                sequence.append(match)
+            match["out"] = content
+            if match in pending:
+                pending.remove(match)
+
+    for item in sequence:
+        item.pop("_id", None)
     return sequence
 
 
@@ -228,6 +246,32 @@ def _extract_psychology_context(decisions: list[dict]) -> dict | None:
             context = decision.get("psychology_context", decision)
             return context if isinstance(context, dict) else None
     return None
+
+
+def _compact_psychology_decisions(decisions: list[dict] | None) -> list[dict]:
+    compact: list[dict] = []
+    for decision in (decisions or [])[:4]:
+        if not isinstance(decision, dict):
+            continue
+        compact.append({
+            "type": decision.get("type") or decision.get("decision_type"),
+            "action": decision.get("action"),
+            "confidence": decision.get("confidence"),
+        })
+    return compact
+
+
+def _compact_psychology_tool_sequence(tool_sequence: list[dict] | None) -> list[dict]:
+    compact: list[dict] = []
+    for item in (tool_sequence or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        compact.append({
+            "t": item.get("t"),
+            "in": _compact_text(str(item.get("in", "")), limit=80),
+            "out": _compact_text(str(item.get("out", "")), limit=140),
+        })
+    return compact
 
 
 def _psychology_cycle_input(
@@ -254,10 +298,10 @@ def _psychology_cycle_input(
                 "stress": round(agent.emotion.stress, 3),
                 "confidence": round(agent.emotion.confidence, 3),
             },
-            "trace": text[:1600],
-            "decisions": decisions or [],
+            "trace": _compact_text(text, limit=700),
+            "decisions": _compact_psychology_decisions(decisions),
             "errors": errors or [],
-            "tool_sequence": (tool_sequence or [])[:8],
+            "tool_sequence": _compact_psychology_tool_sequence(tool_sequence),
         },
         ensure_ascii=False,
         sort_keys=True,

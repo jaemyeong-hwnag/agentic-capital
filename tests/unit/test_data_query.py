@@ -186,6 +186,8 @@ async def test_collect_finance_decision_tool_results_adds_structured_payload():
 
     payload = result["finance_decision_payload"]
     assert payload["balance"]["available"] == 1_000_000
+    assert payload["balance"]["source"] == "effective_capital_limit"
+    assert payload["balance"]["broker_balance"]["available"] == 8_000_000
     assert payload["positions"][0]["symbol"] == "005930"
     assert payload["quote"]["price"] == 72000
     assert payload["market_session"]["is_open"] is True
@@ -202,3 +204,27 @@ async def test_collect_finance_decision_tool_results_adds_structured_payload():
         "get_quote",
         "get_risk_limit",
     }
+
+
+@pytest.mark.asyncio
+async def test_collect_finance_decision_tool_results_records_inner_broker_balance() -> None:
+    guarded = _make_trading()
+    guarded.get_balance.return_value = MagicMock(total=5_000_000, available=5_000_000, currency="KRW")
+    guarded._inner = MagicMock()
+    guarded._inner.get_balance = AsyncMock(
+        return_value=MagicMock(total=49_707_530, available=49_707_530, currency="KRW")
+    )
+
+    result = await collect_finance_decision_tool_results(
+        tool_plan_payload={"tool_plan": [{"tool": "get_balance"}]},
+        trading=guarded,
+        market_data=_make_market_data(),
+        symbol="005930",
+        market="kr_stock",
+        capital_limit=5_000_000,
+    )
+
+    balance = result["finance_decision_payload"]["balance"]
+    assert balance["available"] == 5_000_000
+    assert balance["source"] == "effective_capital_limit"
+    assert balance["broker_balance"]["available"] == 49_707_530

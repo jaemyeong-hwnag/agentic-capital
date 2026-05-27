@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
-REQUIRED_FIELDS = {"evidence_ids", "confidence", "uncertainty"}
+REQUIRED_FIELDS = {"evidence_ids", "confidence", "uncertainty", "risk_tags", "allowed_downstream_use"}
 TRADE_ACTIONS = {"BUY", "SELL", "ORDER", "SUBMIT_ORDER", "PLACE_ORDER"}
 DISALLOWED_DOWNSTREAM = {"trade_decision", "order_execution", "alpha_signal"}
 ALLOWED_DOWNSTREAM = {"context_only", "record_only", "risk_context_not_alpha", "agent_state_context"}
@@ -39,6 +39,7 @@ ORDER_MUTATION_KEYS = {
     "target_weight",
 }
 SOFT_CONTEXT_KEYS = {"risk_tags", "confidence", "uncertainty", "evidence_ids", "agent_state_patch"}
+FORCED_DOWNSTREAM_USE = "context_only"
 
 
 class LocalPsychologyRuntimeError(RuntimeError):
@@ -200,6 +201,71 @@ def _schema_repair_payload(content: str, response_payload: dict[str, Any]) -> di
     }
 
 
+def _coerce_string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if value in (None, ""):
+        return []
+    return [str(value)]
+
+
+def _complete_schema_payload(
+    payload: dict[str, Any],
+    *,
+    content: str,
+    response_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Complete model JSON into the context-only psychology schema before validation."""
+    completed = dict(payload)
+    completion_notes: list[str] = []
+
+    evidence_ids = completed.get("evidence_ids")
+    if not isinstance(evidence_ids, list):
+        evidence_ids = _coerce_string_list(evidence_ids)
+        if not evidence_ids:
+            evidence_ids = _rag_evidence_ids(response_payload)
+        completed["evidence_ids"] = evidence_ids
+        completion_notes.append("evidence_ids_completed")
+    else:
+        completed["evidence_ids"] = _coerce_string_list(evidence_ids)
+
+    confidence = completed.get("confidence")
+    if not isinstance(confidence, int | float) or not 0.0 <= float(confidence) <= 1.0:
+        completed["confidence"] = 0.0
+        completion_notes.append("confidence_defaulted")
+
+    uncertainty = completed.get("uncertainty")
+    if not isinstance(uncertainty, list):
+        completed["uncertainty"] = _coerce_string_list(uncertainty)
+        completion_notes.append("uncertainty_completed")
+    else:
+        completed["uncertainty"] = _coerce_string_list(uncertainty)
+
+    risk_tags = completed.get("risk_tags")
+    if not isinstance(risk_tags, list):
+        completed["risk_tags"] = _coerce_string_list(risk_tags)
+        completion_notes.append("risk_tags_completed")
+    else:
+        completed["risk_tags"] = _coerce_string_list(risk_tags)
+
+    downstream_use = str(completed.get("allowed_downstream_use", "")).lower()
+    if downstream_use != FORCED_DOWNSTREAM_USE:
+        if downstream_use in DISALLOWED_DOWNSTREAM:
+            completed["risk_tags"].append("disallowed_downstream_use_suppressed")
+        completed["allowed_downstream_use"] = FORCED_DOWNSTREAM_USE
+        completion_notes.append("allowed_downstream_use_forced_context_only")
+
+    if completion_notes:
+        completed.setdefault("repair_applied", "schema_completed")
+        completed["uncertainty"].append(f"schema_completed: {','.join(completion_notes)}")
+        if "schema_completed" not in completed["risk_tags"]:
+            completed["risk_tags"].append("schema_completed")
+        if content and "raw_preview" not in " ".join(completed["uncertainty"]):
+            completed["uncertainty"].append(f"raw_preview: {content[:180]}")
+
+    return completed
+
+
 def _summary_text(value: Any, *, limit: int = 500) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
     compact = " ".join(text.split())
@@ -257,19 +323,21 @@ def normalize_psychology_context(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(confidence, int | float) or not 0.0 <= float(confidence) <= 1.0:
         raise LocalPsychologyRuntimeError("local_psychology_confidence_out_of_bounds")
 
-    downstream_use = str(payload.get("allowed_downstream_use", "context_only")).lower()
+    risk_tags = payload.get("risk_tags")
+    if not isinstance(risk_tags, list):
+        raise LocalPsychologyRuntimeError("local_psychology_risk_tags_not_array")
+
+    downstream_use = str(payload.get("allowed_downstream_use")).lower()
     if downstream_use in DISALLOWED_DOWNSTREAM:
         raise LocalPsychologyRuntimeError(f"local_psychology_disallowed_downstream_use: {downstream_use}")
     if downstream_use not in ALLOWED_DOWNSTREAM:
-        downstream_use = "context_only"
+        downstream_use = FORCED_DOWNSTREAM_USE
+    downstream_use = FORCED_DOWNSTREAM_USE
 
     _reject_trade_action_leak(payload)
     _reject_order_mutation(payload)
     _reject_clinical_claim(payload)
 
-    risk_tags = payload.get("risk_tags") or []
-    if not isinstance(risk_tags, list):
-        risk_tags = [str(risk_tags)]
     agent_state_patch = payload.get("agent_state_patch") or {}
     if not isinstance(agent_state_patch, dict):
         agent_state_patch = {}
@@ -283,7 +351,7 @@ def normalize_psychology_context(payload: dict[str, Any]) -> dict[str, Any]:
         "risk_tags": [str(tag) for tag in risk_tags if str(tag)],
         "allowed_downstream_use": downstream_use,
         "use_as": "psychology_context_not_alpha",
-        "schema_status": str(payload.get("repair_applied") or "validated"),
+        "schema_status": str(payload.get("repair_applied") or payload.get("schema_status") or "validated"),
     }
 
 
@@ -309,7 +377,13 @@ def build_finance_soft_context(payload: dict[str, Any]) -> dict[str, Any]:
     } | {
         "schema_status": normalized["schema_status"],
         "use_as": "soft_risk_context_not_alpha",
-        "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
+        "forbidden_use": [
+            "trade_action",
+            "order_quantity",
+            "order_permission",
+            "capital_allocation",
+            "risk_limit_override",
+        ],
     }
 
 
@@ -346,7 +420,7 @@ async def run_local_psychology_context(
                         "request_id": request_id,
                         "service": model,
                         "agent_context": agent_context,
-                        "input_text": _summary_text(input_text, limit=1800),
+                        "input_text": _summary_text(input_text, limit=900),
                         "required_safety": required_safety
                         or {
                             "require_evidence_ids": True,
@@ -372,10 +446,11 @@ async def run_local_psychology_context(
             response_payload = response.json()
         content = _extract_content(response_payload)
         parsed = _extract_json_object(content)
-        repair_applied = None
         if parsed is None:
             parsed = _schema_repair_payload(content, response_payload)
-            repair_applied = parsed.get("repair_applied")
+        else:
+            parsed = _complete_schema_payload(parsed, content=content, response_payload=response_payload)
+        repair_applied = parsed.get("repair_applied")
         context = normalize_psychology_context(parsed)
         return {
             "ok": True,
@@ -409,8 +484,9 @@ def run_local_psychology_smoke() -> dict[str, Any]:
                 "role": "system",
                 "content": (
                     "Return only JSON with evidence_ids, confidence, uncertainty, risk_tags, "
-                    "agent_state_patch, and allowed_downstream_use. Do not output BUY, SELL, "
-                    "orders, capital changes, clinical diagnosis, treatment, or therapy claims."
+                    "agent_state_patch, and allowed_downstream_use=context_only. Do not output BUY, SELL, "
+                    "orders, quantities, order permissions, capital changes, risk limit overrides, "
+                    "clinical diagnosis, treatment, or therapy claims."
                 ),
             },
             {
@@ -440,6 +516,8 @@ def run_local_psychology_smoke() -> dict[str, Any]:
     parsed = _extract_json_object(content)
     if parsed is None:
         parsed = _schema_repair_payload(content, response_payload)
+    else:
+        parsed = _complete_schema_payload(parsed, content=content, response_payload=response_payload)
 
     validated = validate_psychology_context_payload(parsed)
     return {

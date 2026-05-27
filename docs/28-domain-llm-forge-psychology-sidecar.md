@@ -297,6 +297,11 @@ Agentic Capital runtime은 각 agent cycle 전후에 `psychology_model_suite`를
 
 Trader가 finance 전용 flow를 탈 때도 같은 pre/post 관찰을 실행한다. 단, finance pipeline에는 pre psychology 결과를 `build_finance_soft_context`로 축소한 soft context만 전달한다. 이 soft context는 `risk_tags`, `evidence_ids`, `confidence`, `uncertainty`, `agent_state_patch`, `use_as`, `forbidden_use`만 포함하며, alpha signal이나 주문 권한으로 승격되지 않는다.
 
+runtime 요청은 cycle trace, decision, tool output을 그대로 보내지 않고 compact summary로
+줄인다. psychology sidecar가 partial JSON 또는 비정형 JSON을 반환하면 Agentic Capital은
+context-only schema로 수리하거나 `schema_unstable` soft context로 격리해 기록한다. 이 경우도
+`BUY`/`SELL`, quantity, order permission, capital allocation, risk limit override로 승격하지 않는다.
+
 Agentic Capital 쪽 recorder 경로는 세 곳에 남긴다.
 
 | 저장 위치 | 내용 | 목적 |

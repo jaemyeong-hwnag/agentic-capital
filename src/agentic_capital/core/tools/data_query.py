@@ -163,6 +163,16 @@ def _serialise_position(position: Any) -> dict[str, Any]:
     }
 
 
+def _serialise_balance(balance: Any) -> dict[str, Any]:
+    return {
+        "total": float(getattr(balance, "total", 0) or 0),
+        "available": float(getattr(balance, "available", 0) or 0),
+        "currency": str(getattr(balance, "currency", "")),
+        "daily_pnl": float(getattr(balance, "daily_pnl", 0) or 0),
+        "daily_fee": float(getattr(balance, "daily_fee", 0) or 0),
+    }
+
+
 def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
     """Return the structure expected by the finance decision sidecar."""
     return {
@@ -246,18 +256,29 @@ async def collect_finance_decision_tool_results(
         else:
             try:
                 balance = await trading.get_balance()
-                total = float(getattr(balance, "total", 0) or 0)
-                available = float(getattr(balance, "available", 0) or 0)
+                raw_balance_payload = _serialise_balance(balance)
+                total = raw_balance_payload["total"]
+                available = raw_balance_payload["available"]
                 if capital_limit is not None:
                     total = min(total, float(capital_limit))
                     available = min(available, float(capital_limit))
                 balance_payload = {
                     "total": total,
                     "available": available,
-                    "currency": str(getattr(balance, "currency", "")),
-                    "daily_pnl": float(getattr(balance, "daily_pnl", 0) or 0),
-                    "daily_fee": float(getattr(balance, "daily_fee", 0) or 0),
+                    "currency": raw_balance_payload["currency"],
+                    "daily_pnl": raw_balance_payload["daily_pnl"],
+                    "daily_fee": raw_balance_payload["daily_fee"],
+                    "source": "effective_capital_limit" if capital_limit is not None else "broker",
                 }
+                inner = getattr(trading, "__dict__", {}).get("_inner")
+                if inner is not None and inner is not trading and hasattr(inner, "get_balance"):
+                    try:
+                        broker_balance = await inner.get_balance()
+                        balance_payload["broker_balance"] = _serialise_balance(broker_balance)
+                    except Exception:
+                        errors.append({"tool": "get_balance.broker_balance", "error": "unavailable"})
+                elif capital_limit is not None:
+                    balance_payload["broker_balance"] = raw_balance_payload
                 results["get_balance"] = balance_payload
             except Exception as exc:
                 errors.append({"tool": "get_balance", "error": type(exc).__name__})

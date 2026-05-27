@@ -109,7 +109,10 @@ read-only tool result schema:
   `finance_decision_payload.positions`, `finance_decision_payload.quote`,
   `finance_decision_payload.market_session`, `finance_decision_payload.risk_limit`,
   `finance_decision_payload.rag`
-- `get_balance`/`balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`
+- `get_balance`/`balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`,
+  `source`. `FuturesGuard` 같은 capital limit wrapper가 적용되면 top-level
+  `total`/`available`은 주문 가능 한도인 `effective_capital_limit`로 기록하고,
+  실제 broker cash는 `broker_balance`에 별도로 보존한다.
 - `get_positions`/`positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`,
   `current_price`, PnL, `market`, `currency`
 - `get_quote`/`quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
@@ -122,6 +125,10 @@ read-only tool result schema:
 tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_trade` 같은 주문 tool을 요청하면 collector는 실행하지 않고 `_errors`에 `order_tool_blocked_in_shadow`를 남긴다.
 pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않고
 `raw_model_failure(failure_type=order_tool_in_shadow_plan)`로 기록한다.
+
+Agent ReAct cycle 기록은 local LLM이 동일한 `tool_call_id`를 재사용해도 message 순서와
+tool name으로 결과를 붙인다. 따라서 `agent_cycles.tool_sequence`에서 `get_balance`
+출력이 OHLCV나 quote 결과로 덮이는 일을 실패 상태로 본다.
 
 `BUY` 또는 `SELL`이 shadow record로만 허용되는 조건:
 

@@ -96,7 +96,9 @@ def test_build_finance_soft_context_strips_non_soft_psychology_fields() -> None:
     })
 
     assert result["use_as"] == "soft_risk_context_not_alpha"
+    assert result["schema_status"] == "validated"
     assert "trade_action" in result["forbidden_use"]
+    assert "risk_limit_override" in result["forbidden_use"]
     assert "signals" not in result
     assert "action" not in result
 
@@ -156,10 +158,84 @@ async def test_run_local_psychology_context_returns_soft_context_only() -> None:
     assert result["soft_context"]["schema_status"] == "validated"
     assert "signals" not in result["soft_context"]
     assert "trade_action" in result["soft_context"]["forbidden_use"]
+    assert "risk_limit_override" in result["soft_context"]["forbidden_use"]
     assert client.post_url == "http://127.0.0.1:19400/v1/chat/completions"
     request_payload = client.post_kwargs["json"]
     assert request_payload["model"] == "psychology_model_suite"
     assert "Never output BUY, SELL" in request_payload["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_local_psychology_context_completes_partial_json_schema() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = '{"ok":true}'
+    response.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": (
+                    '{"confidence":0.42,"risk_tags":"overconfidence_risk",'
+                    '"allowed_downstream_use":"risk_context_not_alpha"}'
+                ),
+            },
+        }],
+        "rag": {"retrieved": [{"doc_id": "cycle-trace-1"}]},
+    }
+    response.raise_for_status.return_value = None
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_api_key", ""), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        result = await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent_id": "CEO-Alpha"},
+            input_text="recent cycle trace",
+        )
+
+    assert result["ok"] is True
+    assert result["context"]["schema_status"] == "schema_completed"
+    assert result["context"]["evidence_ids"] == ["cycle-trace-1"]
+    assert result["context"]["allowed_downstream_use"] == "context_only"
+    assert "overconfidence_risk" in result["context"]["risk_tags"]
+    assert "schema_completed" in result["context"]["risk_tags"]
+    assert result["soft_context"]["schema_status"] == "schema_completed"
+    assert result["soft_context"]["use_as"] == "soft_risk_context_not_alpha"
+    assert "risk_limit_override" in result["soft_context"]["forbidden_use"]
+
+
+@pytest.mark.asyncio
+async def test_run_local_psychology_context_sends_compact_input_text() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = '{"ok":true}'
+    response.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": (
+                    '{"evidence_ids":["cycle"],"confidence":0.1,"uncertainty":[],'
+                    '"risk_tags":[],"allowed_downstream_use":"context_only"}'
+                ),
+            },
+        }],
+    }
+    response.raise_for_status.return_value = None
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_api_key", ""), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent_id": "CEO-Alpha"},
+            input_text="token " * 1000,
+        )
+
+    content = client.post_kwargs["json"]["messages"][1]["content"]
+    assert len(content) < 1300
+    assert "token " * 200 not in content
 
 
 @pytest.mark.asyncio
@@ -186,21 +262,59 @@ async def test_run_local_psychology_context_records_failure_summary() -> None:
     assert len(result["failure_body_summary"]) <= 503
 
 
+def test_psychology_payload_requires_stable_soft_signal_schema() -> None:
+    with pytest.raises(local_psychology_runtime.LocalPsychologyRuntimeError, match="schema_missing_required"):
+        local_psychology_runtime.validate_psychology_context_payload({
+            "evidence_ids": [],
+            "confidence": 0.5,
+            "uncertainty": [],
+        })
+
+
 @pytest.mark.parametrize(
     "payload,error",
     [
-        ({"action": "BUY", "evidence_ids": [], "confidence": 0.5, "uncertainty": []}, "trade_action_leak"),
+        (
+            {
+                "action": "BUY",
+                "evidence_ids": [],
+                "confidence": 0.5,
+                "uncertainty": [],
+                "risk_tags": [],
+                "allowed_downstream_use": "context_only",
+            },
+            "trade_action_leak",
+        ),
         (
             {
                 "evidence_ids": [],
                 "confidence": 0.5,
                 "uncertainty": [],
+                "risk_tags": [],
                 "allowed_downstream_use": "trade_decision",
             },
             "disallowed_downstream_use",
         ),
-        ({"evidence_ids": [], "confidence": 1.7, "uncertainty": []}, "confidence_out_of_bounds"),
-        ({"evidence_ids": [], "confidence": 0.4, "uncertainty": ["진단 필요"]}, "clinical_claim"),
+        (
+            {
+                "evidence_ids": [],
+                "confidence": 1.7,
+                "uncertainty": [],
+                "risk_tags": [],
+                "allowed_downstream_use": "context_only",
+            },
+            "confidence_out_of_bounds",
+        ),
+        (
+            {
+                "evidence_ids": [],
+                "confidence": 0.4,
+                "uncertainty": ["진단 필요"],
+                "risk_tags": [],
+                "allowed_downstream_use": "context_only",
+            },
+            "clinical_claim",
+        ),
     ],
 )
 def test_psychology_payload_rejects_runtime_boundary_violations(payload, error) -> None:
@@ -235,6 +349,7 @@ def test_psychology_smoke_passes_safe_context_payload() -> None:
     request_payload = mock_post.call_args.kwargs["json"]
     assert request_payload["model"] == "psychology_model_suite"
     assert "Do not output BUY, SELL" in request_payload["messages"][0]["content"]
+    assert "allowed_downstream_use=context_only" in request_payload["messages"][0]["content"]
 
 
 def test_psychology_smoke_repairs_invalid_json_to_context_only() -> None:

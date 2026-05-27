@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
 
 from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.base import AgentProfile
@@ -15,7 +16,9 @@ from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
 from agentic_capital.graph.workflow import (
     _error_retry_seconds,
     _extract_psychology_context,
+    _extract_tool_sequence,
     _filter_tools_for_agent,
+    _psychology_cycle_input,
     run_agent_cycle,
 )
 from agentic_capital.ports.llm import LLMPort
@@ -93,9 +96,46 @@ def _psychology_result(phase: str = "post_agent_cycle") -> dict:
             "uncertainty": ["requires finance tools before any trade"],
             "agent_state_patch": {"attention": "risk_review"},
             "use_as": "soft_risk_context_not_alpha",
-            "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
+            "forbidden_use": [
+                "trade_action",
+                "order_quantity",
+                "order_permission",
+                "capital_allocation",
+                "risk_limit_override",
+            ],
         },
     }
+
+
+def test_extract_tool_sequence_preserves_duplicate_local_call_ids_in_order() -> None:
+    messages = [
+        AIMessage(content="", tool_calls=[{"name": "get_balance", "args": {}, "id": "local_call_0"}]),
+        ToolMessage(content="tot:5000000,avl:5000000,ccy:KRW", tool_call_id="local_call_0", name="get_balance"),
+        AIMessage(content="", tool_calls=[{"name": "get_ohlcv", "args": {"symbol": "005930"}, "id": "local_call_0"}]),
+        ToolMessage(content="@ohlcv:005930[20](dt,o,h,l,c,v)", tool_call_id="local_call_0", name="get_ohlcv"),
+    ]
+
+    assert _extract_tool_sequence(messages) == [
+        {"t": "get_balance", "in": "", "out": "tot:5000000,avl:5000000,ccy:KRW"},
+        {"t": "get_ohlcv", "in": "symbol:005930", "out": "@ohlcv:005930[20](dt,o,h,l,c,v)"},
+    ]
+
+
+def test_psychology_cycle_input_compacts_trace_decisions_and_tool_outputs() -> None:
+    ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+    payload = _psychology_cycle_input(
+        agent=ceo,
+        cycle_number=3,
+        phase="post_agent_cycle",
+        text="x" * 3000,
+        decisions=[{"type": "finance_paper_shadow_decision", "action": "CALL_TOOL", "record": {"raw": "y" * 3000}}],
+        tool_sequence=[{"t": "get_ohlcv", "in": "symbol:005930", "out": "@ohlcv " + ("z" * 2000)}],
+    )
+
+    assert len(payload) < 1400
+    assert "finance_paper_shadow_decision" in payload
+    assert "y" * 100 not in payload
+    assert "z" * 200 not in payload
 
 
 # ─── record_cycle tests ───
@@ -419,6 +459,7 @@ class TestRunAgentCycle:
             "order_quantity",
             "order_permission",
             "capital_allocation",
+            "risk_limit_override",
         ]
         assert economics["agent_request"]["agent_role"] == "ceo"
         assert economics["agent_request"]["cycle_trigger"] == "cycle:7"
