@@ -134,15 +134,22 @@ def _build_system_prompt(agent: BaseAgent) -> str:
     else:
         role = "trader"
 
-    mandate = MANDATE + (MANDATE_CEO_HR if role == "CEO" else "") + MANDATE_RISK
+    mandate = MANDATE
     if role != "trader":
+        mandate = mandate.replace(
+            "|USE_ALL_MARKETS — trade US stocks/ETFs during pre-market and regular hours via submit_order(market=us_stock)",
+            "|USE_ALL_MARKETS — analyze opportunities and send instructions to Trader; do not call order tools",
+        )
         mandate += (
             "\n<role_boundary>"
             "Only Trader may enter the finance sidecar trading flow. "
             "CEO/analyst agents must not submit, cancel, or directly execute orders; "
-            "send instructions or analysis to Trader instead."
+            "send instructions or analysis to Trader instead. "
+            "Use only listed tool names exactly; if a needed tool is unavailable, send a message or request_wakeup. "
+            "Respond in compact Korean or English only."
             "</role_boundary>"
         )
+    mandate += (MANDATE_CEO_HR if role == "CEO" else "") + MANDATE_RISK
 
     return (
         f"{LEGEND}\n"

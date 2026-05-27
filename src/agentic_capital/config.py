@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     local_llm_model: str = "finance_decision_model"
     local_agent_llm_base_url: str = ""
     local_agent_llm_model: str = "agentic_capital_react_model"
+    local_agent_llm_timeout_seconds: float = 90.0
     local_embedding_model: str = "finance_embedding_model"
     local_llm_api_key: str = ""
     local_llm_timeout_seconds: float = 30.0

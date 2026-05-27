@@ -14,6 +14,7 @@ from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
 from agentic_capital.graph.workflow import (
+    _build_system_prompt,
     _error_retry_seconds,
     _exception_summary,
     _extract_psychology_context,
@@ -272,6 +273,14 @@ class TestAgentToolFiltering:
         assert "cancel_order" not in names
         assert "evaluate_reallocation" not in names
         assert "get_fills" not in names
+
+    def test_non_trader_prompt_avoids_direct_order_tool_mandate(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        prompt = _build_system_prompt(ceo)
+
+        assert "trade US stocks/ETFs during pre-market and regular hours via submit_order" not in prompt
+        assert "send instructions to Trader" in prompt
+        assert "Respond in compact Korean or English only" in prompt
 
     def test_trader_keeps_trade_tools_for_legacy_react_runs(self):
         trader = TraderAgent(
