@@ -259,12 +259,15 @@ def _reject_profit_guarantee(payload: dict[str, Any]) -> None:
 
 
 def _trade_notional(payload: dict[str, Any], tool_results: dict[str, Any]) -> float:
+    quantity = _trade_quantity(payload)
+    quote_price = _float(_nested(tool_results, "get_quote", "price"))
+    if quantity > 0 and quote_price > 0:
+        return quantity * quote_price
     explicit = _float(payload.get("notional") or payload.get("order_value"))
     if explicit > 0:
         return explicit
-    quantity = _trade_quantity(payload)
-    price = _float(payload.get("price") or _nested(tool_results, "get_quote", "price"))
-    return quantity * price
+    payload_price = _float(payload.get("price"))
+    return quantity * payload_price
 
 
 def _trade_quantity(payload: dict[str, Any]) -> float:

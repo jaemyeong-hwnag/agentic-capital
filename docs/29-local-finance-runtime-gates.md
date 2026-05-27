@@ -99,8 +99,9 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 - `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있다.
 - `evidence_ids`는 `search_rag.evidence_ids` 또는 반환 evidence의 id/doc_id/chunk_id에서 나온 값이어야 한다.
 - 주문 계획에 `submit_order`, `submit_paper_order`, `submit_futures_order`, `place_order`, `execute_trade`가 없다.
-- `quantity * quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
-- `quantity`, `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
+- `quantity * get_quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
+- `get_quote.price`가 있으면 model payload의 `price`나 `notional`보다 우선해서 주문 규모를 계산한다.
+- quote가 없는 경우에도 `quantity`, payload `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
 - `SELL`은 `get_positions`의 보유 수량을 넘지 않는다.
 - market session이 명시적으로 open/regular 상태다. 빈 값, 미확인 상태, closed/halted 등 닫힌 상태와 open flag가 충돌하는 경우는 매매 불가로 본다.
 - reason/final answer에 수익 보장 표현이 없다.
@@ -131,6 +132,21 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 - `failure_type=trade_exceeds_risk_limit`
 - `retrain_candidate=true`
 - `evidence_ids` 유지
+- 주문 실행 없음
+
+## 2026-05-27 Quote Price Authority Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY` 후보에 낮은 payload `price`를 넣어도,
+- `get_quote.price`가 존재하면 runtime은 model price가 아니라 quote price로 notional을 계산한다.
+- quote 기준 notional이 risk limit을 넘으면 `finance_paper_shadow_decision`으로 세지 않고 `raw_model_failure`를 기록한다.
+
+기대 record:
+
+- `failure_type=trade_exceeds_risk_limit`
+- `details.notional=quantity * get_quote.price`
+- `retrain_candidate=true`
 - 주문 실행 없음
 
 ## 2026-05-27 Risk Guard Hard-Fail Regression

@@ -78,6 +78,26 @@ def test_trade_over_risk_limit_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_uses_quote_price_over_model_payload_price_for_notional() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 10,
+        "price": 1,
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=_complete_tool_results())
+
+    assert exc_info.value.code == "trade_exceeds_risk_limit"
+    assert exc_info.value.details["notional"] == 700_000
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=_complete_tool_results())
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
 def test_buy_over_available_cash_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",
