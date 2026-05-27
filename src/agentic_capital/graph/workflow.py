@@ -100,6 +100,13 @@ def _cycle_error_backoff_seconds(errors: list[str]) -> int:
     return max(_error_retry_seconds(error) or 300 for error in errors)
 
 
+def _exception_summary(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    return type(exc).__name__
+
+
 def _get_langchain_llm():
     """Lazy-init the configured LangChain-compatible LLM."""
     global _langchain_llm
@@ -782,7 +789,7 @@ async def run_agent_cycle(
         )
         result_messages = result.get("messages", [])
     except Exception as e:
-        errors.append(str(e))
+        errors.append(_exception_summary(e))
         logger.exception("agent_react_cycle_failed", agent=agent.name, cycle=cycle_number)
 
     cycle_completed_at = datetime.now()

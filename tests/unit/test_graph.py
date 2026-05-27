@@ -15,6 +15,7 @@ from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
 from agentic_capital.graph.workflow import (
     _error_retry_seconds,
+    _exception_summary,
     _extract_psychology_context,
     _extract_tool_sequence,
     _filter_tools_for_agent,
@@ -487,6 +488,10 @@ class TestRunAgentCycle:
         assert result["agent_name"] == "CEO"
         assert len(result["errors"]) > 0
         assert result["next_cycle_seconds"] == 300
+
+    def test_exception_summary_uses_type_when_message_empty(self):
+        assert _exception_summary(TimeoutError()) == "TimeoutError"
+        assert _exception_summary(RuntimeError("provider crashed")) == "provider crashed"
 
     @pytest.mark.asyncio
     async def test_quota_failure_uses_provider_retry_delay(self):
