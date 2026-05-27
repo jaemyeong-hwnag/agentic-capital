@@ -84,6 +84,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 `agentic-capital` runtime 구현 위치:
 
 - `src/agentic_capital/graph/workflow.py`: Trader cycle을 finance 전용 flow로 분기한다.
+- `src/agentic_capital/adapters/llm/router.py`: CEO/Analyst 일반 ReAct agent는 `LOCAL_AGENT_LLM_BASE_URL`/`LOCAL_AGENT_LLM_MODEL`을 사용한다. `LOCAL_LLM_MODEL=finance_*`인데 agent base URL이 없으면 finance sidecar를 일반 LLM으로 오용하지 않도록 시작 실패한다.
 - `src/agentic_capital/adapters/llm/local_finance_runtime.py`: rag query, RAG search, tool planner, decision, risk guard sidecar client를 실행한다.
 - `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다.
 - `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.

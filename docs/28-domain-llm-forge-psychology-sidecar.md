@@ -277,6 +277,15 @@ finance 계층으로 넘길 때는 다음으로 축소한다.
 }
 ```
 
+Agentic Capital runtime은 각 agent cycle 전후에 `psychology_model_suite`를 관찰자로 호출한다.
+
+| Phase | 입력 | 권한 |
+|---|---|---|
+| `pre_agent_cycle` | agent id/name/role, cycle number, emotion snapshot, 직전 trace 요약 | 상태 관찰만 가능 |
+| `post_agent_cycle` | LLM reasoning, tool sequence, decisions, errors | 상태 관찰과 risk tag 기록만 가능 |
+
+Trader가 finance 전용 flow를 탈 때도 같은 pre/post 관찰을 실행한다. 단, finance pipeline에는 pre psychology 결과를 `build_finance_soft_context`로 축소한 soft context만 전달한다. 이 soft context는 `risk_tags`, `evidence_ids`, `confidence`, `uncertainty`, `agent_state_patch`, `use_as`, `forbidden_use`만 포함하며, alpha signal이나 주문 권한으로 승격되지 않는다.
+
 Agentic Capital 쪽 recorder 경로는 세 곳에 남긴다.
 
 | 저장 위치 | 내용 | 목적 |
@@ -286,6 +295,8 @@ Agentic Capital 쪽 recorder 경로는 세 곳에 남긴다.
 | `agent_decisions.decision_type=psychology_evaluation` | `action=context_only` evaluation record | eval/회귀/실패 학습 기록 |
 
 `record_cycle`은 `psychology`, `psychology_context`, `psychology_evaluation` 타입을 trade/general decision route로 보내지 않고 `record_psychology_context`로만 보낸다. finance decision payload에 psychology가 섞여도 runtime validator가 `build_finance_soft_context`로 축소하고, BUY/SELL, 수량, 주문 권한, 자본 배분 필드는 deterministic hard failure로 차단한다.
+
+테스트/e2e에서는 psychology와 finance sidecar 호출을 mock하거나 `LOCAL_FINANCE_PIPELINE_ENABLED=false`로 고정한다. sidecar 실호출은 smoke, paper loop, runtime monitor에서 검증하며, unit/e2e 테스트가 로컬 모델 latency나 현재 운영 env에 의존하지 않게 유지한다.
 
 ## 안전 경계
 
