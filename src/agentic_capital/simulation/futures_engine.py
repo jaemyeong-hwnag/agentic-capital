@@ -9,13 +9,14 @@ Rules (system-enforced):
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 import structlog
 
 from agentic_capital.config import settings
 from agentic_capital.core.agents.factory import create_agent_profile, create_random_personality
-from agentic_capital.graph.workflow import run_agent_cycle
+from agentic_capital.graph.workflow import run_agent_cycle, _run_psychology_observation
 from agentic_capital.infra.tracing import setup_tracing
 from agentic_capital.simulation.clock import get_open_markets, is_market_open
 
@@ -316,6 +317,13 @@ class FuturesEngine:
 
         from datetime import datetime
         started_at = datetime.now()
+        pre_psychology = await _run_psychology_observation(
+            agent=self._agent,
+            cycle_number=self._cycle_count,
+            phase="pre_agent_cycle",
+            recorder=self._recorder,
+            input_text="pre-cycle futures agent state observation before tool loop",
+        )
 
         # Fetch balance snapshot for cycle context — AI must know capital before deciding
         bal_ctx = ""
@@ -328,6 +336,9 @@ class FuturesEngine:
         cycle_msg = f"cycle:{self._cycle_count}"
         if bal_ctx:
             cycle_msg += f"|{bal_ctx}"
+        if isinstance(pre_psychology, dict) and isinstance(pre_psychology.get("soft_context"), dict):
+            psych_ctx = json.dumps(pre_psychology["soft_context"], ensure_ascii=False, sort_keys=True, default=str)
+            cycle_msg += f"|psychology_context:{psych_ctx[:700]}"
 
         try:
             result = await react_agent.ainvoke(
@@ -340,6 +351,19 @@ class FuturesEngine:
             result_messages = []
 
         completed_at = datetime.now()
+        from agentic_capital.graph.workflow import _extract_tool_sequence, _extract_llm_reasoning
+        tool_seq = _extract_tool_sequence(result_messages)
+        reasoning = _extract_llm_reasoning(result_messages)
+        post_psychology = await _run_psychology_observation(
+            agent=self._agent,
+            cycle_number=self._cycle_count,
+            phase="post_agent_cycle",
+            recorder=self._recorder,
+            input_text=reasoning,
+            decisions=decisions_sink,
+            errors=[],
+            tool_sequence=tool_seq,
+        )
         next_secs = self._apply_cycle_guards(
             requested_delay=wakeup_sink[-1] if wakeup_sink else _DEFAULT_CYCLE_SECONDS,
             total_decisions=len(decisions_sink),
@@ -347,7 +371,6 @@ class FuturesEngine:
 
         # Record cycle to DB
         if self._recorder:
-            from agentic_capital.graph.workflow import _extract_tool_sequence, _extract_llm_reasoning
             from agentic_capital.graph.nodes import record_cycle
             await record_cycle(
                 agent=self._agent,
@@ -356,8 +379,6 @@ class FuturesEngine:
                 messages=[],
                 recorder=self._recorder,
             )
-            tool_seq = _extract_tool_sequence(result_messages)
-            reasoning = _extract_llm_reasoning(result_messages)
             emotion_snap = {
                 "V": round(self._agent.emotion.valence, 2),
                 "AR": round(self._agent.emotion.arousal, 2),
@@ -373,7 +394,27 @@ class FuturesEngine:
                     tool_sequence=tool_seq,
                     llm_reasoning=reasoning,
                     emotion_snapshot=emotion_snap,
-                    economics_snapshot=llm_run_metadata(),
+                    economics_snapshot={
+                        **llm_run_metadata(),
+                        "psychology_context": (
+                            post_psychology.get("soft_context")
+                            if isinstance(post_psychology, dict) and isinstance(post_psychology.get("soft_context"), dict)
+                            else None
+                        ),
+                        "psychology_observations": [
+                            {
+                                "phase": item.get("phase"),
+                                "ok": item.get("ok"),
+                                "model": item.get("model"),
+                                "status_code": item.get("status_code"),
+                                "latency_ms": item.get("latency_ms"),
+                                "repair_applied": item.get("repair_applied"),
+                                "failure_body_summary": item.get("failure_body_summary"),
+                            }
+                            for item in (pre_psychology, post_psychology)
+                            if isinstance(item, dict)
+                        ],
+                    },
                     started_at=started_at,
                     completed_at=completed_at,
                     decisions_count=len(decisions_sink),

@@ -10,6 +10,23 @@ from agentic_capital import local_psychology_smoke
 from agentic_capital.adapters.llm import local_finance_runtime, local_psychology_runtime
 
 
+class _AsyncClientStub:
+    def __init__(self, response):
+        self.response = response
+        self.post_kwargs = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url, **kwargs):
+        self.post_url = url
+        self.post_kwargs = kwargs
+        return self.response
+
+
 def test_local_psychology_health_accepts_expected_model() -> None:
     response = MagicMock()
     response.json.return_value = {"ok": True, "model": "psychology_model_suite", "llama_reachable": True}
@@ -97,6 +114,74 @@ def test_finance_decision_rejects_unsafe_psychology_context() -> None:
                 "allowed_downstream_use": "context_only",
             },
         })
+
+
+@pytest.mark.asyncio
+async def test_run_local_psychology_context_returns_soft_context_only() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = '{"ok":true}'
+    response.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": (
+                    '{"signals":[{"name":"overconfidence"}],'
+                    '"agent_state_patch":{"attention":"risk_review"},'
+                    '"evidence_ids":["memory-1"],"confidence":0.72,'
+                    '"uncertainty":["requires finance tools before any trade"],'
+                    '"risk_tags":["overconfidence_risk"],'
+                    '"allowed_downstream_use":"context_only"}'
+                ),
+            },
+        }],
+    }
+    response.raise_for_status.return_value = None
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_api_key", ""), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        result = await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent_id": "CEO-Alpha", "live_order_enabled": False},
+            input_text="recent cycle trace",
+        )
+
+    assert result["ok"] is True
+    assert result["status_code"] == 200
+    assert result["context"]["allowed_downstream_use"] == "context_only"
+    assert result["soft_context"]["use_as"] == "soft_risk_context_not_alpha"
+    assert "signals" not in result["soft_context"]
+    assert "trade_action" in result["soft_context"]["forbidden_use"]
+    assert client.post_url == "http://127.0.0.1:19400/v1/chat/completions"
+    request_payload = client.post_kwargs["json"]
+    assert request_payload["model"] == "psychology_model_suite"
+    assert "Never output BUY, SELL" in request_payload["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_local_psychology_context_records_failure_summary() -> None:
+    response = MagicMock()
+    response.status_code = 503
+    response.text = "sidecar overloaded " * 100
+    response.raise_for_status.side_effect = RuntimeError("service unavailable")
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        result = await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent_id": "CEO-Alpha"},
+            input_text="trace",
+        )
+
+    assert result["ok"] is False
+    assert result["status_code"] == 503
+    assert result["error"] == "RuntimeError"
+    assert result["failure_body_summary"].startswith("sidecar overloaded")
+    assert len(result["failure_body_summary"]) <= 503
 
 
 @pytest.mark.parametrize(

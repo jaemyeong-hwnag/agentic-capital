@@ -175,15 +175,163 @@ def _extract_psychology_context(decisions: list[dict]) -> dict | None:
     return None
 
 
+def _psychology_cycle_input(
+    *,
+    agent: BaseAgent,
+    cycle_number: int,
+    phase: str,
+    text: str = "",
+    decisions: list[dict] | None = None,
+    errors: list[str] | None = None,
+    tool_sequence: list[dict] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "phase": phase,
+            "agent_id": str(agent.agent_id),
+            "agent_name": agent.name,
+            "agent_role": type(agent).__name__,
+            "cycle_number": cycle_number,
+            "emotion": {
+                "valence": round(agent.emotion.valence, 3),
+                "arousal": round(agent.emotion.arousal, 3),
+                "dominance": round(agent.emotion.dominance, 3),
+                "stress": round(agent.emotion.stress, 3),
+                "confidence": round(agent.emotion.confidence, 3),
+            },
+            "trace": text[:1600],
+            "decisions": decisions or [],
+            "errors": errors or [],
+            "tool_sequence": (tool_sequence or [])[:8],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
+async def _run_psychology_observation(
+    *,
+    agent: BaseAgent,
+    cycle_number: int,
+    phase: str,
+    recorder: Any = None,
+    input_text: str = "",
+    decisions: list[dict] | None = None,
+    errors: list[str] | None = None,
+    tool_sequence: list[dict] | None = None,
+) -> dict[str, Any] | None:
+    """Record context-only psychology observation without trade authority."""
+    if not settings.local_psychology_base_url.strip():
+        return None
+
+    from agentic_capital.adapters.llm.local_psychology_runtime import run_local_psychology_context
+
+    payload = await run_local_psychology_context(
+        request_id=f"{agent.agent_id}:{cycle_number}:{phase}",
+        agent_context={
+            "agent_id": str(agent.agent_id),
+            "agent_name": agent.name,
+            "agent_role": type(agent).__name__,
+            "deployment_mode": "local_paper" if settings.kis_is_paper else "local_shadow",
+            "live_order_enabled": False,
+            "cycle_number": cycle_number,
+            "cycle_phase": phase,
+        },
+        input_text=_psychology_cycle_input(
+            agent=agent,
+            cycle_number=cycle_number,
+            phase=phase,
+            text=input_text,
+            decisions=decisions,
+            errors=errors,
+            tool_sequence=tool_sequence,
+        ),
+    )
+    if not payload.get("ok"):
+        logger.warning(
+            "psychology_observation_failed",
+            agent=agent.name,
+            cycle=cycle_number,
+            phase=phase,
+            error=payload.get("error"),
+            status_code=payload.get("status_code"),
+            failure_body_summary=payload.get("failure_body_summary"),
+        )
+        failure_context = _psychology_failure_context(payload, phase=phase)
+        soft_context: dict[str, Any] = {}
+        if recorder:
+            try:
+                soft_context = await recorder.record_psychology_context(
+                    agent_id=agent.agent_id,
+                    psychology_context=failure_context,
+                    source=f"{settings.local_psychology_model}:{phase}:failure",
+                    cycle_number=cycle_number,
+                )
+            except Exception:
+                logger.warning("psychology_failure_context_record_failed", agent=agent.name, cycle=cycle_number, phase=phase)
+        return {
+            "phase": phase,
+            "ok": False,
+            "error": payload.get("error"),
+            "status_code": payload.get("status_code"),
+            "latency_ms": payload.get("latency_ms"),
+            "failure_body_summary": payload.get("failure_body_summary"),
+            "context": failure_context,
+            "soft_context": soft_context,
+        }
+
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    soft_context: dict[str, Any] = {}
+    if recorder and context:
+        try:
+            soft_context = await recorder.record_psychology_context(
+                agent_id=agent.agent_id,
+                psychology_context=context,
+                source=f"{settings.local_psychology_model}:{phase}",
+                cycle_number=cycle_number,
+            )
+        except Exception:
+            logger.warning("psychology_context_record_failed", agent=agent.name, cycle=cycle_number, phase=phase)
+            soft_context = payload.get("soft_context") if isinstance(payload.get("soft_context"), dict) else {}
+    else:
+        soft_context = payload.get("soft_context") if isinstance(payload.get("soft_context"), dict) else {}
+
+    return {
+        "phase": phase,
+        "ok": True,
+        "model": payload.get("model"),
+        "status_code": payload.get("status_code"),
+        "latency_ms": payload.get("latency_ms"),
+        "repair_applied": payload.get("repair_applied"),
+        "context": context,
+        "soft_context": soft_context,
+    }
+
+
+def _psychology_failure_context(payload: dict[str, Any], *, phase: str) -> dict[str, Any]:
+    """Build a schema-valid context-only failure record for observer persistence."""
+    return {
+        "signals": [],
+        "agent_state_patch": {},
+        "evidence_ids": [],
+        "confidence": 0.0,
+        "uncertainty": [
+            "psychology_sidecar_unavailable",
+            str(payload.get("error") or "unknown_error"),
+        ],
+        "risk_tags": ["psychology_context_unavailable"],
+        "allowed_downstream_use": "context_only",
+        "cycle_phase": phase,
+    }
+
+
 def _should_use_local_finance_flow(agent: BaseAgent) -> bool:
     """Route Trader cycles to the finance sidecar when local finance LLM is active."""
-    from agentic_capital.adapters.llm.router import is_local_llm_enabled
-
     agent_class = type(agent).__name__
     model = settings.local_llm_model.strip().lower()
     return (
         bool(settings.local_finance_pipeline_enabled)
-        and is_local_llm_enabled()
         and "trader" in agent_class.lower()
         and model.startswith("finance_")
     )
@@ -215,6 +363,13 @@ async def _run_local_finance_agent_cycle(
     from agentic_capital.adapters.llm.local_finance_runtime import run_local_finance_decision_pipeline
 
     cycle_started_at = datetime.now()
+    pre_psychology = await _run_psychology_observation(
+        agent=agent,
+        cycle_number=cycle_number,
+        phase="pre_agent_cycle",
+        recorder=recorder,
+        input_text="pre-cycle finance trader state observation before tool collection",
+    )
     primary_symbol = (symbols or [settings.local_finance_default_symbol])[0]
     agent_state = {
         "deployment_mode": "paper" if settings.kis_is_paper else "shadow",
@@ -257,6 +412,11 @@ async def _run_local_finance_agent_cycle(
         agent_state=agent_state,
         required_safety=required_safety,
         collect_tool_results=_collect_tool_results,
+        psychology_context=(
+            pre_psychology.get("context")
+            if isinstance(pre_psychology, dict) and isinstance(pre_psychology.get("context"), dict)
+            else None
+        ),
     )
     if result.get("errors"):
         errors.extend(str(error) for error in result["errors"])
@@ -317,6 +477,16 @@ async def _run_local_finance_agent_cycle(
         "ST": round(agent.emotion.stress, 2),
         "CF": round(agent.emotion.confidence, 2),
     }
+    post_psychology = await _run_psychology_observation(
+        agent=agent,
+        cycle_number=cycle_number,
+        phase="post_agent_cycle",
+        recorder=recorder,
+        input_text=reasoning,
+        decisions=all_decisions,
+        errors=errors,
+        tool_sequence=tool_seq,
+    )
     economics_snapshot = {
         **llm_run_metadata(),
         "finance_record_type": record_type,
@@ -325,6 +495,24 @@ async def _run_local_finance_agent_cycle(
         "risk_flags": risk_flags,
         "sidecar_calls": sidecar_calls,
         "first_failing_stage": first_failing_stage,
+        "psychology_context": (
+            post_psychology.get("soft_context")
+            if isinstance(post_psychology, dict) and isinstance(post_psychology.get("soft_context"), dict)
+            else None
+        ),
+        "psychology_observations": [
+            {
+                "phase": item.get("phase"),
+                "ok": item.get("ok"),
+                "model": item.get("model"),
+                "status_code": item.get("status_code"),
+                "latency_ms": item.get("latency_ms"),
+                "repair_applied": item.get("repair_applied"),
+                "failure_body_summary": item.get("failure_body_summary"),
+            }
+            for item in (pre_psychology, post_psychology)
+            if isinstance(item, dict)
+        ],
     }
     if recorder:
         try:
@@ -441,6 +629,14 @@ async def run_agent_cycle(
             capital_limit=capital_limit,
         )
 
+    pre_psychology = await _run_psychology_observation(
+        agent=agent,
+        cycle_number=cycle_number,
+        phase="pre_agent_cycle",
+        recorder=recorder,
+        input_text="pre-cycle agent state observation before ReAct tool loop",
+    )
+
     # Load AI-created tools from DB and build StructuredTool instances
     preloaded: list = []
     if recorder:
@@ -495,7 +691,18 @@ async def run_agent_cycle(
     org_decisions = _extract_org_decisions(result_messages)
 
     all_decisions = decisions_sink + org_decisions
-    psychology_context = _extract_psychology_context(all_decisions)
+    tool_seq = _extract_tool_sequence(result_messages)
+    reasoning = _extract_llm_reasoning(result_messages)
+    post_psychology = await _run_psychology_observation(
+        agent=agent,
+        cycle_number=cycle_number,
+        phase="post_agent_cycle",
+        recorder=recorder,
+        input_text=reasoning,
+        decisions=all_decisions,
+        errors=errors,
+        tool_sequence=tool_seq,
+    )
 
     # Record decisions/emotions/messages to DB
     await record_cycle(
@@ -514,14 +721,33 @@ async def run_agent_cycle(
     # Record full LLM activity trace: tool sequence + reasoning
     if recorder:
         try:
-            tool_seq = _extract_tool_sequence(result_messages)
-            reasoning = _extract_llm_reasoning(result_messages)
             emotion_snap = {
                 "V": round(agent.emotion.valence, 2),
                 "AR": round(agent.emotion.arousal, 2),
                 "D": round(agent.emotion.dominance, 2),
                 "ST": round(agent.emotion.stress, 2),
                 "CF": round(agent.emotion.confidence, 2),
+            }
+            economics_snapshot = {
+                **llm_run_metadata(),
+                "psychology_context": (
+                    post_psychology.get("soft_context")
+                    if isinstance(post_psychology, dict) and isinstance(post_psychology.get("soft_context"), dict)
+                    else None
+                ),
+                "psychology_observations": [
+                    {
+                        "phase": item.get("phase"),
+                        "ok": item.get("ok"),
+                        "model": item.get("model"),
+                        "status_code": item.get("status_code"),
+                        "latency_ms": item.get("latency_ms"),
+                        "repair_applied": item.get("repair_applied"),
+                        "failure_body_summary": item.get("failure_body_summary"),
+                    }
+                    for item in (pre_psychology, post_psychology)
+                    if isinstance(item, dict)
+                ],
             }
             await recorder.record_agent_cycle(
                 agent_id=agent.agent_id,
@@ -530,13 +756,12 @@ async def run_agent_cycle(
                 tool_sequence=tool_seq,
                 llm_reasoning=reasoning,
                 emotion_snapshot=emotion_snap,
-                economics_snapshot=llm_run_metadata(),
+                economics_snapshot=economics_snapshot,
                 started_at=cycle_started_at,
                 completed_at=cycle_completed_at,
                 decisions_count=len(all_decisions),
                 errors_count=len(errors),
                 next_cycle_seconds=next_cycle_seconds,
-                psychology_context=psychology_context,
             )
             await recorder.commit()
         except Exception:

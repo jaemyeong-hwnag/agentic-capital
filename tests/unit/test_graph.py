@@ -58,6 +58,35 @@ def _make_recorder():
     return recorder
 
 
+def _psychology_result(phase: str = "post_agent_cycle") -> dict:
+    return {
+        "phase": phase,
+        "ok": True,
+        "model": "psychology_model_suite",
+        "status_code": 200,
+        "latency_ms": 11,
+        "repair_applied": None,
+        "context": {
+            "signals": [],
+            "agent_state_patch": {"attention": "risk_review"},
+            "evidence_ids": ["memory-1"],
+            "confidence": 0.72,
+            "uncertainty": ["requires finance tools before any trade"],
+            "risk_tags": ["overconfidence_risk"],
+            "allowed_downstream_use": "context_only",
+        },
+        "soft_context": {
+            "risk_tags": ["overconfidence_risk"],
+            "evidence_ids": ["memory-1"],
+            "confidence": 0.72,
+            "uncertainty": ["requires finance tools before any trade"],
+            "agent_state_patch": {"attention": "risk_review"},
+            "use_as": "soft_risk_context_not_alpha",
+            "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
+        },
+    }
+
+
 # ─── record_cycle tests ───
 
 
@@ -187,7 +216,8 @@ class TestRunAgentCycle:
         mock_agent.ainvoke = AsyncMock(return_value=self._mock_react_result())
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(ceo, cycle_number=1)
 
         assert result["agent_name"] == "CEO"
@@ -203,7 +233,8 @@ class TestRunAgentCycle:
         mock_agent.ainvoke = AsyncMock(return_value=self._mock_react_result())
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(
                 analyst, cycle_number=1,
                 symbols=["005930"],
@@ -226,7 +257,8 @@ class TestRunAgentCycle:
 
         with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", False), \
              patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(
                 trader, cycle_number=1,
                 trading=trading,
@@ -269,8 +301,15 @@ class TestRunAgentCycle:
 
         with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
              patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
-             patch("agentic_capital.adapters.llm.router.settings.llm_provider", "local"), \
+             patch("agentic_capital.adapters.llm.router.settings.llm_provider", "gemini"), \
              patch("agentic_capital.graph.workflow.create_react_agent") as mock_react, \
+             patch(
+                 "agentic_capital.graph.workflow._run_psychology_observation",
+                 AsyncMock(side_effect=[
+                     _psychology_result("pre_agent_cycle"),
+                     _psychology_result("post_agent_cycle"),
+                 ]),
+             ) as mock_psychology, \
              patch(
                  "agentic_capital.adapters.llm.local_finance_runtime.run_local_finance_decision_pipeline",
                  AsyncMock(return_value=pipeline_result),
@@ -288,11 +327,55 @@ class TestRunAgentCycle:
 
         mock_react.assert_not_called()
         mock_pipeline.assert_awaited_once()
+        assert mock_pipeline.await_args.kwargs["psychology_context"]["allowed_downstream_use"] == "context_only"
+        assert mock_psychology.await_count == 2
         recorder.record_raw_model_failure.assert_awaited_once()
         assert recorder.record_raw_model_failure.await_args.kwargs["first_failing_stage"] == "finance_tool_planner_model"
+        economics = recorder.record_agent_cycle.await_args.kwargs["economics_snapshot"]
+        assert economics["psychology_context"]["use_as"] == "soft_risk_context_not_alpha"
+        assert [item["phase"] for item in economics["psychology_observations"]] == [
+            "pre_agent_cycle",
+            "post_agent_cycle",
+        ]
         assert result["finance_no_context"] is True
         assert result["first_failing_stage"] == "finance_tool_planner_model"
         assert result["decisions"] == []
+
+    @pytest.mark.asyncio
+    async def test_agent_cycle_records_pre_post_psychology_context(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        recorder = _make_recorder()
+        recorder.record_agent_cycle = AsyncMock()
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value=self._mock_react_result())
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch(
+                 "agentic_capital.graph.workflow._run_psychology_observation",
+                 AsyncMock(side_effect=[
+                     _psychology_result("pre_agent_cycle"),
+                     _psychology_result("post_agent_cycle"),
+                 ]),
+             ) as mock_psychology:
+            result = await run_agent_cycle(ceo, cycle_number=7, recorder=recorder)
+
+        assert result["agent_name"] == "CEO"
+        assert mock_psychology.await_count == 2
+        phases = [call.kwargs["phase"] for call in mock_psychology.await_args_list]
+        assert phases == ["pre_agent_cycle", "post_agent_cycle"]
+        economics = recorder.record_agent_cycle.await_args.kwargs["economics_snapshot"]
+        assert economics["psychology_context"]["use_as"] == "soft_risk_context_not_alpha"
+        assert economics["psychology_context"]["forbidden_use"] == [
+            "trade_action",
+            "order_quantity",
+            "order_permission",
+            "capital_allocation",
+        ]
+        assert [item["phase"] for item in economics["psychology_observations"]] == [
+            "pre_agent_cycle",
+            "post_agent_cycle",
+        ]
 
     @pytest.mark.asyncio
     async def test_handles_react_failure_gracefully(self):
@@ -302,7 +385,8 @@ class TestRunAgentCycle:
         mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("LLM provider crashed"))
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(ceo, cycle_number=1)
 
         assert result["agent_name"] == "CEO"
@@ -321,7 +405,8 @@ class TestRunAgentCycle:
         mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError(message))
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(ceo, cycle_number=1)
 
         assert result["agent_name"] == "CEO"
@@ -345,7 +430,8 @@ class TestRunAgentCycle:
         mock_agent.ainvoke = AsyncMock(return_value=mock_react_result)
 
         with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
             result = await run_agent_cycle(ceo, cycle_number=1)
 
         org_decisions = [d for d in result["decisions"] if d.get("type") == "hire"]

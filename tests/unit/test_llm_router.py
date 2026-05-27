@@ -18,6 +18,7 @@ def test_router_builds_local_langchain_model():
     with patch.object(router.settings, "llm_provider", "local"), \
          patch.object(router.settings, "local_llm_base_url", "http://127.0.0.1:8080/v1"), \
          patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
+         patch.object(router.settings, "local_agent_llm_base_url", "http://127.0.0.1:19000/v1"), \
          patch.object(router.settings, "local_agent_llm_model", "agentic_capital_react_model"), \
          patch.object(router.settings, "local_llm_api_key", ""), \
          patch.object(router.settings, "local_llm_timeout_seconds", 10.0), \
@@ -26,7 +27,7 @@ def test_router_builds_local_langchain_model():
         model = router.build_langchain_chat_model()
 
     assert model.model == "agentic_capital_react_model"
-    assert model.base_url == "http://127.0.0.1:8080/v1"
+    assert model.base_url == "http://127.0.0.1:19000/v1"
     assert model.send_native_tools is False
 
 
@@ -35,6 +36,15 @@ def test_router_rejects_finance_model_as_general_agent_llm():
          patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
          patch.object(router.settings, "local_agent_llm_model", ""), \
          pytest.raises(ValueError, match="LOCAL_AGENT_LLM_MODEL"):
+        router.build_langchain_chat_model()
+
+
+def test_router_requires_agent_base_url_when_finance_model_is_primary():
+    with patch.object(router.settings, "llm_provider", "local"), \
+         patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
+         patch.object(router.settings, "local_agent_llm_model", "agentic_capital_react_model"), \
+         patch.object(router.settings, "local_agent_llm_base_url", ""), \
+         pytest.raises(ValueError, match="LOCAL_AGENT_LLM_BASE_URL"):
         router.build_langchain_chat_model()
 
 
@@ -304,6 +314,8 @@ async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context
 @pytest.mark.asyncio
 async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
     captured_planner_payload = {}
+    captured_decision_payload = {}
+    captured_risk_payload = {}
 
     async def collect_tool_results(payload):
         assert payload["tool_plan"]["fallback"] == "deterministic_paper_tool_plan"
@@ -316,6 +328,7 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
+                "evidence": [{"doc_id": "ev-raw", "text": "y" * 2000}],
             },
             "finance_decision_payload": {
                 "balance": {"available": 1_000_000, "currency": "KRW"},
@@ -323,6 +336,7 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
                 "quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
                 "market_session": {"state": "regular", "is_open": True, "regular_session": True},
                 "risk_limit": {"max_order_value": 1_000_000},
+                "rag": {"evidence": [{"doc_id": "ev-raw", "text": "z" * 2000}]},
             },
         }
 
@@ -345,7 +359,19 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
                 compact_payload_hash="plannerhash",
             )
         if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            captured_decision_payload.update(payload)
             assert payload["finance_context"]["balance"]["available"] == 1_000_000
+            assert payload["tool_results"]["available"] == sorted([
+                "finance_decision_payload",
+                "get_balance",
+                "get_market_session",
+                "get_positions",
+                "get_quote",
+                "get_risk_limit",
+                "search_rag",
+            ])
+            assert "tool_results" not in payload["finance_context"]
+            assert len(payload["user_question"]) < 350
             return {
                 "action": "CALL_TOOL",
                 "symbol": "005930",
@@ -360,6 +386,9 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
                 ],
                 "evidence_ids": ["ev-compact"],
             }, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_RISK_GUARD_MODEL:
+            captured_risk_payload.update(payload)
+            return {"risk_flags": [], "hard_fail": False}, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
         return {"risk_flags": [], "hard_fail": False}, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
 
     with patch(
@@ -391,6 +420,16 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
     assert captured_planner_payload["evidence_count"] == 1
     assert captured_planner_payload["evidence"][0]["preview"].endswith("...")
     assert "x" * 1000 not in json.dumps(captured_planner_payload, ensure_ascii=False)
+    assert captured_decision_payload["evidence"][0]["preview"].endswith("...")
+    assert "x" * 1000 not in json.dumps(captured_decision_payload, ensure_ascii=False)
+    assert "y" * 1000 not in json.dumps(captured_decision_payload, ensure_ascii=False)
+    assert "z" * 1000 not in json.dumps(captured_decision_payload, ensure_ascii=False)
+    assert "rag_query" not in captured_risk_payload
+    assert "tool_plan" not in captured_risk_payload
+    assert "evidence" not in captured_risk_payload
+    assert captured_risk_payload["finance_context"]["rag"]["evidence_ids"] == []
+    assert "y" * 1000 not in json.dumps(captured_risk_payload, ensure_ascii=False)
+    assert "z" * 1000 not in json.dumps(captured_risk_payload, ensure_ascii=False)
     failed_stage = next(call for call in result["sidecar_calls"] if call.get("ok") is False)
     assert failed_stage["status_code"] == 503
     assert failed_stage["failure_body_summary"] == "service unavailable"

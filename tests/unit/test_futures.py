@@ -1,7 +1,9 @@
 """Tests for futures trading components: FuturesSessionGuard, futures_tools, FuturesEngine."""
+
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,9 +17,7 @@ from agentic_capital.ports.trading import (
     OrderResult,
     OrderSide,
     OrderType,
-    Position,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1106,7 +1106,7 @@ class TestFuturesTools:
     async def test_close_all_positions_no_positions(self):
         from agentic_capital.core.tools.futures_tools import build_futures_tools
         trading = self._build_trading()
-        tools, decisions, _ = build_futures_tools(trading=trading)
+        tools, _decisions, _ = build_futures_tools(trading=trading)
         tool = next(t for t in tools if t.name == "close_all_positions")
         result = await tool.ainvoke({})
         assert "OK:no_positions_to_close" in result
@@ -1145,7 +1145,7 @@ class TestFuturesTools:
             quantity=1.0, filled_price=380.0, status="filled",
             market=Market.KR_FUTURES,
         ))
-        tools, decisions, _ = build_futures_tools(trading=trading)
+        tools, _decisions, _ = build_futures_tools(trading=trading)
         tool = next(t for t in tools if t.name == "close_all_positions")
         result = await tool.ainvoke({})
         assert "OK:closed" in result
@@ -1274,6 +1274,11 @@ class TestFuturesTools:
 
 
 class TestFuturesEngine:
+    @pytest.fixture(autouse=True)
+    def _agent_runtime_url(self):
+        with patch("agentic_capital.adapters.llm.router.settings.local_agent_llm_base_url", "http://127.0.0.1:19000/v1"):
+            yield
+
     @pytest.mark.asyncio
     async def test_engine_init(self):
         from agentic_capital.simulation.futures_engine import FuturesEngine
@@ -1392,6 +1397,7 @@ class TestFuturesEngine:
         engine._agent = agent
         engine._running = True
         engine._cycle_count = 0
+        engine._volatility_threshold_pct = 999.0
 
         return engine
 
@@ -1733,12 +1739,11 @@ class TestMinutesUntilSessionEnd:
         return FuturesEngine()
 
     def test_day_session_returns_minutes_to_1545(self):
-        """During day session (09:00–15:45 KST), returns minutes until 15:45."""
-        from datetime import datetime, timezone, timedelta
+        """During day session (09:00-15:45 KST), returns minutes until 15:45."""
         engine = self._make_engine()
-        KST = timezone(timedelta(hours=9))
+        kst = timezone(timedelta(hours=9))
         # Simulate 10:00 KST — 345 minutes until 15:45
-        fake_now = datetime(2026, 3, 19, 10, 0, 0, tzinfo=KST)
+        fake_now = datetime(2026, 3, 19, 10, 0, 0, tzinfo=kst)
         with patch("datetime.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mins = engine._minutes_until_session_end()
@@ -1746,11 +1751,10 @@ class TestMinutesUntilSessionEnd:
 
     def test_night_session_returns_minutes_to_0500_next_day(self):
         """During night session (18:00+), returns minutes until 05:00 next day."""
-        from datetime import datetime, timezone, timedelta
         engine = self._make_engine()
-        KST = timezone(timedelta(hours=9))
+        kst = timezone(timedelta(hours=9))
         # Simulate 20:00 KST — 9 hours until 05:00 next day = 540 min
-        fake_now = datetime(2026, 3, 19, 20, 0, 0, tzinfo=KST)
+        fake_now = datetime(2026, 3, 19, 20, 0, 0, tzinfo=kst)
         with patch("datetime.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mins = engine._minutes_until_session_end()
@@ -1758,10 +1762,9 @@ class TestMinutesUntilSessionEnd:
 
     def test_between_sessions_returns_9999(self):
         """Between 05:00 and 09:00 KST (between sessions), returns 9999."""
-        from datetime import datetime, timezone, timedelta
         engine = self._make_engine()
-        KST = timezone(timedelta(hours=9))
-        fake_now = datetime(2026, 3, 19, 7, 0, 0, tzinfo=KST)
+        kst = timezone(timedelta(hours=9))
+        fake_now = datetime(2026, 3, 19, 7, 0, 0, tzinfo=kst)
         with patch("datetime.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mins = engine._minutes_until_session_end()

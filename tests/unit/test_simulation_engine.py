@@ -44,6 +44,23 @@ class TestSimulationEngine:
     def test_startup_gate_validates_local_finance_runtime(self):
         engine = SimulationEngine()
         with patch("agentic_capital.adapters.llm.router.is_local_llm_enabled", return_value=True), \
+             patch("agentic_capital.simulation.engine.settings.local_agent_llm_base_url", "http://127.0.0.1:19000/v1"), \
+             patch("agentic_capital.adapters.llm.local_finance_runtime.validate_local_finance_runtime") as mock_validate:
+            engine._validate_startup_gate()
+        mock_validate.assert_called_once()
+
+    def test_startup_gate_rejects_missing_agent_runtime_when_finance_model_is_primary(self):
+        engine = SimulationEngine()
+        with patch("agentic_capital.adapters.llm.router.is_local_llm_enabled", return_value=True), \
+             patch("agentic_capital.simulation.engine.settings.local_llm_model", "finance_decision_model"), \
+             patch("agentic_capital.simulation.engine.settings.local_agent_llm_base_url", ""), \
+             pytest.raises(RuntimeError, match="LOCAL_AGENT_LLM_BASE_URL"):
+            engine._validate_startup_gate()
+
+    def test_startup_gate_validates_finance_pipeline_with_hosted_agent_llm(self):
+        engine = SimulationEngine()
+        with patch("agentic_capital.adapters.llm.router.is_local_llm_enabled", return_value=False), \
+             patch("agentic_capital.simulation.engine.settings.local_finance_pipeline_enabled", True), \
              patch("agentic_capital.adapters.llm.local_finance_runtime.validate_local_finance_runtime") as mock_validate:
             engine._validate_startup_gate()
         mock_validate.assert_called_once()

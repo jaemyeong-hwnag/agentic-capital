@@ -181,7 +181,7 @@ async def test_collect_finance_decision_tool_results_adds_structured_payload():
         market="kr_stock",
         open_markets=["KRX"],
         capital_limit=1_000_000,
-        evidence=[{"doc_id": "ev-1", "text": "risk policy"}],
+        evidence=[{"doc_id": "ev-1", "text": "risk policy " + ("x" * 1000)}],
     )
 
     payload = result["finance_decision_payload"]
@@ -191,6 +191,9 @@ async def test_collect_finance_decision_tool_results_adds_structured_payload():
     assert payload["market_session"]["is_open"] is True
     assert payload["risk_limit"]["paper_trade_only"] is True
     assert payload["rag"]["evidence_ids"] == ["ev-1"]
+    assert payload["rag"]["evidence"][0]["id"] == "ev-1"
+    assert payload["rag"]["evidence"][0]["preview"].endswith("...")
+    assert "x" * 500 not in str(payload["rag"]["evidence"])
     assert set(payload["tool_results"]) >= {
         "search_rag",
         "get_market_session",

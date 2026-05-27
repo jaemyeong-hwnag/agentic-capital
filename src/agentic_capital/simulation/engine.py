@@ -54,7 +54,15 @@ class SimulationEngine:
         """Block paper trading unless the finance local LLM is ready."""
         from agentic_capital.adapters.llm.router import is_local_llm_enabled
 
-        if not is_local_llm_enabled():
+        if (
+            is_local_llm_enabled()
+            and settings.local_llm_model.strip().lower().startswith("finance_")
+            and not settings.local_agent_llm_base_url.strip()
+        ):
+            raise RuntimeError(
+                "LOCAL_AGENT_LLM_BASE_URL is required so CEO/Analyst do not use the finance sidecar as a general LLM"
+            )
+        if not is_local_llm_enabled() and not settings.local_finance_pipeline_enabled:
             return
         from agentic_capital.adapters.llm.local_finance_runtime import validate_local_finance_runtime
 
@@ -136,6 +144,7 @@ class SimulationEngine:
                     "agents": [a.name for a in self._agents],
                     "llm_provider": metadata["llm_provider"],
                     "llm_base_url": metadata.get("llm_base_url"),
+                    "agent_llm_base_url": metadata.get("agent_llm_base_url"),
                 },
                 llm_model=metadata["llm_model"],
                 embedding_model=metadata["embedding_model"],

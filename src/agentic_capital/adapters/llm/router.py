@@ -51,14 +51,19 @@ def build_langchain_chat_model() -> Any:
 
         model = settings.local_agent_llm_model.strip()
         finance_model = settings.local_llm_model.strip()
+        agent_base_url = settings.local_agent_llm_base_url.strip()
         if not model:
             if finance_model.lower().startswith("finance_"):
                 raise ValueError(
                     "LOCAL_AGENT_LLM_MODEL is required when LOCAL_LLM_MODEL points to a finance sidecar"
                 )
             model = finance_model
+        if finance_model.lower().startswith("finance_") and not agent_base_url:
+            raise ValueError(
+                "LOCAL_AGENT_LLM_BASE_URL is required when LOCAL_LLM_MODEL points to a finance sidecar"
+            )
         return LocalOpenAICompatibleChatModel(
-            base_url=settings.local_llm_base_url,
+            base_url=agent_base_url or settings.local_llm_base_url,
             model=model,
             api_key=settings.local_llm_api_key,
             timeout_seconds=settings.local_llm_timeout_seconds,
@@ -86,6 +91,7 @@ def llm_run_metadata() -> dict[str, Any]:
             "agent_llm_model": settings.local_agent_llm_model,
             "embedding_model": settings.local_embedding_model,
             "llm_base_url": settings.local_llm_base_url,
+            "agent_llm_base_url": settings.local_agent_llm_base_url,
         }
     return {
         "llm_provider": active_llm_provider(),

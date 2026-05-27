@@ -387,6 +387,141 @@ def _compact_evidence_payload(evidence: list[dict[str, Any]], *, limit: int = 6)
     return compact
 
 
+def _compact_finance_tool_results(tool_results: dict[str, Any]) -> dict[str, Any]:
+    """Build the decision/risk sidecar view without bulky raw evidence."""
+    allowed = {
+        "get_balance",
+        "get_positions",
+        "get_quote",
+        "get_market_session",
+        "get_risk_limit",
+        "search_rag",
+        "finance_decision_payload",
+        "_errors",
+        "_meta",
+    }
+    compact = {name: value for name, value in tool_results.items() if name in allowed}
+    rag = compact.get("search_rag")
+    if isinstance(rag, dict):
+        evidence = rag.get("evidence")
+        compact["search_rag"] = {
+            **rag,
+            "evidence": _compact_evidence_payload(evidence if isinstance(evidence, list) else []),
+        }
+    finance_context = compact.get("finance_decision_payload")
+    if isinstance(finance_context, dict):
+        context = dict(finance_context)
+        context_rag = context.get("rag")
+        if isinstance(context_rag, dict):
+            evidence = context_rag.get("evidence")
+            context["rag"] = {
+                **context_rag,
+                "evidence": _compact_evidence_payload(evidence if isinstance(evidence, list) else []),
+            }
+        context.pop("tool_results", None)
+        compact["finance_decision_payload"] = context
+    return compact
+
+
+def _compact_agent_state(agent_state: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "deployment_mode",
+        "live_order_enabled",
+        "agent_name",
+        "symbol",
+        "symbols",
+        "market",
+        "open_markets",
+        "capital_limit",
+        "risk_per_trade_pct",
+    }
+    return {key: agent_state.get(key) for key in allowed if key in agent_state}
+
+
+def _compact_rag_query_payload(rag_query: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in ("query", "route", "requires_fresh_data", "no_context_if_empty", "symbol", "market"):
+        if key in rag_query:
+            value = rag_query[key]
+            compact[key] = _summary_text(value, limit=160) if isinstance(value, str) else value
+    queries = rag_query.get("queries")
+    if isinstance(queries, list):
+        compact["queries"] = [_summary_text(query, limit=120) for query in queries[:3]]
+    return compact
+
+
+def _compact_tool_plan_payload(tool_plan: dict[str, Any]) -> dict[str, Any]:
+    plan = tool_plan.get("tool_plan") or tool_plan.get("tools") or tool_plan.get("tool_calls") or []
+    compact_plan: list[dict[str, Any]] = []
+    if isinstance(plan, list):
+        for item in plan[:8]:
+            if isinstance(item, str):
+                compact_plan.append({"tool": item})
+            elif isinstance(item, dict):
+                args = item.get("args") if isinstance(item.get("args"), dict) else {}
+                compact_plan.append({
+                    "tool": str(item.get("tool") or item.get("name") or item.get("function") or ""),
+                    "args": {
+                        str(key): _summary_text(value, limit=80) if isinstance(value, str) else value
+                        for key, value in args.items()
+                    },
+                })
+    return {
+        "tool_plan": [item for item in compact_plan if item.get("tool")],
+        "stop_if_missing": tool_plan.get("stop_if_missing", []),
+        "fallback": tool_plan.get("fallback"),
+        "paper_trade_only": tool_plan.get("paper_trade_only", True),
+    }
+
+
+def _tool_result_stage_summary(tool_results: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "available": sorted(key for key in tool_results if not key.startswith("_")),
+        "errors": tool_results.get("_errors", []),
+        "meta": tool_results.get("_meta", {}),
+    }
+
+
+def _compact_decision_for_risk_guard(decision: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in (
+        "action",
+        "symbol",
+        "market",
+        "side",
+        "quantity",
+        "price",
+        "confidence",
+        "evidence_ids",
+        "required_tools",
+        "risk_tags",
+    ):
+        if key in decision:
+            compact[key] = decision[key]
+    reason = decision.get("reason") or decision.get("rationale") or decision.get("message")
+    if reason:
+        compact["reason"] = _summary_text(reason, limit=180)
+    return compact
+
+
+def _risk_guard_finance_context(finance_context: dict[str, Any]) -> dict[str, Any]:
+    rag = finance_context.get("rag")
+    compact_rag: dict[str, Any] = {}
+    if isinstance(rag, dict):
+        compact_rag = {
+            "evidence_ids": rag.get("evidence_ids", []),
+            "evidence_count": rag.get("evidence_count", 0),
+        }
+    return {
+        "balance": finance_context.get("balance", {}),
+        "positions": finance_context.get("positions", []),
+        "quote": finance_context.get("quote", {}),
+        "market_session": finance_context.get("market_session", {}),
+        "risk_limit": finance_context.get("risk_limit", {}),
+        "rag": compact_rag,
+    }
+
+
 def _deterministic_paper_tool_plan(agent_state: dict[str, Any]) -> dict[str, Any]:
     """Fallback tool plan used when the tool planner sidecar is unavailable."""
     symbol = str(agent_state.get("symbol") or "").strip()
@@ -513,6 +648,7 @@ async def run_local_finance_decision_pipeline(
     agent_state: dict[str, Any],
     required_safety: dict[str, Any],
     collect_tool_results: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+    psychology_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the finance sidecar as a staged decision client.
 
@@ -530,6 +666,11 @@ async def run_local_finance_decision_pipeline(
         "agent_state": agent_state,
         "required_safety": required_safety,
     }
+    if psychology_context:
+        try:
+            base_payload["psychology_context"] = build_finance_soft_context(psychology_context)
+        except LocalPsychologyRuntimeError as exc:
+            raise LocalFinanceRuntimeError(f"local_finance_psychology_context_unsafe: {exc}") from exc
 
     try:
         rag_query, meta = await _call_finance_stage(
@@ -585,14 +726,23 @@ async def run_local_finance_decision_pipeline(
         })
         if not isinstance(tool_results, dict):
             tool_results = {"_errors": [{"tool": "collector", "error": "invalid_tool_results"}]}
+        compact_tool_results = _compact_finance_tool_results(tool_results)
+        compact_finance_context = compact_tool_results.get("finance_decision_payload", {})
+        compact_base_payload = {
+            "request_id": request_id,
+            "user_question": _summary_text(user_question, limit=300),
+            "agent_state": _compact_agent_state(agent_state),
+            "required_safety": required_safety,
+        }
 
         decision_payload = {
-            **base_payload,
-            "rag_query": rag_query,
-            "tool_plan": tool_plan,
-            "tool_results": tool_results,
-            "finance_context": tool_results.get("finance_decision_payload", {}),
-            "evidence": evidence,
+            **compact_base_payload,
+            "rag_query": _compact_rag_query_payload(rag_query),
+            "tool_plan": _compact_tool_plan_payload(tool_plan if isinstance(tool_plan, dict) else {}),
+            "tool_results": _tool_result_stage_summary(tool_results),
+            "finance_context": compact_finance_context,
+            "evidence": compact_evidence[:3],
+            "evidence_count": len(evidence),
             "evidence_ids": evidence_ids,
         }
         decision, meta = await _call_finance_stage(
@@ -605,12 +755,26 @@ async def run_local_finance_decision_pipeline(
             ),
         )
         sidecar_calls.append(meta)
-        decision = _normalise_decision_payload(decision, tool_results=tool_results, evidence_ids=evidence_ids)
+        decision = _normalise_decision_payload(
+            decision,
+            tool_results=compact_tool_results,
+            evidence_ids=evidence_ids,
+        )
         blocked_order_tools = _blocked_order_tools(tool_results)
 
+        risk_guard_payload = {
+            "request_id": request_id,
+            "agent_state": _compact_agent_state(agent_state),
+            "required_safety": required_safety,
+            "decision": _compact_decision_for_risk_guard(decision),
+            "finance_context": _risk_guard_finance_context(
+                compact_finance_context if isinstance(compact_finance_context, dict) else {}
+            ),
+            "tool_results": _tool_result_stage_summary(tool_results),
+        }
         risk_guard, meta = await _call_finance_stage(
             model=FINANCE_RISK_GUARD_MODEL,
-            payload={**decision_payload, "decision": decision},
+            payload=risk_guard_payload,
             system=(
                 "Return only JSON with risk_flags, hard_fail, explanation. "
                 "Hard fail profit guarantees, unsupported latest-market claims, or live orders without permission."

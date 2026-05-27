@@ -15,6 +15,7 @@ class TestConfig:
         assert s.kis_is_paper is True
         assert s.llm_provider == "local"
         assert s.local_llm_model == "finance_decision_model"
+        assert s.local_agent_llm_base_url == ""
         assert s.local_agent_llm_model == "agentic_capital_react_model"
         assert s.local_embedding_model == "finance_embedding_model"
         assert s.local_llm_send_native_tools is False

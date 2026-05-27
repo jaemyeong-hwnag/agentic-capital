@@ -162,6 +162,26 @@ def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_rag_evidence(evidence: list[dict[str, Any]], *, limit: int = 6) -> list[dict[str, Any]]:
+    """Keep RAG results model-friendly by stripping full chunk text."""
+    compact: list[dict[str, Any]] = []
+    for idx, item in enumerate(evidence[:limit]):
+        if not isinstance(item, dict):
+            continue
+        evidence_id = item.get("id") or item.get("evidence_id") or item.get("doc_id") or item.get("chunk_id")
+        text = item.get("summary") or item.get("title") or item.get("text") or item.get("content") or ""
+        preview = " ".join(str(text).split())
+        if len(preview) > 180:
+            preview = f"{preview[:180].rstrip()}..."
+        compact.append({
+            "id": str(evidence_id or f"rag-{idx}"),
+            "source": str(item.get("source") or item.get("path") or item.get("doc") or ""),
+            "score": item.get("score"),
+            "preview": preview,
+        })
+    return compact
+
+
 async def collect_finance_decision_tool_results(
     *,
     tool_plan_payload: dict[str, Any],
@@ -272,7 +292,7 @@ async def collect_finance_decision_tool_results(
         results["search_rag"] = {
             "evidence_ids": ids,
             "evidence_count": len(ev),
-            "evidence": ev[:6],
+            "evidence": _compact_rag_evidence(ev),
         }
 
     if errors:

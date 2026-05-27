@@ -96,7 +96,9 @@ def mock_langgraph_react_agent():
     mock_agent = MagicMock()
     mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content="cycle_done")]})
     with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
-         patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()):
+         patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+         patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", False), \
+         patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
         yield
 
 

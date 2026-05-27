@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -199,6 +200,12 @@ def _schema_repair_payload(content: str, response_payload: dict[str, Any]) -> di
     }
 
 
+def _summary_text(value: Any, *, limit: int = 500) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    compact = " ".join(text.split())
+    return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
+
+
 def _reject_trade_action_leak(payload: dict[str, Any]) -> None:
     for key in ("action", "decision", "trade_action", "order_action", "signal"):
         action = _normalize_text(payload.get(key))
@@ -301,6 +308,90 @@ def build_finance_soft_context(payload: dict[str, Any]) -> dict[str, Any]:
         "use_as": "soft_risk_context_not_alpha",
         "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
     }
+
+
+async def run_local_psychology_context(
+    *,
+    request_id: str,
+    agent_context: dict[str, Any],
+    input_text: str,
+    required_safety: dict[str, Any] | None = None,
+    service: str | None = None,
+) -> dict[str, Any]:
+    """Call psychology sidecar for context-only cycle observation."""
+    model = service or settings.local_psychology_model
+    chat_url = _join_url(settings.local_psychology_base_url, "/chat/completions")
+    request_payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only JSON with signals, agent_state_patch, evidence_ids, confidence, "
+                    "uncertainty, risk_tags, and allowed_downstream_use. This is context-only "
+                    "psychology observation for recorder/risk support. Never output BUY, SELL, "
+                    "orders, quantities, capital allocation, risk limit overrides, clinical "
+                    "diagnosis, treatment, or therapy claims."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "request_id": request_id,
+                        "service": model,
+                        "agent_context": agent_context,
+                        "input_text": _summary_text(input_text, limit=1800),
+                        "required_safety": required_safety
+                        or {
+                            "require_evidence_ids": True,
+                            "allow_observation_only": True,
+                            "no_clinical_diagnosis": True,
+                            "no_direct_order": True,
+                        },
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ),
+            },
+        ],
+        "temperature": 0.0,
+    }
+    started = time.perf_counter()
+    response: httpx.Response | None = None
+    try:
+        async with httpx.AsyncClient(timeout=settings.local_psychology_timeout_seconds) as client:
+            response = await client.post(chat_url, headers=_auth_headers(), json=request_payload)
+            response.raise_for_status()
+            response_payload = response.json()
+        content = _extract_content(response_payload)
+        parsed = _extract_json_object(content)
+        repair_applied = None
+        if parsed is None:
+            parsed = _schema_repair_payload(content, response_payload)
+            repair_applied = parsed.get("repair_applied")
+        context = normalize_psychology_context(parsed)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "model": model,
+            "status_code": getattr(response, "status_code", None),
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "context": context,
+            "soft_context": build_finance_soft_context(context),
+            "repair_applied": repair_applied,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "request_id": request_id,
+            "model": model,
+            "status_code": getattr(response, "status_code", None),
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "error": type(exc).__name__,
+            "failure_body_summary": _summary_text(getattr(response, "text", "") or str(exc)),
+        }
 
 
 def run_local_psychology_smoke() -> dict[str, Any]:
