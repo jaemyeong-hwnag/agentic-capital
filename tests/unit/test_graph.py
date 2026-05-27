@@ -15,6 +15,7 @@ from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
 from agentic_capital.graph.workflow import (
     _agent_response_quality_issues,
+    _agent_cycle_trigger,
     _build_system_prompt,
     _error_retry_seconds,
     _exception_summary,
@@ -296,6 +297,31 @@ class TestAgentToolFiltering:
         assert "market_status_token_confusion" in issues
         assert _agent_response_quality_issues("trader", "¿Qué tal si actualizamos quote symbol KRX:POST?") == []
 
+    def test_non_trader_cycle_trigger_forces_operational_note(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        trigger = _agent_cycle_trigger(
+            agent=ceo,
+            cycle_number=8,
+            symbols=["005930", "TQQQ"],
+            open_markets=["NASDAQ_PRE"],
+        )
+
+        assert "cycle:8" in trigger
+        assert "Do not ask the user for help" in trigger
+        assert "send_message" in trigger
+        assert "KRX:POST" in trigger
+        assert "OBS|..." in trigger
+
+    def test_trader_cycle_trigger_stays_minimal_for_finance_flow(self):
+        trader = TraderAgent(
+            profile=_make_profile("Trader"),
+            personality=create_random_personality(42),
+            llm=_make_llm(),
+            trading=_make_trading(),
+        )
+
+        assert _agent_cycle_trigger(agent=trader, cycle_number=8, symbols=["005930"], open_markets=[]) == "cycle:8"
+
     def test_trader_keeps_trade_tools_for_legacy_react_runs(self):
         trader = TraderAgent(
             profile=_make_profile("Trader"),
@@ -486,7 +512,8 @@ class TestRunAgentCycle:
             "risk_limit_override",
         ]
         assert economics["agent_request"]["agent_role"] == "ceo"
-        assert economics["agent_request"]["cycle_trigger"] == "cycle:7"
+        assert economics["agent_request"]["cycle_trigger"].startswith("cycle:7")
+        assert "Do not ask the user for help" in economics["agent_request"]["cycle_trigger"]
         assert economics["agent_response"]["tool_calls_count"] == len(
             recorder.record_agent_cycle.await_args.kwargs["tool_sequence"]
         )

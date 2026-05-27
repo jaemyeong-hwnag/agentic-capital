@@ -304,6 +304,39 @@ def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
     return issues
 
 
+def _agent_cycle_trigger(
+    *,
+    agent: BaseAgent,
+    cycle_number: int,
+    symbols: list[str] | None,
+    open_markets: list[str] | None,
+) -> str:
+    """Build the user turn that starts a ReAct cycle."""
+    role = _agent_tool_role(agent)
+    if role == "trader":
+        return f"cycle:{cycle_number}"
+
+    symbol_text = ",".join(symbols or []) if symbols else "unspecified"
+    markets_text = ",".join(open_markets or []) if open_markets else "none"
+    if role == "ceo":
+        role_task = (
+            "own company strategy, assign concrete analysis/trading tasks, and use send_message "
+            "to Trader or Analyst when an action is needed."
+        )
+    else:
+        role_task = (
+            "analyze symbols with available tools, identify evidence gaps, and use send_message "
+            "to Trader with a concrete research/trade review task when useful."
+        )
+    return (
+        f"cycle:{cycle_number}. Role task: {role_task} "
+        f"Watchlist:{symbol_text}. Open markets/status:{markets_text}. "
+        "Do not ask the user for help. Do not summarize market status as a final answer. "
+        "Treat KRX:POST, NASDAQ:CLOSED, NYSE:CLOSED and similar values as session labels, not quote symbols. "
+        "Final answer must be compact Korean or English in this shape: OBS|... TRADER_TASK|... NEXT|..."
+    )
+
+
 def _extract_psychology_context(decisions: list[dict]) -> dict | None:
     """Return the first psychology context decision for cycle-level auditing."""
     psychology_types = {"psychology", "psychology_context", "psychology_evaluation"}
@@ -836,7 +869,12 @@ async def run_agent_cycle(
 
     react_agent = create_react_agent(llm, tools, prompt=system_prompt)
 
-    cycle_trigger = f"cycle:{cycle_number}"
+    cycle_trigger = _agent_cycle_trigger(
+        agent=agent,
+        cycle_number=cycle_number,
+        symbols=symbols,
+        open_markets=open_markets,
+    )
 
     logger.info("agent_cycle_start", agent=agent.name, cycle=cycle_number)
 
