@@ -46,6 +46,12 @@ _NON_TRADER_BLOCKED_TOOL_NAMES = frozenset({
 })
 
 
+def _compact_text(value: Any, *, limit: int = 500) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    compact = " ".join(text.split())
+    return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
+
+
 def _parse_retry_delay_seconds(message: str) -> int | None:
     """Parse provider retry hints into seconds."""
     retry_delay_match = re.search(
@@ -780,6 +786,20 @@ async def run_agent_cycle(
             }
             economics_snapshot = {
                 **llm_run_metadata(),
+                "agent_request": {
+                    "prompt_summary": _compact_text(system_prompt, limit=700),
+                    "cycle_trigger": cycle_trigger,
+                    "agent_role": _agent_tool_role(agent),
+                    "tool_names": [str(getattr(tool, "name", "")) for tool in tools],
+                },
+                "agent_response": {
+                    "reasoning_summary": _compact_text(reasoning, limit=700),
+                    "tool_calls_count": len(tool_seq),
+                    "decisions_count": len(all_decisions),
+                    "errors_count": len(errors),
+                    "next_action": "retry_after_error" if errors else ("agent_requested_wakeup" if wakeup_sink else "continue_cycle"),
+                    "failure_cause": errors[0][:300] if errors else None,
+                },
                 "psychology_context": (
                     post_psychology.get("soft_context")
                     if isinstance(post_psychology, dict) and isinstance(post_psychology.get("soft_context"), dict)

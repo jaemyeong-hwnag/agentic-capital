@@ -163,6 +163,30 @@ risk_tags:
 | logs | provider/quota/runtime incident | 일부 있음 |
 | docs/research/filings/news | RAG external evidence | 골격 필요 |
 
+## Agent Runtime Recording
+
+CEO/Analyst는 finance decision model을 일반 LLM처럼 쓰지 않는다. `LOCAL_LLM_MODEL=finance_*`인 경우에도 일반 ReAct agent는
+`LOCAL_AGENT_LLM_BASE_URL`와 `LOCAL_AGENT_LLM_MODEL`에 연결된다. Trader만 local finance pipeline 조건에서 finance sidecar flow로 간다.
+
+각 `agent_cycles.economics_snapshot`에는 다음 운영 필드를 남긴다.
+
+| Field | 목적 |
+|---|---|
+| `agent_request.prompt_summary` | 전체 system prompt 원문 대신 짧은 요청 요약만 저장 |
+| `agent_request.cycle_trigger` | `cycle:<n>` 형태의 실행 trigger |
+| `agent_request.agent_role` | `ceo`, `analyst`, `trader` role boundary 확인 |
+| `agent_request.tool_names` | 해당 cycle에 노출된 tool 목록 |
+| `agent_response.reasoning_summary` | 최종 응답 요약 |
+| `agent_response.tool_calls_count` | ReAct tool 호출 수 |
+| `agent_response.decisions_count` | 기록된 decision 수 |
+| `agent_response.errors_count` | cycle 오류 수 |
+| `agent_response.next_action` | continue, wakeup, retry 분류 |
+| `agent_response.failure_cause` | 오류 시 첫 실패 원인 요약 |
+
+로컬 instruct 모델이 tool schema를 그대로 흉내 내 `{"properties":{"symbol":"005930"}}` 같은 인자를 반환하면,
+runtime은 schema map이 아닌 value map일 때만 `{"symbol":"005930"}`으로 보정한다.
+이는 Analyst/CEO의 read-only quote/balance 조회 validation noise를 줄이기 위한 제한적 repair다.
+
 ## RAG Requirement
 
 이 서비스는 RAG가 필요하다. 이유는 다음과 같다.

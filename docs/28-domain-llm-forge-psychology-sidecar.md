@@ -92,6 +92,17 @@ agent conversation / cycle trace
  -> recorder / eval loop
 ```
 
+Agentic Capital은 psychology 결과를 `schema_status`와 함께 저장한다.
+
+| 상태 | 의미 | downstream 사용 |
+|---|---|---|
+| `validated` | 필수 필드와 context-only 안전 가드를 통과 | recorder, memory, finance soft context |
+| `invalid_json_to_context_only` | JSON parse 실패를 context-only failure signal로 축소 | recorder와 risk context에만 사용 |
+
+모든 psychology soft context에는 `use_as=soft_risk_context_not_alpha`와
+`forbidden_use=["trade_action","order_quantity","order_permission","capital_allocation"]`가 포함된다.
+이 필드는 BUY/SELL, 주문 수량, 주문 권한, 자본 배분, risk limit override를 바꾸는 데 사용할 수 없다.
+
 2026-05-26 기준 `domain-llm-forge`에서는 runtime psychology sidecar 7개와 `psychology_model_suite`에 대해 runtime schema, output validator, Agentic Capital integration, failure learning reference를 RAG corpus에 추가했다. search/gateway smoke에서 schema/validator/integration reference가 회수되고, suite는 QA/eval-only 모델을 runtime route로 쓰지 않도록 검증한다.
 
 ## 공통 파일 구조

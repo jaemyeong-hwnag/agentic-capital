@@ -420,6 +420,12 @@ class TestRunAgentCycle:
             "order_permission",
             "capital_allocation",
         ]
+        assert economics["agent_request"]["agent_role"] == "ceo"
+        assert economics["agent_request"]["cycle_trigger"] == "cycle:7"
+        assert economics["agent_response"]["tool_calls_count"] == len(
+            recorder.record_agent_cycle.await_args.kwargs["tool_sequence"]
+        )
+        assert economics["agent_response"]["next_action"] == "continue_cycle"
         assert [item["phase"] for item in economics["psychology_observations"]] == [
             "pre_agent_cycle",
             "post_agent_cycle",

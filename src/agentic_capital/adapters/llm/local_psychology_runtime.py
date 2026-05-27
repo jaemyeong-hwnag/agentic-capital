@@ -283,6 +283,7 @@ def normalize_psychology_context(payload: dict[str, Any]) -> dict[str, Any]:
         "risk_tags": [str(tag) for tag in risk_tags if str(tag)],
         "allowed_downstream_use": downstream_use,
         "use_as": "psychology_context_not_alpha",
+        "schema_status": str(payload.get("repair_applied") or "validated"),
     }
 
 
@@ -294,6 +295,7 @@ def validate_psychology_context_payload(payload: dict[str, Any]) -> dict[str, An
         "confidence": normalized["confidence"],
         "uncertainty_count": len(normalized["uncertainty"]),
         "allowed_downstream_use": normalized["allowed_downstream_use"],
+        "schema_status": normalized["schema_status"],
     }
 
 
@@ -305,6 +307,7 @@ def build_finance_soft_context(payload: dict[str, Any]) -> dict[str, Any]:
         for key in SOFT_CONTEXT_KEYS
         if normalized.get(key) not in (None, [], {})
     } | {
+        "schema_status": normalized["schema_status"],
         "use_as": "soft_risk_context_not_alpha",
         "forbidden_use": ["trade_action", "order_quantity", "order_permission", "capital_allocation"],
     }
@@ -328,8 +331,10 @@ async def run_local_psychology_context(
                 "role": "system",
                 "content": (
                     "Return only JSON with signals, agent_state_patch, evidence_ids, confidence, "
-                    "uncertainty, risk_tags, and allowed_downstream_use. This is context-only "
-                    "psychology observation for recorder/risk support. Never output BUY, SELL, "
+                    "uncertainty, risk_tags, and allowed_downstream_use. "
+                    "Use allowed_downstream_use=context_only. Include evidence_ids even if the "
+                    "only evidence is the cycle trace request_id. "
+                    "This is context-only psychology observation for recorder/risk support. Never output BUY, SELL, "
                     "orders, quantities, capital allocation, risk limit overrides, clinical "
                     "diagnosis, treatment, or therapy claims."
                 ),

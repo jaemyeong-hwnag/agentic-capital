@@ -191,3 +191,43 @@ def test_local_chat_model_parses_textual_tool_call(monkeypatch):
     assert message.content == ""
     assert message.tool_calls[0]["name"] == "get_positions"
     assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
+
+
+def test_local_chat_model_repairs_properties_wrapped_tool_args(monkeypatch):
+    class _PropertiesWrappedClient(_FakeSyncClient):
+        def post(self, url, *, headers, json):
+            return _FakeResponse({
+                "choices": [{
+                    "message": {
+                        "content": (
+                            '{"tool_calls":[{"name":"get_quote",'
+                            '"args":{"properties":{"symbol":"005930"}},"id":"call_3"}]}'
+                        ),
+                    },
+                }],
+            })
+
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _PropertiesWrappedClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:19000/v1",
+        model="agentic_capital_react_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_quote",
+                "description": "paper quote",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"symbol": {"type": "string"}},
+                    "required": ["symbol"],
+                },
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="005930 quote")])
+
+    assert message.tool_calls[0]["name"] == "get_quote"
+    assert message.tool_calls[0]["args"] == {"symbol": "005930"}

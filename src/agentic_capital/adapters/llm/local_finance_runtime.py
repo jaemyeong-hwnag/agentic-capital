@@ -617,6 +617,44 @@ def _blocked_order_tools(tool_results: dict[str, Any]) -> list[str]:
     return sorted(set(blocked))
 
 
+def _classify_no_trade_reason(
+    *,
+    decision: dict[str, Any],
+    record: dict[str, Any],
+    risk_flags: list[str],
+    tool_results: dict[str, Any],
+    risk_guard: dict[str, Any],
+) -> str | None:
+    """Explain why a paper-shadow cycle did not become an order candidate."""
+    action = _normalize_action(decision.get("action"))
+    if action in {"BUY", "SELL"} and record.get("record_type") == "finance_paper_shadow_decision":
+        return None
+    if record.get("record_type") == "raw_model_failure":
+        failure_type = str(record.get("failure_type") or "")
+        return f"blocked:{failure_type}" if failure_type else "blocked:raw_model_failure"
+    errors = tool_results.get("_errors")
+    if isinstance(errors, list) and errors:
+        first_error = errors[0] if isinstance(errors[0], dict) else {}
+        tool = str(first_error.get("tool") or "tool")
+        error = str(first_error.get("error") or "error")
+        return f"tool_error:{tool}:{error}"
+    if risk_guard.get("hard_fail") is True:
+        return "risk_guard_block"
+    if any("missing_evidence" in str(flag) for flag in risk_flags):
+        return "missing_evidence_review"
+    if not decision.get("evidence_ids"):
+        return "missing_evidence_ids"
+    if action == "CALL_TOOL":
+        return "tool_collection_only"
+    if action in {"WAIT", "HOLD", "OBSERVE"}:
+        return "insufficient_edge"
+    if action == "REJECT":
+        return "model_rejected_trade"
+    if action == "NO_CONTEXT":
+        return "no_context"
+    return "non_trade_action"
+
+
 def _normalise_decision_payload(
     decision_payload: dict[str, Any],
     *,
@@ -827,6 +865,17 @@ async def run_local_finance_decision_pipeline(
                 record = build_finance_shadow_record(decision, tool_results=tool_results)
             except FinanceShadowValidationError as exc:
                 record = build_finance_shadow_failure_record(exc, decision, tool_results=tool_results)
+
+        no_trade_reason = _classify_no_trade_reason(
+            decision=decision,
+            record=record,
+            risk_flags=risk_flags,
+            tool_results=tool_results,
+            risk_guard=risk_guard,
+        )
+        if no_trade_reason:
+            decision["no_trade_reason"] = no_trade_reason
+            record["no_trade_reason"] = no_trade_reason
 
         return {
             "ok": record.get("record_type") != "raw_model_failure",

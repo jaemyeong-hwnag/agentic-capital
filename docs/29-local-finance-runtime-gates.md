@@ -66,6 +66,10 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - runtime 중 stage 호출이 실패하면 `sidecar_calls`에 stage/model, `status_code`, `latency_ms`,
   compact payload hash, 실패 응답 body 요약을 남긴다. 이 값은 agent cycle economics snapshot과
   `finance_paper_shadow_decision`/`raw_model_failure` context/outcome에도 보존한다.
+- 매매로 이어지지 않은 paper-shadow 결과에는 `no_trade_reason`을 남긴다. 예:
+  `tool_collection_only`, `insufficient_edge`, `missing_evidence_review`,
+  `tool_error:<tool>:<error>`, `risk_guard_block`, `blocked:<failure_type>`.
+  이 값은 "모델이 왜 주문 후보를 만들지 않았는지"를 모니터링과 재학습 후보 분류에서 바로 쓰기 위한 운영 필드다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
   paper/shadow mode에서는 deterministic fallback plan을 사용한다:
   `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.

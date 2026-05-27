@@ -68,6 +68,7 @@ def test_psychology_payload_accepts_context_only_schema() -> None:
 
     assert result["evidence_count"] == 1
     assert result["allowed_downstream_use"] == "context_only"
+    assert result["schema_status"] == "validated"
 
 
 def test_psychology_payload_rejects_order_mutation_fields() -> None:
@@ -152,6 +153,7 @@ async def test_run_local_psychology_context_returns_soft_context_only() -> None:
     assert result["status_code"] == 200
     assert result["context"]["allowed_downstream_use"] == "context_only"
     assert result["soft_context"]["use_as"] == "soft_risk_context_not_alpha"
+    assert result["soft_context"]["schema_status"] == "validated"
     assert "signals" not in result["soft_context"]
     assert "trade_action" in result["soft_context"]["forbidden_use"]
     assert client.post_url == "http://127.0.0.1:19400/v1/chat/completions"

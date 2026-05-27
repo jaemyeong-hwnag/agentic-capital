@@ -130,7 +130,7 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 args = {"_raw_arguments": arguments}
         elif isinstance(arguments, dict):
-            args = arguments
+            args = _normalize_tool_args(arguments)
         else:
             args = {}
         parsed.append({
@@ -139,6 +139,33 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
             "id": raw.get("id") or f"local_call_{index}",
         })
     return parsed
+
+
+def _looks_like_json_schema_properties(value: dict[str, Any]) -> bool:
+    """Return true for OpenAI schema property maps, not runtime tool args."""
+    if not value:
+        return False
+    for nested in value.values():
+        if not isinstance(nested, dict):
+            return False
+        if any(key in nested for key in ("type", "anyOf", "oneOf", "allOf", "enum", "description", "title")):
+            continue
+        return False
+    return True
+
+
+def _normalize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Repair common local-model tool-call argument wrappers.
+
+    Some local instruct models echo the compact schema wrapper as
+    {"properties": {"symbol": "005930"}} instead of the actual runtime args.
+    Unwrap only when the nested object is value-like rather than a JSON schema.
+    """
+    if set(args) == {"properties"} and isinstance(args.get("properties"), dict):
+        properties = args["properties"]
+        if not _looks_like_json_schema_properties(properties):
+            return properties
+    return args
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:

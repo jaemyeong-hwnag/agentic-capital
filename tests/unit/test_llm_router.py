@@ -415,6 +415,8 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
         )
 
     assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["record"]["no_trade_reason"] == "tool_collection_only"
+    assert result["decision"]["no_trade_reason"] == "tool_collection_only"
     assert result["first_failing_stage"] == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL
     assert result["tool_plan"]["fallback"] == "deterministic_paper_tool_plan"
     assert captured_planner_payload["evidence_count"] == 1
