@@ -102,7 +102,7 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 - `quantity * quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
 - `quantity`, `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
 - `SELL`은 `get_positions`의 보유 수량을 넘지 않는다.
-- market session이 명시적으로 open/regular 상태다. 빈 값이나 미확인 상태는 매매 불가로 본다.
+- market session이 명시적으로 open/regular 상태다. 빈 값, 미확인 상태, closed/halted 등 닫힌 상태와 open flag가 충돌하는 경우는 매매 불가로 본다.
 - reason/final answer에 수익 보장 표현이 없다.
 
 위 조건 미달이면 주문 대신 `raw_model_failure` record를 만들고, `retrain_candidate=true`로 남겨 raw model failure 학습 루프에 넣는다.
@@ -155,7 +155,7 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 
 - `finance_decision_model`이 `BUY` 후보를 반환하고,
 - RAG evidence, quote, balance, position, risk limit tool 결과가 모두 존재해도,
-- `get_market_session.is_open=false`, `regular_session=false`, 또는 open/regular 확인 필드가 없으면
+- `get_market_session.is_open=false`, `regular_session=false`, open/regular 확인 필드가 없거나, closed/halted/pre/post 상태와 open flag가 충돌하면
 - `finance_paper_shadow_decision`으로 세지 않고 `raw_model_failure`를 기록한다.
 
 기대 record:
