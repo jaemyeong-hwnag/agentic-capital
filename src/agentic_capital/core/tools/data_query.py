@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import builtins
 import inspect
+import re
 from typing import Any
 
 import structlog
@@ -72,6 +73,10 @@ _PLACEHOLDER_TEXT = {
     "content",
     "description",
     "name",
+    "n/a",
+    "na",
+    "none",
+    "null",
     "order_id",
     "permissions",
     "reason",
@@ -80,14 +85,54 @@ _PLACEHOLDER_TEXT = {
     "symbol",
     "target",
     "target_name",
+    "ticker",
     "to_agent",
     "type",
+    "unknown",
+    "unspecified",
 }
+
+_MARKET_SESSION_LABELS = {
+    "AFTER",
+    "AFTER_HOURS",
+    "CLOSED",
+    "KRX",
+    "MARKET_OPEN",
+    "NASDAQ",
+    "NIGHT",
+    "NYSE",
+    "OPEN",
+    "OPEN_MARKETS",
+    "POST",
+    "PRE",
+    "REGULAR",
+}
+_MARKET_SESSION_SYMBOL_RE = re.compile(
+    r"^[A-Z_]{2,12}:(AFTER|AFTER_HOURS|CLOSED|HALTED|NIGHT|OPEN|POST|PRE|REGULAR|SUSPENDED)$"
+)
 
 
 def _is_placeholder_text(value: Any) -> bool:
     text = str(value or "").strip().lower()
     return text in _PLACEHOLDER_TEXT or text.startswith("<") or text.endswith("_here")
+
+
+def _quote_symbol_error(symbol: Any) -> str | None:
+    text = str(symbol or "").strip()
+    if _is_placeholder_text(text):
+        return "placeholder_symbol"
+    upper = text.upper()
+    if upper in _MARKET_SESSION_LABELS or _MARKET_SESSION_SYMBOL_RE.fullmatch(upper):
+        return "market_session_label"
+    return None
+
+
+def _resolve_quote_symbol(primary: Any, fallback: Any = "") -> str:
+    for value in (primary, fallback):
+        text = str(value or "").strip()
+        if text and _quote_symbol_error(text) is None:
+            return text
+    return str(primary or fallback or "").strip()
 
 
 def _extract_finance_tool_names(tool_plan_payload: dict[str, Any]) -> set[str]:
@@ -242,7 +287,7 @@ async def collect_finance_decision_tool_results(
         requested = set(required)
     requested |= required
 
-    resolved_symbol = _symbol_from_plan(tool_plan_payload, fallback=symbol)
+    resolved_symbol = _resolve_quote_symbol(_symbol_from_plan(tool_plan_payload, fallback=""), symbol)
     results: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
 
@@ -297,6 +342,8 @@ async def collect_finance_decision_tool_results(
             errors.append({"tool": "get_quote", "error": "no_market_data"})
         elif not resolved_symbol:
             errors.append({"tool": "get_quote", "error": "missing_symbol"})
+        elif symbol_error := _quote_symbol_error(resolved_symbol):
+            errors.append({"tool": "get_quote", "error": "invalid_symbol", "reason": symbol_error, "symbol": resolved_symbol})
         else:
             try:
                 quote = await market_data.get_quote(resolved_symbol)
@@ -946,9 +993,12 @@ def build_agent_tools(
         """Get current price quote. KR stocks: 6-digit code (005930). US: ticker (AAPL)."""
         if not market_data:
             return "ERR:no_market_data"
+        resolved_symbol = _resolve_quote_symbol(symbol)
+        if error := _quote_symbol_error(resolved_symbol):
+            return f"ERR:invalid_symbol:{error}:{resolved_symbol}"
         try:
             from agentic_capital.formats.compact import quote as _quote
-            q = await market_data.get_quote(symbol)
+            q = await market_data.get_quote(resolved_symbol)
             return _quote(q.symbol, q.price, q.bid, q.ask, q.volume, q.currency)
         except Exception as e:
             return f"ERR:{e}"
@@ -957,10 +1007,13 @@ def build_agent_tools(
         """Get historical OHLCV candles. Returns TOON table. timeframe: 1m|5m|15m|60m|1d|1w|1mo|3mo"""
         if not market_data:
             return "ERR:no_market_data"
+        resolved_symbol = _resolve_quote_symbol(symbol)
+        if error := _quote_symbol_error(resolved_symbol):
+            return f"ERR:invalid_symbol:{error}:{resolved_symbol}"
         try:
             from agentic_capital.formats.compact import ohlcv as _ohlcv
-            candles = await market_data.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
-            return _ohlcv(symbol, candles)
+            candles = await market_data.get_ohlcv(resolved_symbol, timeframe=timeframe, limit=limit)
+            return _ohlcv(resolved_symbol, candles)
         except Exception as e:
             return f"ERR:{e}"
 
@@ -1376,10 +1429,13 @@ class DataQueryTools:
         """Query current price quote for a symbol."""
         if not self._market_data:
             return {"error": "market data adapter not available"}
+        resolved_symbol = _resolve_quote_symbol(symbol)
+        if error := _quote_symbol_error(resolved_symbol):
+            return {"error": f"invalid_symbol:{error}", "symbol": resolved_symbol}
         try:
-            quote = await self._market_data.get_quote(symbol)
+            quote = await self._market_data.get_quote(resolved_symbol)
             return {
-                "symbol": symbol,
+                "symbol": resolved_symbol,
                 "price": quote.price,
                 "bid": quote.bid,
                 "ask": quote.ask,
@@ -1402,8 +1458,12 @@ class DataQueryTools:
         """Query historical OHLCV candles."""
         if not self._market_data:
             return []
+        resolved_symbol = _resolve_quote_symbol(symbol)
+        if error := _quote_symbol_error(resolved_symbol):
+            logger.warning("query_ohlcv_invalid_symbol", symbol=resolved_symbol, reason=error)
+            return []
         try:
-            candles = await self._market_data.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
+            candles = await self._market_data.get_ohlcv(resolved_symbol, timeframe=timeframe, limit=limit)
             return [
                 {
                     "timestamp": str(c.timestamp),

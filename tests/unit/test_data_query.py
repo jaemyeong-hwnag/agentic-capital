@@ -77,6 +77,16 @@ class TestDataQueryTools:
         assert "error" in result
 
     @pytest.mark.asyncio
+    async def test_query_quote_rejects_market_session_labels_before_adapter(self):
+        market_data = _make_market_data()
+        tools = DataQueryTools(market_data=market_data)
+
+        result = await tools.query_quote("NASDAQ:CLOSED")
+
+        assert result == {"error": "invalid_symbol:market_session_label", "symbol": "NASDAQ:CLOSED"}
+        market_data.get_quote.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_query_quotes(self):
         tools = DataQueryTools(market_data=_make_market_data())
         result = await tools.query_quotes(["005930", "000660"])
@@ -94,6 +104,16 @@ class TestDataQueryTools:
         tools = DataQueryTools()
         result = await tools.query_ohlcv("005930")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_query_ohlcv_rejects_placeholder_before_adapter(self):
+        market_data = _make_market_data()
+        tools = DataQueryTools(market_data=market_data)
+
+        result = await tools.query_ohlcv("unspecified")
+
+        assert result == []
+        market_data.get_ohlcv.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_query_symbols(self):

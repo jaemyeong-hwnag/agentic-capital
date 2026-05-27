@@ -77,6 +77,44 @@ class TestFinanceDecisionToolCollector:
         assert result["search_rag"]["evidence_ids"] == ["ev-1"]
         assert result["_errors"][0]["error"] == "order_tool_blocked_in_shadow"
 
+    @pytest.mark.asyncio
+    async def test_collects_quote_with_valid_fallback_when_plan_symbol_is_placeholder(self):
+        result = await collect_finance_decision_tool_results(
+            tool_plan_payload={"tool_plan": [{"tool": "get_quote", "args": {"symbol": "unspecified"}}]},
+            trading=_make_trading(),
+            market_data=_make_market_data(),
+            symbol="005930",
+            market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000,
+        )
+
+        assert result["get_quote"]["symbol"] == "005930"
+        assert not any(error.get("tool") == "get_quote" for error in result.get("_errors", []))
+
+    @pytest.mark.asyncio
+    async def test_collects_rejects_market_session_label_as_quote_symbol(self):
+        market_data = _make_market_data()
+        result = await collect_finance_decision_tool_results(
+            tool_plan_payload={"tool_plan": [{"tool": "get_quote", "args": {"symbol": "NASDAQ:CLOSED"}}]},
+            trading=_make_trading(),
+            market_data=market_data,
+            market="us_stock",
+            open_markets=[],
+            capital_limit=5_000_000,
+        )
+
+        assert any(
+            error == {
+                "tool": "get_quote",
+                "error": "invalid_symbol",
+                "reason": "market_session_label",
+                "symbol": "NASDAQ:CLOSED",
+            }
+            for error in result["_errors"]
+        )
+        market_data.get_quote.assert_not_awaited()
+
 
 class TestBuildAgentTools:
     """Test build_agent_tools() returns correct tools and they work."""
@@ -265,6 +303,21 @@ class TestBuildAgentTools:
         assert messages[0]["from"] == "CEO-Alpha"
         assert "wire" in messages[0]
         assert "INSTR|CEO-Alpha|Trader-Gamma" in messages[0]["wire"]
+
+    @pytest.mark.asyncio
+    async def test_quote_tools_reject_placeholders_before_market_data(self):
+        market_data = _make_market_data()
+        tools, _, _, _ = build_agent_tools(market_data=market_data)
+        quote = next(t for t in tools if t.name == "get_quote")
+        ohlcv = next(t for t in tools if t.name == "get_ohlcv")
+
+        quote_result = await quote.coroutine(symbol="unspecified")
+        ohlcv_result = await ohlcv.coroutine(symbol="KRX:POST")
+
+        assert quote_result == "ERR:invalid_symbol:placeholder_symbol:unspecified"
+        assert ohlcv_result == "ERR:invalid_symbol:market_session_label:KRX:POST"
+        market_data.get_quote.assert_not_awaited()
+        market_data.get_ohlcv.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_request_wakeup_records_delay(self):
