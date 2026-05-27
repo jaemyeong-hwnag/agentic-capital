@@ -45,6 +45,38 @@ _NON_TRADER_BLOCKED_TOOL_NAMES = frozenset({
     "submit_order",
 })
 
+_GENERIC_ASSISTANT_PHRASES = (
+    "if you need further assistance",
+    "please let me know",
+    "feel free to let me know",
+    "how can i help",
+)
+
+_NON_KO_EN_MARKERS = (
+    "¿",
+    "¡",
+    "qué",
+    "tal si",
+    "actualizamos",
+    "con esta",
+    "podemos",
+)
+
+_MARKET_STATUS_TOKENS = (
+    "krx:pre",
+    "krx:post",
+    "krx:regular",
+    "krx:closed",
+    "nasdaq:pre",
+    "nasdaq:post",
+    "nasdaq:regular",
+    "nasdaq:closed",
+    "nyse:pre",
+    "nyse:post",
+    "nyse:regular",
+    "nyse:closed",
+)
+
 
 def _compact_text(value: Any, *, limit: int = 500) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
@@ -146,7 +178,10 @@ def _build_system_prompt(agent: BaseAgent) -> str:
             "CEO/analyst agents must not submit, cancel, or directly execute orders; "
             "send instructions or analysis to Trader instead. "
             "Use only listed tool names exactly; if a needed tool is unavailable, send a message or request_wakeup. "
-            "Respond in compact Korean or English only."
+            "Respond in compact Korean or English only; never use Spanish, Hindi, or other languages. "
+            "Do not produce generic assistant help text. Produce an investment-company operating note. "
+            "Treat KRX/NASDAQ/NYSE market-session tokens such as KRX:POST or NASDAQ:CLOSED as market status, not symbols. "
+            "Use this compact shape when possible: OBS|... TRADER_TASK|... NEXT|..."
             "</role_boundary>"
         )
     mandate += (MANDATE_CEO_HR if role == "CEO" else "") + MANDATE_RISK
@@ -247,6 +282,26 @@ def _extract_llm_reasoning(messages: list) -> str:
         if content and isinstance(content, str) and content.strip() and not getattr(msg, "tool_calls", None):
             return content[:2000]
     return ""
+
+
+def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
+    """Flag non-Trader roleplay drift for recorder/ops visibility."""
+    if role == "trader" or not reasoning.strip():
+        return []
+
+    normalized = " ".join(reasoning.split()).lower()
+    issues: list[str] = []
+    if any(phrase in normalized for phrase in _GENERIC_ASSISTANT_PHRASES):
+        issues.append("generic_assistant_response")
+    if any(marker in normalized for marker in _NON_KO_EN_MARKERS) or any(
+        "\u0900" <= char <= "\u097f" for char in reasoning
+    ):
+        issues.append("language_drift_non_ko_en")
+    if any(token in normalized for token in _MARKET_STATUS_TOKENS) and any(
+        word in normalized for word in ("symbol", "quote", "price", "종목", "시세")
+    ):
+        issues.append("market_status_token_confusion")
+    return issues
 
 
 def _extract_psychology_context(decisions: list[dict]) -> dict | None:
@@ -807,6 +862,14 @@ async def run_agent_cycle(
     all_decisions = decisions_sink + org_decisions
     tool_seq = _extract_tool_sequence(result_messages)
     reasoning = _extract_llm_reasoning(result_messages)
+    response_quality_issues = _agent_response_quality_issues(_agent_tool_role(agent), reasoning)
+    if response_quality_issues:
+        logger.warning(
+            "agent_response_quality_issue",
+            agent=agent.name,
+            cycle=cycle_number,
+            issues=response_quality_issues,
+        )
     post_psychology = await _run_psychology_observation(
         agent=agent,
         cycle_number=cycle_number,
@@ -857,6 +920,7 @@ async def run_agent_cycle(
                     "errors_count": len(errors),
                     "next_action": "retry_after_error" if errors else ("agent_requested_wakeup" if wakeup_sink else "continue_cycle"),
                     "failure_cause": errors[0][:300] if errors else None,
+                    "quality_issues": response_quality_issues,
                 },
                 "psychology_context": (
                     post_psychology.get("soft_context")

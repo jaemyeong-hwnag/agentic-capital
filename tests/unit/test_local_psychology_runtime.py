@@ -374,6 +374,7 @@ def test_psychology_smoke_repairs_invalid_json_to_context_only() -> None:
     assert result["ok"] is True
     assert result["confidence"] == 0.0
     assert result["evidence_count"] == 2
+    assert result["schema_status"] == "schema_repaired_context_only"
     assert result["repair_applied"] == "invalid_json_to_context_only"
 
 

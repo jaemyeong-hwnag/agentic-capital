@@ -14,6 +14,7 @@ from agentic_capital.core.agents.trader import TraderAgent
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.graph.state import AgentCycleResult, AgentWorkflowState
 from agentic_capital.graph.workflow import (
+    _agent_response_quality_issues,
     _build_system_prompt,
     _error_retry_seconds,
     _exception_summary,
@@ -281,6 +282,19 @@ class TestAgentToolFiltering:
         assert "trade US stocks/ETFs during pre-market and regular hours via submit_order" not in prompt
         assert "send instructions to Trader" in prompt
         assert "Respond in compact Korean or English only" in prompt
+        assert "KRX:POST" in prompt
+        assert "OBS|..." in prompt
+
+    def test_non_trader_response_quality_flags_roleplay_drift(self):
+        issues = _agent_response_quality_issues(
+            "ceo",
+            "¿Qué tal si actualizamos quote symbol KRX:POST? If you need further assistance, please let me know.",
+        )
+
+        assert "language_drift_non_ko_en" in issues
+        assert "generic_assistant_response" in issues
+        assert "market_status_token_confusion" in issues
+        assert _agent_response_quality_issues("trader", "¿Qué tal si actualizamos quote symbol KRX:POST?") == []
 
     def test_trader_keeps_trade_tools_for_legacy_react_runs(self):
         trader = TraderAgent(
@@ -477,6 +491,7 @@ class TestRunAgentCycle:
             recorder.record_agent_cycle.await_args.kwargs["tool_sequence"]
         )
         assert economics["agent_response"]["next_action"] == "continue_cycle"
+        assert economics["agent_response"]["quality_issues"] == []
         assert [item["phase"] for item in economics["psychology_observations"]] == [
             "pre_agent_cycle",
             "post_agent_cycle",

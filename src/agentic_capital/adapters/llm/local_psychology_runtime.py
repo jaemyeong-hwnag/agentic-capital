@@ -192,11 +192,13 @@ def _schema_repair_payload(content: str, response_payload: dict[str, Any]) -> di
         "evidence_ids": evidence_ids,
         "confidence": 0.0,
         "uncertainty": [
-            "schema_unstable: local psychology sidecar returned non-parseable JSON",
+            "raw_model_output_invalid_json",
+            "deterministic_context_only_repair_applied",
             f"raw_preview: {content[:180]}",
         ],
-        "risk_tags": ["schema_unstable"],
+        "risk_tags": ["schema_repaired_context_only"],
         "allowed_downstream_use": "context_only",
+        "schema_status": "schema_repaired_context_only",
         "repair_applied": "invalid_json_to_context_only",
     }
 
@@ -351,7 +353,7 @@ def normalize_psychology_context(payload: dict[str, Any]) -> dict[str, Any]:
         "risk_tags": [str(tag) for tag in risk_tags if str(tag)],
         "allowed_downstream_use": downstream_use,
         "use_as": "psychology_context_not_alpha",
-        "schema_status": str(payload.get("repair_applied") or payload.get("schema_status") or "validated"),
+        "schema_status": str(payload.get("schema_status") or payload.get("repair_applied") or "validated"),
     }
 
 
