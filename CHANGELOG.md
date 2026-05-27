@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0] - 2026-05-27
+
+- Added finance sidecar stage telemetry with latency, status, compact payload hash, failure body summaries, and first failing stage diagnostics.
+- Added deterministic paper-mode fallback tool planning when the finance tool planner sidecar is unavailable.
+- Structured finance tool collection for decision payloads while preserving deterministic shadow validator compatibility.
+- Blocked accidental reuse of finance sidecar models as general CEO/Analyst ReAct LLMs when `LOCAL_AGENT_LLM_MODEL` is unset.
+
 ## [0.15.0] - 2026-03-14
 
 ### Added

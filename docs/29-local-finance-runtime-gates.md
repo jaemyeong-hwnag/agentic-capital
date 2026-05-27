@@ -63,6 +63,15 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `agentic-capital`은 finance 모델을 일반 ReAct agent LLM처럼 쓰지 않는다. Trader cycle에서 `LOCAL_FINANCE_PIPELINE_ENABLED=true`, `LOCAL_LLM_MODEL=finance_*`, local provider이면 finance 전용 flow로 분기한다.
 - `domain-llm-forge` RAG Gateway는 프로세스 시작 시 `RAG_SERVICE`가 고정된다. 실사용 paper-shadow에서는 `finance_rag_query_model`, `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model`을 각각 다른 gateway URL로 띄우고 `LOCAL_FINANCE_*_BASE_URL`로 연결한다. 비워두면 호환성을 위해 `LOCAL_LLM_BASE_URL` 하나를 사용하지만, 이는 smoke/단일 sidecar 검증용이다.
 - stage별 URL을 설정하면 startup gate 결과에 `pipeline_health.checked`와 stage별 `health_url`, `expected_model`, `actual_model`이 포함되어 sidecar 배선 이력을 남긴다.
+- runtime 중 stage 호출이 실패하면 `sidecar_calls`에 stage/model, `status_code`, `latency_ms`,
+  compact payload hash, 실패 응답 body 요약을 남긴다. 이 값은 agent cycle economics snapshot과
+  `finance_paper_shadow_decision`/`raw_model_failure` context/outcome에도 보존한다.
+- `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
+  paper/shadow mode에서는 deterministic fallback plan을 사용한다:
+  `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.
+  이때 `first_failing_stage=finance_tool_planner_model`을 같이 기록한다.
+- tool planner에는 RAG evidence 원문 전체를 전달하지 않는다. planner payload는 `evidence_ids`,
+  `evidence_count`, source/score/text preview 중심의 compact evidence만 포함한다.
 
 필수 순서:
 
@@ -82,12 +91,21 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 
 read-only tool result schema:
 
-- `get_balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`
-- `get_positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`, `current_price`, PnL, `market`, `currency`
-- `get_quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
-- `get_market_session`: `state`, `session`, `is_open`, `regular_session`, `open_markets`
-- `get_risk_limit`: `max_order_value`, `max_trade_value`, `capital_limit`, `paper_trade_only`
-- `search_rag`: `evidence_ids`, `evidence_count`, 상위 evidence
+- validator 호환 키: `get_balance`, `get_positions`, `get_quote`, `get_market_session`,
+  `get_risk_limit`, `search_rag`
+- finance decision payload alias: `finance_decision_payload.balance`,
+  `finance_decision_payload.positions`, `finance_decision_payload.quote`,
+  `finance_decision_payload.market_session`, `finance_decision_payload.risk_limit`,
+  `finance_decision_payload.rag`
+- `get_balance`/`balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`
+- `get_positions`/`positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`,
+  `current_price`, PnL, `market`, `currency`
+- `get_quote`/`quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
+- `get_market_session`/`market_session`: `state`, `session`, `is_open`,
+  `regular_session`, `open_markets`
+- `get_risk_limit`/`risk_limit`: `max_order_value`, `max_trade_value`,
+  `capital_limit`, `paper_trade_only`
+- `search_rag`/`rag`: `evidence_ids`, `evidence_count`, 상위 evidence
 
 tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_trade` 같은 주문 tool을 요청하면 collector는 실행하지 않고 `_errors`에 `order_tool_blocked_in_shadow`를 남긴다.
 pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않고
@@ -112,6 +130,10 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 `finance_risk_guard_model`이 `hard_fail=true`를 반환하면 action을 안전한 `REJECT`로 덮어
 shadow decision처럼 저장하지 않고, 원본 action과 `risk_flags`를 유지한
 `raw_model_failure(failure_type=risk_guard_hard_fail)`로 기록한다.
+
+zero-decision guard로 simulation이 멈추면 `stop_diagnostics`에 원인을 남긴다.
+finance sidecar no-context/raw failure가 선행된 경우 `cause_classification=finance_sidecar_no_context`,
+`first_failing_stage`, `failure_type`, agent 이름을 기록한다.
 
 오프라인 회귀 테스트:
 
