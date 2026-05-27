@@ -31,6 +31,19 @@ def test_router_builds_local_langchain_model():
     assert model.send_native_tools is False
 
 
+def test_local_run_metadata_separates_agent_and_finance_models():
+    with patch.object(router.settings, "llm_provider", "local"), \
+         patch.object(router.settings, "local_llm_base_url", "http://127.0.0.1:8080/v1"), \
+         patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
+         patch.object(router.settings, "local_agent_llm_base_url", "http://127.0.0.1:19000/v1"), \
+         patch.object(router.settings, "local_agent_llm_model", "agentic_capital_react_model"):
+        metadata = router.llm_run_metadata()
+
+    assert metadata["llm_model"] == "agentic_capital_react_model"
+    assert metadata["agent_llm_model"] == "agentic_capital_react_model"
+    assert metadata["finance_llm_model"] == "finance_decision_model"
+
+
 def test_router_rejects_finance_model_as_general_agent_llm():
     with patch.object(router.settings, "llm_provider", "local"), \
          patch.object(router.settings, "local_llm_model", "finance_decision_model"), \

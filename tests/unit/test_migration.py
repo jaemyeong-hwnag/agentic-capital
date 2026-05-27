@@ -17,3 +17,15 @@ class TestMigration:
         assert hasattr(mod, "downgrade")
         assert mod.revision == "001"
         assert mod.down_revision is None
+
+    def test_raw_model_failures_migration_importable(self) -> None:
+        migration_path = Path(__file__).parents[2] / "alembic" / "versions" / "006_raw_model_failures.py"
+        spec = importlib.util.spec_from_file_location("migration_006", migration_path)
+        assert spec is not None
+        assert spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, "upgrade")
+        assert hasattr(mod, "downgrade")
+        assert mod.revision == "006"
+        assert mod.down_revision == "005"

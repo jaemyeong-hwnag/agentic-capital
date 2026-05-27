@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DECIMAL, DateTime, Float, String, Text
+from sqlalchemy import DECIMAL, Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -95,4 +95,30 @@ class AgentDecisionModel(Base):
     emotion_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
     context_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
     outcome: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now)
+
+
+class RawModelFailureModel(Base):
+    """raw_model_failures — structured local model failure evidence.
+
+    AgentDecisionModel keeps the decision-audit surface. This table gives ops,
+    regression, and retraining jobs a stable failure feed without parsing
+    human-facing decision rows.
+    """
+
+    __tablename__ = "raw_model_failures"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    simulation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    cycle_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failure_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    first_failing_stage: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    sidecar_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    risk_flags: Mapped[list] = mapped_column(JSONB, default=list)
+    sidecar_stage_metrics: Mapped[list] = mapped_column(JSONB, default=list)
+    failure_payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    failure_body_summary: Mapped[str] = mapped_column(Text, default="")
+    retrain_candidate: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now)

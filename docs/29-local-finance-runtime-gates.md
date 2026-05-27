@@ -66,6 +66,13 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - runtime 중 stage 호출이 실패하면 `sidecar_calls`에 stage/model, `status_code`, `latency_ms`,
   compact payload hash, 실패 응답 body 요약을 남긴다. 이 값은 agent cycle economics snapshot과
   `finance_paper_shadow_decision`/`raw_model_failure` context/outcome에도 보존한다.
+- `raw_model_failure`는 `agent_decisions` 감사 행과 별도로 `raw_model_failures` 테이블에도 저장한다.
+  이 전용 테이블은 `first_failing_stage`, `sidecar_latency_ms`, `sidecar_stage_metrics`,
+  `compact_payload_hash`, `failure_body_summary`, `evidence_ids`, `risk_flags`,
+  `retrain_candidate`를 구조화해서 모니터링/회귀/eval 학습 루프가 decision text를 파싱하지 않게 한다.
+- local metadata에서 `llm_model`/`agent_llm_model`은 CEO/Analyst용 agent runtime 모델을 뜻한다.
+  finance 판단 모델은 `finance_llm_model`로 별도 기록한다. 따라서 `llm_model=finance_decision_model`
+  같은 기록은 일반 agent가 finance decision model에 붙은 신호로 해석하지 않도록 분리한다.
 - 매매로 이어지지 않은 paper-shadow 결과에는 `no_trade_reason`을 남긴다. 예:
   `tool_collection_only`, `insufficient_edge`, `missing_evidence_review`,
   `tool_error:<tool>:<error>`, `risk_guard_block`, `blocked:<failure_type>`.
@@ -91,7 +98,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `src/agentic_capital/adapters/llm/router.py`: CEO/Analyst 일반 ReAct agent는 `LOCAL_AGENT_LLM_BASE_URL`/`LOCAL_AGENT_LLM_MODEL`을 사용한다. `LOCAL_LLM_MODEL=finance_*`인데 agent base URL이 없으면 finance sidecar를 일반 LLM으로 오용하지 않도록 시작 실패한다.
 - `src/agentic_capital/adapters/llm/local_finance_runtime.py`: rag query, RAG search, tool planner, decision, risk guard sidecar client를 실행한다.
 - `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다. 일반 ReAct agent tool은 role별로 노출하며, CEO/Analyst에는 주문 실행/취소/fill/reallocation tool을 노출하지 않는다.
-- `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.
+- `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `raw_model_failures`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.
 - `src/agentic_capital/simulation/engine.py`: zero-decision guard 실행 전에 finance `no_context`/raw failure가 기록됐는지 로그로 드러낸다.
 
 agent role tool boundary:

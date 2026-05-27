@@ -19,6 +19,7 @@ from agentic_capital.infra.models import (
     MemoryModel,
     PermissionHistoryModel,
     PositionModel,
+    RawModelFailureModel,
     RoleModel,
     SimulationRunModel,
     TradeModel,
@@ -27,7 +28,7 @@ from agentic_capital.infra.models import (
 
 class TestAllTablesRegistered:
     def test_table_count(self) -> None:
-        assert len(Base.metadata.tables) == 18
+        assert len(Base.metadata.tables) == 19
 
     def test_expected_tables(self) -> None:
         expected = {
@@ -37,6 +38,7 @@ class TestAllTablesRegistered:
             "roles", "permission_history", "hr_events", "agent_messages",
             "memories", "episodic_details", "market_ohlcv",
             "simulation_runs", "company_snapshots", "agent_tools",
+            "raw_model_failures",
         }
         assert set(Base.metadata.tables.keys()) == expected
 
@@ -105,6 +107,26 @@ class TestAgentModels:
         )
         assert d.decision_type == "trade"
         assert d.__tablename__ == "agent_decisions"
+
+    def test_raw_model_failure_model(self) -> None:
+        failure = RawModelFailureModel(
+            id=uuid4(),
+            agent_id=uuid4(),
+            simulation_id=uuid4(),
+            cycle_number=7,
+            failure_type="no_context",
+            first_failing_stage="finance_tool_planner_model",
+            sidecar_latency_ms=99,
+            evidence_ids=["ev-1"],
+            risk_flags=["missing_evidence_review"],
+            sidecar_stage_metrics=[{"stage": "finance_tool_planner_model", "status": "failed"}],
+            failure_payload={"record_type": "raw_model_failure"},
+            failure_body_summary="planner body",
+            retrain_candidate=True,
+        )
+        assert failure.failure_type == "no_context"
+        assert failure.first_failing_stage == "finance_tool_planner_model"
+        assert failure.__tablename__ == "raw_model_failures"
 
 
 class TestTradeModels:

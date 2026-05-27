@@ -6,6 +6,7 @@ from agentic_capital.infra.models.agent import (
     AgentModel,
     AgentPersonalityHistoryModel,
     AgentPersonalityModel,
+    RawModelFailureModel,
 )
 from agentic_capital.infra.models.base import Base
 from agentic_capital.infra.models.cycle import AgentCycleModel
@@ -38,6 +39,7 @@ __all__ = [
     "MemoryModel",
     "PermissionHistoryModel",
     "PositionModel",
+    "RawModelFailureModel",
     "RoleModel",
     "SimulationRunModel",
     "TradeModel",

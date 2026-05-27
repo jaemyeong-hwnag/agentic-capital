@@ -85,10 +85,12 @@ def build_langchain_chat_model() -> Any:
 def llm_run_metadata() -> dict[str, Any]:
     """Return non-secret LLM metadata for reproducibility."""
     if is_local_llm_enabled():
+        agent_model = settings.local_agent_llm_model.strip() or settings.local_llm_model
         return {
             "llm_provider": active_llm_provider(),
-            "llm_model": settings.local_llm_model,
-            "agent_llm_model": settings.local_agent_llm_model,
+            "llm_model": agent_model,
+            "agent_llm_model": agent_model,
+            "finance_llm_model": settings.local_llm_model,
             "embedding_model": settings.local_embedding_model,
             "llm_base_url": settings.local_llm_base_url,
             "agent_llm_base_url": settings.local_agent_llm_base_url,

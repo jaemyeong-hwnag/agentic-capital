@@ -19,6 +19,7 @@ from agentic_capital.infra.models.agent import (
     AgentModel,
     AgentPersonalityHistoryModel,
     AgentPersonalityModel,
+    RawModelFailureModel,
 )
 from agentic_capital.infra.models.organization import (
     AgentMessageModel,
@@ -67,6 +68,25 @@ def _sidecar_stage_metrics(sidecar_calls: list[dict[str, Any]] | None) -> list[d
             "failure_body_summary": str(call.get("failure_body_summary") or "")[:500],
         })
     return metrics
+
+
+def _failure_body_summary(failure: dict[str, Any], stage_metrics: list[dict[str, Any]]) -> str:
+    """Return the shortest useful raw failure body for ops dashboards."""
+    for metric in stage_metrics:
+        summary = str(metric.get("failure_body_summary") or "")
+        if summary:
+            return summary[:500]
+    for key in ("failure_body_summary", "body_summary", "raw_body", "error", "message"):
+        value = failure.get(key)
+        if value:
+            return str(value)[:500]
+    details = failure.get("details")
+    if isinstance(details, dict):
+        for key in ("failure_body_summary", "body_summary", "raw_body", "error", "message"):
+            value = details.get(key)
+            if value:
+                return str(value)[:500]
+    return ""
 
 
 def _estimate_commission(market: str, total_value: float) -> float:
@@ -515,6 +535,23 @@ class SimulationRecorder:
             first_failing_stage
             or failure.get("first_failing_stage")
             or failure_details.get("first_failing_stage")
+        )
+        body_summary = _failure_body_summary(failure, stage_metrics)
+        self._session.add(
+            RawModelFailureModel(
+                agent_id=agent_id,
+                simulation_id=self._simulation_id,
+                cycle_number=cycle_number,
+                failure_type=failure_type,
+                first_failing_stage=resolved_first_failing_stage,
+                sidecar_latency_ms=sidecar_latency_ms,
+                evidence_ids=evidence,
+                risk_flags=risks,
+                sidecar_stage_metrics=stage_metrics,
+                failure_payload=failure,
+                failure_body_summary=body_summary,
+                retrain_candidate=bool(failure.get("retrain_candidate")),
+            )
         )
         self._session.add(
             AgentDecisionModel(

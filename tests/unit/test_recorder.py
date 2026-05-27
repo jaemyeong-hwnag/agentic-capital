@@ -8,7 +8,7 @@ import pytest
 
 from agentic_capital.core.decision.pipeline import TradingDecision
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
-from agentic_capital.infra.models.agent import AgentDecisionModel
+from agentic_capital.infra.models.agent import AgentDecisionModel, RawModelFailureModel
 from agentic_capital.infra.models.cycle import AgentCycleModel
 from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
 from agentic_capital.simulation.recorder import SimulationRecorder, _emotion_to_dict, _personality_to_dict
@@ -442,7 +442,14 @@ class TestSimulationRecorder:
             ],
         )
 
-        decision = recorder._session.add.call_args.args[0]
+        raw_failure = recorder._session.add.call_args_list[0].args[0]
+        decision = recorder._session.add.call_args_list[1].args[0]
+        assert isinstance(raw_failure, RawModelFailureModel)
+        assert raw_failure.failure_type == "no_context"
+        assert raw_failure.first_failing_stage == "finance_tool_planner_model"
+        assert raw_failure.sidecar_stage_metrics[0]["failure_body_summary"] == "traceback body"
+        assert raw_failure.failure_body_summary == "traceback body"
+        assert raw_failure.retrain_candidate is True
         assert isinstance(decision, AgentDecisionModel)
         assert decision.decision_type == "raw_model_failure"
         assert decision.outcome["failure_type"] == "no_context"
