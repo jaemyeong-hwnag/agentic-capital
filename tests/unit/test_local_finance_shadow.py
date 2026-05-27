@@ -98,6 +98,30 @@ def test_trade_uses_quote_price_over_model_payload_price_for_notional() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_with_mismatched_quote_symbol_is_blocked_and_learnable() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 1,
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+    tool_results = {
+        **_complete_tool_results(),
+        "get_quote": {"symbol": "000660", "price": 70_000, "market": "kr_stock"},
+        "get_risk_limit": {"max_order_value": 1_000_000},
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=tool_results)
+
+    assert exc_info.value.code == "trade_quote_context_mismatch"
+    assert exc_info.value.details["symbol"] == {"expected": "005930", "actual": "000660"}
+    failure = build_finance_shadow_failure_record(exc_info.value, payload, tool_results=tool_results)
+    assert failure["record_type"] == "raw_model_failure"
+    assert failure["retrain_candidate"] is True
+
+
 def test_buy_over_available_cash_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",

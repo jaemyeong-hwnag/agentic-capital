@@ -99,6 +99,7 @@ pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않
 - `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있다.
 - `evidence_ids`는 `search_rag.evidence_ids` 또는 반환 evidence의 id/doc_id/chunk_id에서 나온 값이어야 한다.
 - 주문 계획에 `submit_order`, `submit_paper_order`, `submit_futures_order`, `place_order`, `execute_trade`가 없다.
+- `get_quote.symbol`/`market`이 decision payload의 `symbol`/`market`과 충돌하지 않는다.
 - `quantity * get_quote.price`가 available cash와 `get_risk_limit.max_order_value`를 넘지 않는다.
 - `get_quote.price`가 있으면 model payload의 `price`나 `notional`보다 우선해서 주문 규모를 계산한다.
 - quote가 없는 경우에도 `quantity`, payload `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
@@ -146,6 +147,21 @@ pytest tests/unit/test_local_finance_shadow.py tests/unit/test_llm_router.py tes
 
 - `failure_type=trade_exceeds_risk_limit`
 - `details.notional=quantity * get_quote.price`
+- `retrain_candidate=true`
+- 주문 실행 없음
+
+## 2026-05-27 Quote Context Regression
+
+추가된 deterministic pipeline 회귀:
+
+- `finance_decision_model`이 `BUY`/`SELL` 후보를 반환하고,
+- `get_quote` 결과의 `symbol` 또는 `market`이 decision payload와 다르면,
+- quote 가격이 존재해도 해당 quote를 다른 종목/시장 근거로 쓰지 않는다.
+
+기대 record:
+
+- `failure_type=trade_quote_context_mismatch`
+- `details.symbol` 또는 `details.market`에 expected/actual 기록
 - `retrain_candidate=true`
 - 주문 실행 없음
 

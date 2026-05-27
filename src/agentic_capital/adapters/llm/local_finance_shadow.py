@@ -113,6 +113,9 @@ def validate_finance_shadow_payload(
                     "rag_evidence_ids": sorted(rag_evidence_ids),
                 },
             )
+        quote_mismatch = _quote_context_mismatch(payload, merged_tool_results)
+        if quote_mismatch is not None:
+            raise FinanceShadowValidationError("trade_quote_context_mismatch", details=quote_mismatch)
 
         notional = _trade_notional(payload, merged_tool_results)
         if notional <= 0:
@@ -194,6 +197,7 @@ def build_finance_shadow_failure_record(
             "trade_missing_evidence_ids",
             "trade_missing_rag_evidence",
             "trade_uncovered_evidence_ids",
+            "trade_quote_context_mismatch",
             "trade_missing_notional",
             "trade_exceeds_risk_limit",
             "trade_exceeds_available_cash",
@@ -272,6 +276,22 @@ def _trade_notional(payload: dict[str, Any], tool_results: dict[str, Any]) -> fl
 
 def _trade_quantity(payload: dict[str, Any]) -> float:
     return _float(payload.get("quantity") or payload.get("qty") or _nested(payload, "order", "quantity"))
+
+
+def _quote_context_mismatch(payload: dict[str, Any], tool_results: dict[str, Any]) -> dict[str, Any] | None:
+    quote = tool_results.get("get_quote")
+    if not isinstance(quote, dict):
+        return None
+    expected_symbol = str(payload.get("symbol") or payload.get("ticker") or "").strip()
+    quote_symbol = str(quote.get("symbol") or quote.get("ticker") or "").strip()
+    expected_market = str(payload.get("market") or "").strip().lower()
+    quote_market = str(quote.get("market") or "").strip().lower()
+    mismatches: dict[str, Any] = {}
+    if expected_symbol and quote_symbol and expected_symbol != quote_symbol:
+        mismatches["symbol"] = {"expected": expected_symbol, "actual": quote_symbol}
+    if expected_market and quote_market and expected_market != quote_market:
+        mismatches["market"] = {"expected": expected_market, "actual": quote_market}
+    return mismatches or None
 
 
 def _owned_position_quantity(payload: dict[str, Any], tool_results: dict[str, Any]) -> float:
