@@ -267,6 +267,8 @@ async def _run_local_finance_agent_cycle(
     risk_flags = result.get("risk_flags") if isinstance(result.get("risk_flags"), list) else []
     evidence_ids = result.get("evidence_ids") if isinstance(result.get("evidence_ids"), list) else []
     sidecar_latency_ms = result.get("sidecar_latency_ms")
+    sidecar_calls = result.get("sidecar_calls", []) if isinstance(result.get("sidecar_calls"), list) else []
+    first_failing_stage = result.get("first_failing_stage")
 
     all_decisions: list[dict[str, Any]] = []
     if record_type == "finance_paper_shadow_decision" and action.upper() != "NO_CONTEXT":
@@ -321,7 +323,8 @@ async def _run_local_finance_agent_cycle(
         "sidecar_latency_ms": sidecar_latency_ms,
         "evidence_ids": evidence_ids,
         "risk_flags": risk_flags,
-        "sidecar_calls": result.get("sidecar_calls", []),
+        "sidecar_calls": sidecar_calls,
+        "first_failing_stage": first_failing_stage,
     }
     if recorder:
         try:
@@ -333,6 +336,8 @@ async def _run_local_finance_agent_cycle(
                     sidecar_latency_ms=sidecar_latency_ms,
                     evidence_ids=evidence_ids,
                     risk_flags=risk_flags,
+                    sidecar_calls=sidecar_calls,
+                    first_failing_stage=first_failing_stage,
                 )
             else:
                 await recorder.record_raw_model_failure(
@@ -342,6 +347,8 @@ async def _run_local_finance_agent_cycle(
                     sidecar_latency_ms=sidecar_latency_ms,
                     evidence_ids=evidence_ids,
                     risk_flags=risk_flags,
+                    sidecar_calls=sidecar_calls,
+                    first_failing_stage=first_failing_stage,
                 )
             await recorder.record_agent_cycle(
                 agent_id=agent.agent_id,
@@ -383,6 +390,8 @@ async def _run_local_finance_agent_cycle(
         "finance_record_type": record_type,
         "finance_no_context": record_type == "raw_model_failure" or action.upper() == "NO_CONTEXT",
         "sidecar_latency_ms": sidecar_latency_ms,
+        "sidecar_calls": sidecar_calls,
+        "first_failing_stage": first_failing_stage,
         "evidence_ids": evidence_ids,
         "risk_flags": risk_flags,
         "emotion": {

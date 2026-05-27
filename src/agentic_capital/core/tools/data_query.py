@@ -138,6 +138,30 @@ def _serialise_position(position: Any) -> dict[str, Any]:
     }
 
 
+def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
+    """Return the structure expected by the finance decision sidecar."""
+    return {
+        "balance": results.get("get_balance", {}),
+        "positions": results.get("get_positions", []),
+        "quote": results.get("get_quote", {}),
+        "market_session": results.get("get_market_session", {}),
+        "risk_limit": results.get("get_risk_limit", {}),
+        "rag": results.get("search_rag", {}),
+        "tool_results": {
+            name: results.get(name)
+            for name in (
+                "search_rag",
+                "get_market_session",
+                "get_balance",
+                "get_positions",
+                "get_quote",
+                "get_risk_limit",
+            )
+            if name in results
+        },
+    }
+
+
 async def collect_finance_decision_tool_results(
     *,
     tool_plan_payload: dict[str, Any],
@@ -253,6 +277,7 @@ async def collect_finance_decision_tool_results(
 
     if errors:
         results["_errors"] = errors
+    results["finance_decision_payload"] = _finance_decision_payload(results)
     results["_meta"] = {
         "requested_tools": sorted(requested),
         "blocked_order_tools": forbidden,

@@ -59,9 +59,32 @@ class TestSimulationEngine:
         engine._running = True
         with patch("agentic_capital.simulation.engine.settings.simulation_zero_decision_max_cycles", 2):
             engine._apply_cycle_guards(requested_delay=60, total_decisions=0)
-            engine._apply_cycle_guards(requested_delay=60, total_decisions=0)
+            engine._apply_cycle_guards(
+                requested_delay=60,
+                total_decisions=0,
+                guard_context={
+                    "cause_classification": "finance_sidecar_no_context",
+                    "first_failing_stage": "finance_tool_planner_model",
+                },
+            )
         assert engine._running is False
         assert engine._stop_reason == "zero_decision_guard"
+        assert engine._stop_diagnostics["first_failing_stage"] == "finance_tool_planner_model"
+
+    def test_guard_context_classifies_finance_first_failing_stage(self):
+        engine = SimulationEngine()
+        context = engine._classify_guard_context([
+            {
+                "agent_name": "Trader-Gamma",
+                "finance_no_context": True,
+                "first_failing_stage": "finance_tool_planner_model",
+                "finance_record": {"failure_type": "sidecar_pipeline_failed"},
+            }
+        ])
+
+        assert context["cause_classification"] == "finance_sidecar_no_context"
+        assert context["first_failing_stage"] == "finance_tool_planner_model"
+        assert context["failure_type"] == "sidecar_pipeline_failed"
 
     def test_init_agents(self):
         engine = SimulationEngine()

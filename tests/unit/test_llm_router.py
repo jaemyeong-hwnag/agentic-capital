@@ -30,6 +30,14 @@ def test_router_builds_local_langchain_model():
     assert model.send_native_tools is False
 
 
+def test_router_rejects_finance_model_as_general_agent_llm():
+    with patch.object(router.settings, "llm_provider", "local"), \
+         patch.object(router.settings, "local_llm_model", "finance_decision_model"), \
+         patch.object(router.settings, "local_agent_llm_model", ""), \
+         pytest.raises(ValueError, match="LOCAL_AGENT_LLM_MODEL"):
+        router.build_langchain_chat_model()
+
+
 def test_router_uses_gemini_only_when_explicitly_configured():
     with patch.object(router.settings, "llm_provider", "gemini"), \
          patch("langchain_google_genai.ChatGoogleGenerativeAI", return_value=MagicMock()) as mock_cls:
@@ -291,6 +299,101 @@ async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context
     assert result["record"]["failure_type"] == "no_context"
     assert result["decision"]["action"] == "NO_CONTEXT"
     assert result["risk_flags"] == ["missing_context"]
+
+
+@pytest.mark.asyncio
+async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
+    captured_planner_payload = {}
+
+    async def collect_tool_results(payload):
+        assert payload["tool_plan"]["fallback"] == "deterministic_paper_tool_plan"
+        return {
+            "get_balance": {"available": 1_000_000, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+            "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
+            "get_risk_limit": {"max_order_value": 1_000_000},
+            "search_rag": {
+                "evidence_ids": payload["evidence_ids"],
+                "evidence_count": len(payload["evidence"]),
+            },
+            "finance_decision_payload": {
+                "balance": {"available": 1_000_000, "currency": "KRW"},
+                "positions": [],
+                "quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+                "market_session": {"state": "regular", "is_open": True, "regular_session": True},
+                "risk_limit": {"max_order_value": 1_000_000},
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {"queries": ["005930 risk check"], "symbol": "005930"}, {
+                "model": model,
+                "stage": model,
+                "latency_ms": 1,
+                "ok": True,
+            }
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            captured_planner_payload.update(payload)
+            raise local_finance_runtime.LocalFinanceStageError(
+                model,
+                "planner unavailable",
+                status_code=503,
+                body_summary="service unavailable",
+                latency_ms=7,
+                compact_payload_hash="plannerhash",
+            )
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            assert payload["finance_context"]["balance"]["available"] == 1_000_000
+            return {
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "required_tools": [
+                    "search_rag",
+                    "get_balance",
+                    "get_positions",
+                    "get_quote",
+                    "get_market_session",
+                    "get_risk_limit",
+                ],
+                "evidence_ids": ["ev-compact"],
+            }, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": [], "hard_fail": False}, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=(
+            [{
+                "doc_id": "ev-compact",
+                "source": "policy.md",
+                "text": "x" * 2000,
+                "score": 0.9,
+            }],
+            {"model": "rag_search", "stage": "rag_search", "latency_ms": 1, "ok": True},
+        )),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-planner-fallback",
+            user_question="005930 매수 가능?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["first_failing_stage"] == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL
+    assert result["tool_plan"]["fallback"] == "deterministic_paper_tool_plan"
+    assert captured_planner_payload["evidence_count"] == 1
+    assert captured_planner_payload["evidence"][0]["preview"].endswith("...")
+    assert "x" * 1000 not in json.dumps(captured_planner_payload, ensure_ascii=False)
+    failed_stage = next(call for call in result["sidecar_calls"] if call.get("ok") is False)
+    assert failed_stage["status_code"] == 503
+    assert failed_stage["failure_body_summary"] == "service unavailable"
 
 
 @pytest.mark.asyncio

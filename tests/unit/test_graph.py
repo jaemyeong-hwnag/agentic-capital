@@ -263,7 +263,8 @@ class TestRunAgentCycle:
             "evidence_ids": [],
             "risk_flags": ["missing_context"],
             "sidecar_latency_ms": 12,
-            "sidecar_calls": [],
+            "sidecar_calls": [{"stage": "finance_tool_planner_model", "ok": False, "status_code": 503}],
+            "first_failing_stage": "finance_tool_planner_model",
         }
 
         with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
@@ -288,7 +289,9 @@ class TestRunAgentCycle:
         mock_react.assert_not_called()
         mock_pipeline.assert_awaited_once()
         recorder.record_raw_model_failure.assert_awaited_once()
+        assert recorder.record_raw_model_failure.await_args.kwargs["first_failing_stage"] == "finance_tool_planner_model"
         assert result["finance_no_context"] is True
+        assert result["first_failing_stage"] == "finance_tool_planner_model"
         assert result["decisions"] == []
 
     @pytest.mark.asyncio

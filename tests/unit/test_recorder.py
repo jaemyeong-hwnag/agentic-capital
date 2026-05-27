@@ -391,12 +391,26 @@ class TestSimulationRecorder:
             sidecar_latency_ms=42,
             evidence_ids=["ev-1"],
             risk_flags=["paper"],
+            sidecar_calls=[
+                {
+                    "stage": "finance_tool_planner_model",
+                    "ok": False,
+                    "status_code": 503,
+                    "latency_ms": 12,
+                    "compact_payload_hash": "abc123",
+                    "failure_body_summary": "unavailable",
+                }
+            ],
+            first_failing_stage="finance_tool_planner_model",
         )
 
         decision = recorder._session.add.call_args.args[0]
         assert isinstance(decision, AgentDecisionModel)
         assert decision.decision_type == "finance_paper_shadow_decision"
         assert decision.context_snapshot["sidecar_latency_ms"] == 42
+        assert decision.context_snapshot["first_failing_stage"] == "finance_tool_planner_model"
+        assert decision.context_snapshot["sidecar_stage_metrics"][0]["status_code"] == 503
+        assert decision.context_snapshot["sidecar_stage_metrics"][0]["compact_payload_hash"] == "abc123"
         assert decision.outcome["would_submit_order"] is False
 
     @pytest.mark.asyncio
@@ -412,9 +426,20 @@ class TestSimulationRecorder:
                 "action": "NO_CONTEXT",
                 "evidence_ids": [],
                 "retrain_candidate": True,
+                "details": {"first_failing_stage": "finance_tool_planner_model"},
             },
             cycle_number=4,
             sidecar_latency_ms=99,
+            sidecar_calls=[
+                {
+                    "stage": "finance_tool_planner_model",
+                    "ok": False,
+                    "status_code": 500,
+                    "latency_ms": 9,
+                    "compact_payload_hash": "hash500",
+                    "failure_body_summary": "traceback body",
+                }
+            ],
         )
 
         decision = recorder._session.add.call_args.args[0]
@@ -422,6 +447,8 @@ class TestSimulationRecorder:
         assert decision.decision_type == "raw_model_failure"
         assert decision.outcome["failure_type"] == "no_context"
         assert decision.context_snapshot["sidecar_latency_ms"] == 99
+        assert decision.outcome["first_failing_stage"] == "finance_tool_planner_model"
+        assert decision.outcome["sidecar_stage_metrics"][0]["failure_body_summary"] == "traceback body"
 
     @pytest.mark.asyncio
     async def test_commit(self):

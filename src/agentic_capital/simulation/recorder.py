@@ -52,6 +52,23 @@ _COMMISSION_RATES: dict[str, float] = {
 }
 
 
+def _sidecar_stage_metrics(sidecar_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Compact finance sidecar stage telemetry for DB snapshots."""
+    metrics: list[dict[str, Any]] = []
+    for call in sidecar_calls or []:
+        if not isinstance(call, dict):
+            continue
+        metrics.append({
+            "stage": str(call.get("stage") or call.get("model") or ""),
+            "status": "ok" if call.get("ok") is True else "failed",
+            "status_code": call.get("status_code"),
+            "latency_ms": call.get("latency_ms"),
+            "compact_payload_hash": str(call.get("compact_payload_hash") or ""),
+            "failure_body_summary": str(call.get("failure_body_summary") or "")[:500],
+        })
+    return metrics
+
+
 def _estimate_commission(market: str, total_value: float) -> float:
     """Estimate trading commission. AI uses this for P&L awareness."""
     rate = _COMMISSION_RATES.get(market, 0.00015)
@@ -435,12 +452,15 @@ class SimulationRecorder:
         sidecar_latency_ms: int | float | None = None,
         evidence_ids: list[str] | None = None,
         risk_flags: list[str] | None = None,
+        sidecar_calls: list[dict[str, Any]] | None = None,
+        first_failing_stage: str | None = None,
     ) -> None:
         """Persist a local finance paper-shadow decision without creating trades."""
         action = str(record.get("action") or "")
         symbol = str(record.get("symbol") or "")
         evidence = evidence_ids if evidence_ids is not None else record.get("evidence_ids", [])
         risks = risk_flags if risk_flags is not None else record.get("risk_flags", [])
+        stage_metrics = _sidecar_stage_metrics(sidecar_calls)
         self._session.add(
             AgentDecisionModel(
                 agent_id=agent_id,
@@ -457,6 +477,8 @@ class SimulationRecorder:
                     "sidecar_latency_ms": sidecar_latency_ms,
                     "evidence_ids": evidence,
                     "risk_flags": risks,
+                    "sidecar_stage_metrics": stage_metrics,
+                    "first_failing_stage": first_failing_stage,
                 },
                 outcome={
                     "record_type": "finance_paper_shadow_decision",
@@ -464,6 +486,8 @@ class SimulationRecorder:
                     "would_submit_order": False,
                     "evidence_ids": evidence,
                     "risk_flags": risks,
+                    "sidecar_stage_metrics": stage_metrics,
+                    "first_failing_stage": first_failing_stage,
                 },
             )
         )
@@ -478,11 +502,20 @@ class SimulationRecorder:
         sidecar_latency_ms: int | float | None = None,
         evidence_ids: list[str] | None = None,
         risk_flags: list[str] | None = None,
+        sidecar_calls: list[dict[str, Any]] | None = None,
+        first_failing_stage: str | None = None,
     ) -> None:
         """Persist raw finance model failure as eval/retraining material."""
         failure_type = str(failure.get("failure_type") or "unknown_raw_model_failure")
         evidence = evidence_ids if evidence_ids is not None else failure.get("evidence_ids", [])
         risks = risk_flags if risk_flags is not None else failure.get("risk_flags", [])
+        stage_metrics = _sidecar_stage_metrics(sidecar_calls)
+        failure_details = failure.get("details") if isinstance(failure.get("details"), dict) else {}
+        resolved_first_failing_stage = (
+            first_failing_stage
+            or failure.get("first_failing_stage")
+            or failure_details.get("first_failing_stage")
+        )
         self._session.add(
             AgentDecisionModel(
                 agent_id=agent_id,
@@ -499,6 +532,8 @@ class SimulationRecorder:
                     "sidecar_latency_ms": sidecar_latency_ms,
                     "evidence_ids": evidence,
                     "risk_flags": risks,
+                    "sidecar_stage_metrics": stage_metrics,
+                    "first_failing_stage": resolved_first_failing_stage,
                 },
                 outcome={
                     "record_type": "raw_model_failure",
@@ -506,6 +541,8 @@ class SimulationRecorder:
                     "retrain_candidate": bool(failure.get("retrain_candidate")),
                     "evidence_ids": evidence,
                     "risk_flags": risks,
+                    "sidecar_stage_metrics": stage_metrics,
+                    "first_failing_stage": resolved_first_failing_stage,
                 },
             )
         )

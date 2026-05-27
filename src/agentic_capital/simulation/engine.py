@@ -48,6 +48,7 @@ class SimulationEngine:
         self._capital_limit: float = float(settings.initial_capital)
         self._zero_decision_streak = 0
         self._stop_reason: str | None = None
+        self._stop_diagnostics: dict | None = None
 
     def _validate_startup_gate(self) -> None:
         """Block paper trading unless the finance local LLM is ready."""
@@ -267,7 +268,12 @@ class SimulationEngine:
         requested_delay = min(delays) if delays else 0
         total_decisions = sum(len(r.get("decisions", [])) for r in cycle_results)
         self._log_finance_failures_before_guards(cycle_results)
-        next_delay = self._apply_cycle_guards(requested_delay=requested_delay, total_decisions=total_decisions)
+        guard_context = self._classify_guard_context(cycle_results)
+        next_delay = self._apply_cycle_guards(
+            requested_delay=requested_delay,
+            total_decisions=total_decisions,
+            guard_context=guard_context,
+        )
 
         logger.info(
             "cycle_complete",
@@ -276,6 +282,7 @@ class SimulationEngine:
             total_decisions=total_decisions,
             next_cycle_in=f"{next_delay}s",
             zero_decision_streak=self._zero_decision_streak,
+            stop_diagnostics=self._stop_diagnostics,
         )
 
         return next_delay
@@ -289,6 +296,8 @@ class SimulationEngine:
                 "evidence_ids": result.get("evidence_ids", []),
                 "risk_flags": result.get("risk_flags", []),
                 "sidecar_latency_ms": result.get("sidecar_latency_ms"),
+                "first_failing_stage": result.get("first_failing_stage")
+                or ((result.get("finance_record") or {}).get("details") or {}).get("first_failing_stage"),
             }
             for result in cycle_results
             if result and result.get("finance_no_context")
@@ -301,7 +310,29 @@ class SimulationEngine:
                 failures=failures,
             )
 
-    def _apply_cycle_guards(self, *, requested_delay: int | float | None, total_decisions: int) -> int:
+    def _classify_guard_context(self, cycle_results: list[dict]) -> dict:
+        """Classify no-decision failures for stop diagnostics."""
+        for result in cycle_results:
+            if not result or not result.get("finance_no_context"):
+                continue
+            record = result.get("finance_record") if isinstance(result.get("finance_record"), dict) else {}
+            details = record.get("details") if isinstance(record.get("details"), dict) else {}
+            first_failing_stage = result.get("first_failing_stage") or details.get("first_failing_stage")
+            return {
+                "cause_classification": "finance_sidecar_no_context",
+                "first_failing_stage": first_failing_stage,
+                "failure_type": record.get("failure_type"),
+                "agent": result.get("agent_name"),
+            }
+        return {"cause_classification": "agent_no_decision"}
+
+    def _apply_cycle_guards(
+        self,
+        *,
+        requested_delay: int | float | None,
+        total_decisions: int,
+        guard_context: dict | None = None,
+    ) -> int:
         """Clamp unsafe pacing and stop repeated no-decision loops."""
         max_zero_cycles = max(int(settings.simulation_zero_decision_max_cycles), 0)
         if total_decisions <= 0:
@@ -311,11 +342,18 @@ class SimulationEngine:
 
         if max_zero_cycles and self._zero_decision_streak >= max_zero_cycles:
             self._stop_reason = "zero_decision_guard"
+            self._stop_diagnostics = {
+                "stop_reason": self._stop_reason,
+                "streak": self._zero_decision_streak,
+                "max_cycles": max_zero_cycles,
+                **(guard_context or {}),
+            }
             self._running = False
             logger.warning(
                 "zero_decision_guard_triggered",
                 streak=self._zero_decision_streak,
                 max_cycles=max_zero_cycles,
+                stop_diagnostics=self._stop_diagnostics,
             )
 
         try:

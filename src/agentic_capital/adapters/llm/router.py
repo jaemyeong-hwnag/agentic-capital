@@ -49,7 +49,14 @@ def build_langchain_chat_model() -> Any:
     if is_local_llm_enabled():
         from agentic_capital.adapters.llm.local_openai import LocalOpenAICompatibleChatModel
 
-        model = settings.local_agent_llm_model.strip() or settings.local_llm_model
+        model = settings.local_agent_llm_model.strip()
+        finance_model = settings.local_llm_model.strip()
+        if not model:
+            if finance_model.lower().startswith("finance_"):
+                raise ValueError(
+                    "LOCAL_AGENT_LLM_MODEL is required when LOCAL_LLM_MODEL points to a finance sidecar"
+                )
+            model = finance_model
         return LocalOpenAICompatibleChatModel(
             base_url=settings.local_llm_base_url,
             model=model,

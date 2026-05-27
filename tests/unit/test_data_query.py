@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentic_capital.core.tools.data_query import DataQueryTools
+from agentic_capital.core.tools.data_query import DataQueryTools, collect_finance_decision_tool_results
 
 
 def _make_trading():
@@ -160,3 +160,42 @@ class TestDataQueryTools:
         tools = DataQueryTools(market_data=md)
         result = await tools.query_quote("INVALID")
         assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_collect_finance_decision_tool_results_adds_structured_payload():
+    result = await collect_finance_decision_tool_results(
+        tool_plan_payload={
+            "tool_plan": [
+                {"tool": "search_rag"},
+                {"tool": "get_market_session"},
+                {"tool": "get_balance"},
+                {"tool": "get_positions"},
+                {"tool": "get_quote", "args": {"symbol": "005930"}},
+                {"tool": "get_risk_limit"},
+            ],
+        },
+        trading=_make_trading(),
+        market_data=_make_market_data(),
+        symbol="005930",
+        market="kr_stock",
+        open_markets=["KRX"],
+        capital_limit=1_000_000,
+        evidence=[{"doc_id": "ev-1", "text": "risk policy"}],
+    )
+
+    payload = result["finance_decision_payload"]
+    assert payload["balance"]["available"] == 1_000_000
+    assert payload["positions"][0]["symbol"] == "005930"
+    assert payload["quote"]["price"] == 72000
+    assert payload["market_session"]["is_open"] is True
+    assert payload["risk_limit"]["paper_trade_only"] is True
+    assert payload["rag"]["evidence_ids"] == ["ev-1"]
+    assert set(payload["tool_results"]) >= {
+        "search_rag",
+        "get_market_session",
+        "get_balance",
+        "get_positions",
+        "get_quote",
+        "get_risk_limit",
+    }
