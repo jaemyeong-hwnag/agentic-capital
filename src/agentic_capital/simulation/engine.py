@@ -390,6 +390,7 @@ class SimulationEngine:
         Any agent can propose org actions — AI decides who has authority.
         System executes what agents decide and records everything.
         """
+        seen_hires: set[tuple[str, str]] = set()
         for decision in result.get("decisions", []):
             if not isinstance(decision, dict):
                 continue
@@ -397,6 +398,19 @@ class SimulationEngine:
             action_type = decision.get("type", decision.get("action_type", ""))
 
             if action_type == "hire":
+                hire_key = (
+                    str(decision.get("target", "")).strip().lower(),
+                    str(decision.get("detail", decision.get("role", "trader"))).strip().lower(),
+                )
+                if hire_key in seen_hires:
+                    logger.warning(
+                        "duplicate_hire_decision_skipped",
+                        agent=agent.name,
+                        target=decision.get("target"),
+                        role=decision.get("detail", decision.get("role", "trader")),
+                    )
+                    continue
+                seen_hires.add(hire_key)
                 await self._handle_hire(agent, decision)
             elif action_type == "fire":
                 await self._handle_fire(agent, decision)

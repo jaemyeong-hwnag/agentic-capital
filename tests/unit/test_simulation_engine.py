@@ -635,3 +635,29 @@ class TestSimulationEngine:
         hired_name = call_kwargs.get("name", mock_create.call_args[0][0] if mock_create.call_args[0] else "")
         assert hired_name != "RiskManager-Rho"
         assert "RiskManager-Rho-" in hired_name
+
+    @pytest.mark.asyncio
+    async def test_process_org_actions_skips_duplicate_hires_in_same_cycle(self):
+        """Repeated identical hire decisions in one cycle create one agent."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        engine._trading = MagicMock()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+
+        result = {
+            "decisions": [
+                {"type": "hire", "target": "TraderBeta", "detail": "trader", "reason": "add trader"},
+                {"type": "hire", "target": "TraderBeta", "detail": "trader", "reason": "repeat"},
+            ],
+        }
+
+        with patch("agentic_capital.simulation.engine.create_agent") as mock_create:
+            new_agent = AnalystAgent(profile=_make_profile("TraderBeta"), personality=create_random_personality(77), llm=llm)
+            mock_create.return_value = new_agent
+            await engine._process_org_actions(ceo, result)
+
+        mock_create.assert_called_once()
+        assert len(engine._agents) == 2
