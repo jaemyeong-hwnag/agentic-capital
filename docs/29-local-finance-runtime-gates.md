@@ -107,7 +107,7 @@ agent role tool boundary:
 - CEO/Analyst: 조직 운영, 분석, memory, market/account read-only 조회, 메시지 도구를 사용할 수 있다. `submit_order`, `cancel_order`, `get_fills`, `evaluate_reallocation`, `set_position_policy`는 ReAct tool list에서 제거된다.
 - CEO/Analyst가 주문 의도나 리밸런싱 아이디어를 낼 때는 직접 실행하지 않고 `send_message`로 Trader에게 지시 또는 분석을 전달한다.
 - CEO/Analyst local agent runtime이 timeout/connection error를 내면 `first_failing_stage=local_agent_runtime_timeout|local_agent_runtime_connection|local_agent_runtime`으로 기록하고, 빈 응답 대신 deterministic `OBS|... TRADER_TASK|... NEXT|...` 운영 노트를 남긴다.
-- CEO/Analyst가 일반 비서 응답, market-status 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
+- CEO/Analyst가 일반 비서 응답, raw `tool_calls` JSON, market-status 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
 - HR/message tool은 `target_name`, `reason`, `to_agent`, `content` 같은 placeholder 값을 runtime 결정으로 기록하지 않고 `ERR:placeholder_*`로 거절한다.
 
 read-only tool result schema:

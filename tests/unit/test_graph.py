@@ -306,6 +306,10 @@ class TestAgentToolFiltering:
             "ceo",
             "The current market status is KRX regular. If you need further assistance, please provide details.",
         )
+        assert "raw_tool_call_json_final_answer" in _agent_response_quality_issues(
+            "ceo",
+            '{"tool_calls":[{"name":"get_market_status","parameters":{"properties":{}}}]}',
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
@@ -612,6 +616,29 @@ class TestRunAgentCycle:
         economics = kwargs["economics_snapshot"]
         assert economics["agent_response"]["repair_applied"] is True
         assert "market_status_as_final_answer" in economics["agent_response"]["quality_issues"]
+
+    @pytest.mark.asyncio
+    async def test_raw_tool_call_json_final_answer_is_repaired(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        recorder = _make_recorder()
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value={
+            "messages": [
+                AIMessage(content='{"tool_calls":[{"name":"get_market_status","parameters":{"properties":{}}}]}')
+            ]
+        })
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
+            result = await run_agent_cycle(ceo, cycle_number=5, recorder=recorder)
+
+        assert result["first_failing_stage"] == "local_agent_response_quality"
+        kwargs = recorder.record_agent_cycle.await_args.kwargs
+        assert "response_repaired=true" in kwargs["llm_reasoning"]
+        assert "raw_tool_call_json_final_answer" in (
+            kwargs["economics_snapshot"]["agent_response"]["quality_issues"]
+        )
 
     def test_exception_summary_uses_type_when_message_empty(self):
         assert _exception_summary(TimeoutError()) == "TimeoutError"
