@@ -52,6 +52,13 @@ _GENERIC_ASSISTANT_PHRASES = (
     "how can i help",
 )
 
+_MARKET_STATUS_ANSWER_PHRASES = (
+    "the current market status is",
+    "market status update indicating",
+    "you've provided a market status update",
+    "you have provided a market status update",
+)
+
 _NON_KO_EN_MARKERS = (
     "¿",
     "¡",
@@ -137,6 +144,68 @@ def _exception_summary(exc: Exception) -> str:
     if message:
         return message
     return type(exc).__name__
+
+
+def _agent_runtime_failure_stage(error: str) -> str:
+    """Classify local agent runtime failures for recorder/guard diagnostics."""
+    normalized = error.lower()
+    if "timeout" in normalized or "readtimeout" in normalized or error == "TimeoutError":
+        return "local_agent_runtime_timeout"
+    if "connect" in normalized or "connection" in normalized:
+        return "local_agent_runtime_connection"
+    return "local_agent_runtime"
+
+
+def _agent_runtime_fallback_reasoning(
+    *,
+    agent: BaseAgent,
+    cycle_number: int,
+    symbols: list[str] | None,
+    open_markets: list[str] | None,
+    error: str,
+) -> str:
+    """Return a deterministic non-trading operating note when local agent LLM fails."""
+    role = _agent_tool_role(agent)
+    markets_text = ",".join(open_markets or []) if open_markets else "none"
+    symbols_text = ",".join(symbols or []) if symbols else "unspecified"
+    stage = _agent_runtime_failure_stage(error)
+    if role == "ceo":
+        task = "Trader-Gamma: continue finance sidecar paper-shadow review only; Analyst-Beta: refresh evidence when runtime recovers"
+    else:
+        task = "Trader-Gamma: use finance sidecar tools before any trade; report missing evidence and risk flags"
+    return (
+        f"OBS|cycle={cycle_number}; role={role}; local_agent_runtime_status=failed; "
+        f"first_failing_stage={stage}; watchlist={symbols_text}; market_status={markets_text}. "
+        f"TRADER_TASK|{task}. "
+        "NEXT|record failure, keep paper-only mode, retry local agent runtime after guarded backoff."
+    )
+
+
+def _agent_response_repair_reasoning(
+    *,
+    agent: BaseAgent,
+    cycle_number: int,
+    symbols: list[str] | None,
+    open_markets: list[str] | None,
+    quality_issues: list[str],
+    tool_sequence: list[dict],
+) -> str:
+    """Repair non-Trader assistant drift into an operating note."""
+    role = _agent_tool_role(agent)
+    markets_text = ",".join(open_markets or []) if open_markets else "none"
+    symbols_text = ",".join(symbols or []) if symbols else "unspecified"
+    tool_hint = ",".join(str(item.get("t")) for item in tool_sequence[:4] if item.get("t")) or "none"
+    if role == "ceo":
+        task = "Trader-Gamma: run finance sidecar paper-shadow review on watchlist; Analyst-Beta: attach evidence gaps only"
+    else:
+        task = "Trader-Gamma: review finance sidecar evidence, balance, quote, positions, session, and risk limit before any order"
+    return (
+        f"OBS|cycle={cycle_number}; role={role}; response_repaired=true; "
+        f"quality_issues={','.join(quality_issues)}; watchlist={symbols_text}; "
+        f"market_status={markets_text}; tools_seen={tool_hint}. "
+        f"TRADER_TASK|{task}. "
+        "NEXT|continue local-only paper loop; do not ask user; do not execute orders outside Trader finance flow."
+    )
 
 
 def _get_langchain_llm():
@@ -293,13 +362,18 @@ def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
     issues: list[str] = []
     if any(phrase in normalized for phrase in _GENERIC_ASSISTANT_PHRASES):
         issues.append("generic_assistant_response")
+    if any(phrase in normalized for phrase in _MARKET_STATUS_ANSWER_PHRASES):
+        issues.append("market_status_as_final_answer")
     if any(marker in normalized for marker in _NON_KO_EN_MARKERS) or any(
         "\u0900" <= char <= "\u097f" for char in reasoning
     ):
         issues.append("language_drift_non_ko_en")
-    if any(token in normalized for token in _MARKET_STATUS_TOKENS) and any(
-        word in normalized for word in ("symbol", "quote", "price", "종목", "시세")
-    ):
+    status_pattern = "|".join(re.escape(token) for token in _MARKET_STATUS_TOKENS)
+    market_status_as_symbol = re.search(
+        rf"(?:symbol|quote|price|종목|시세)[^.\n|]{{0,40}}(?:{status_pattern})",
+        normalized,
+    )
+    if market_status_as_symbol:
         issues.append("market_status_token_confusion")
     return issues
 
@@ -880,6 +954,8 @@ async def run_agent_cycle(
 
     errors: list[str] = []
     result_messages = []
+    first_failing_stage: str | None = None
+    fallback_reasoning: str | None = None
     cycle_started_at = datetime.now()
 
     try:
@@ -889,7 +965,23 @@ async def run_agent_cycle(
         )
         result_messages = result.get("messages", [])
     except Exception as e:
-        errors.append(_exception_summary(e))
+        error_summary = _exception_summary(e)
+        errors.append(error_summary)
+        first_failing_stage = _agent_runtime_failure_stage(error_summary)
+        if _agent_tool_role(agent) != "trader":
+            fallback_reasoning = _agent_runtime_fallback_reasoning(
+                agent=agent,
+                cycle_number=cycle_number,
+                symbols=symbols,
+                open_markets=open_markets,
+                error=error_summary,
+            )
+            logger.warning(
+                "agent_runtime_fallback_reasoning_created",
+                agent=agent.name,
+                cycle=cycle_number,
+                first_failing_stage=first_failing_stage,
+            )
         logger.exception("agent_react_cycle_failed", agent=agent.name, cycle=cycle_number)
 
     cycle_completed_at = datetime.now()
@@ -899,8 +991,27 @@ async def run_agent_cycle(
 
     all_decisions = decisions_sink + org_decisions
     tool_seq = _extract_tool_sequence(result_messages)
-    reasoning = _extract_llm_reasoning(result_messages)
+    reasoning = _extract_llm_reasoning(result_messages) or fallback_reasoning or ""
     response_quality_issues = _agent_response_quality_issues(_agent_tool_role(agent), reasoning)
+    response_repair_applied = False
+    if response_quality_issues and _agent_tool_role(agent) != "trader":
+        first_failing_stage = first_failing_stage or "local_agent_response_quality"
+        reasoning = _agent_response_repair_reasoning(
+            agent=agent,
+            cycle_number=cycle_number,
+            symbols=symbols,
+            open_markets=open_markets,
+            quality_issues=response_quality_issues,
+            tool_sequence=tool_seq,
+        )
+        response_repair_applied = True
+        logger.warning(
+            "agent_response_repaired",
+            agent=agent.name,
+            cycle=cycle_number,
+            first_failing_stage=first_failing_stage,
+            issues=response_quality_issues,
+        )
     if response_quality_issues:
         logger.warning(
             "agent_response_quality_issue",
@@ -956,8 +1067,15 @@ async def run_agent_cycle(
                     "tool_calls_count": len(tool_seq),
                     "decisions_count": len(all_decisions),
                     "errors_count": len(errors),
-                    "next_action": "retry_after_error" if errors else ("agent_requested_wakeup" if wakeup_sink else "continue_cycle"),
+                    "next_action": (
+                        "local_runtime_fallback_continue"
+                        if fallback_reasoning
+                        else ("retry_after_error" if errors else ("agent_requested_wakeup" if wakeup_sink else "continue_cycle"))
+                    ),
                     "failure_cause": errors[0][:300] if errors else None,
+                    "first_failing_stage": first_failing_stage,
+                    "fallback_applied": bool(fallback_reasoning),
+                    "repair_applied": response_repair_applied,
                     "quality_issues": response_quality_issues,
                 },
                 "psychology_context": (
@@ -1016,6 +1134,7 @@ async def run_agent_cycle(
         "messages_to_send": messages_sink,
         "errors": errors,
         "next_cycle_seconds": next_cycle_seconds,
+        "first_failing_stage": first_failing_stage,
         "emotion": {
             "valence": agent.emotion.valence,
             "arousal": agent.emotion.arousal,

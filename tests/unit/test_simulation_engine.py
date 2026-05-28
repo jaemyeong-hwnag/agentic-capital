@@ -103,6 +103,20 @@ class TestSimulationEngine:
         assert context["first_failing_stage"] == "finance_tool_planner_model"
         assert context["failure_type"] == "sidecar_pipeline_failed"
 
+    def test_guard_context_classifies_local_agent_timeout(self):
+        engine = SimulationEngine()
+        context = engine._classify_guard_context([
+            {
+                "agent_name": "CEO-Alpha",
+                "errors": ["ReadTimeout"],
+                "first_failing_stage": "local_agent_runtime_timeout",
+            }
+        ])
+
+        assert context["cause_classification"] == "local_agent_runtime_failure"
+        assert context["first_failing_stage"] == "local_agent_runtime_timeout"
+        assert context["agent"] == "CEO-Alpha"
+
     def test_init_agents(self):
         engine = SimulationEngine()
         llm = _make_llm()

@@ -106,6 +106,8 @@ agent role tool boundary:
 - Trader: `LOCAL_FINANCE_PIPELINE_ENABLED=true`와 `LOCAL_LLM_MODEL=finance_*`이면 ReAct가 아니라 finance sidecar flow를 사용한다. legacy/non-finance Trader ReAct 실행에서만 주문 도구를 보유할 수 있다.
 - CEO/Analyst: 조직 운영, 분석, memory, market/account read-only 조회, 메시지 도구를 사용할 수 있다. `submit_order`, `cancel_order`, `get_fills`, `evaluate_reallocation`, `set_position_policy`는 ReAct tool list에서 제거된다.
 - CEO/Analyst가 주문 의도나 리밸런싱 아이디어를 낼 때는 직접 실행하지 않고 `send_message`로 Trader에게 지시 또는 분석을 전달한다.
+- CEO/Analyst local agent runtime이 timeout/connection error를 내면 `first_failing_stage=local_agent_runtime_timeout|local_agent_runtime_connection|local_agent_runtime`으로 기록하고, 빈 응답 대신 deterministic `OBS|... TRADER_TASK|... NEXT|...` 운영 노트를 남긴다.
+- CEO/Analyst가 일반 비서 응답, market-status 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
 - HR/message tool은 `target_name`, `reason`, `to_agent`, `content` 같은 placeholder 값을 runtime 결정으로 기록하지 않고 `ERR:placeholder_*`로 거절한다.
 
 read-only tool result schema:
@@ -159,6 +161,8 @@ shadow decision처럼 저장하지 않고, 원본 action과 `risk_flags`를 유�
 
 zero-decision guard로 simulation이 멈추면 `stop_diagnostics`에 원인을 남긴다.
 finance sidecar no-context/raw failure가 선행된 경우 `cause_classification=finance_sidecar_no_context`,
+`first_failing_stage`, `failure_type`, agent 이름을 기록한다.
+일반 agent runtime 실패가 선행된 경우 `cause_classification=local_agent_runtime_failure`,
 `first_failing_stage`, `failure_type`, agent 이름을 기록한다.
 
 오프라인 회귀 테스트:

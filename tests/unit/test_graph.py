@@ -69,9 +69,11 @@ def _make_recorder():
     recorder.record_emotion = AsyncMock()
     recorder.record_decision = AsyncMock()
     recorder.record_psychology_context = AsyncMock()
+    recorder.record_agent_cycle = AsyncMock()
     recorder.record_hr_event = AsyncMock()
     recorder.record_agent_message = AsyncMock()
     recorder.record_position_snapshot = AsyncMock()
+    recorder.load_tools = AsyncMock(return_value=[])
     recorder.commit = AsyncMock()
     return recorder
 
@@ -296,6 +298,14 @@ class TestAgentToolFiltering:
         assert "generic_assistant_response" in issues
         assert "market_status_token_confusion" in issues
         assert _agent_response_quality_issues("trader", "¿Qué tal si actualizamos quote symbol KRX:POST?") == []
+        assert _agent_response_quality_issues(
+            "analyst",
+            "OBS|market_status=KRX:REGULAR; quote 005930 price is 70000. TRADER_TASK|review risk.",
+        ) == []
+        assert "market_status_as_final_answer" in _agent_response_quality_issues(
+            "ceo",
+            "The current market status is KRX regular. If you need further assistance, please provide details.",
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
@@ -539,6 +549,69 @@ class TestRunAgentCycle:
         assert result["agent_name"] == "CEO"
         assert len(result["errors"]) > 0
         assert result["next_cycle_seconds"] == 300
+        assert result["first_failing_stage"] == "local_agent_runtime"
+
+    @pytest.mark.asyncio
+    async def test_agent_runtime_timeout_records_deterministic_fallback(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        recorder = _make_recorder()
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(side_effect=TimeoutError())
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
+            result = await run_agent_cycle(
+                ceo,
+                cycle_number=3,
+                recorder=recorder,
+                symbols=["005930"],
+                open_markets=["KRX:REGULAR"],
+            )
+
+        assert result["first_failing_stage"] == "local_agent_runtime_timeout"
+        kwargs = recorder.record_agent_cycle.await_args.kwargs
+        assert "OBS|cycle=3" in kwargs["llm_reasoning"]
+        assert "TRADER_TASK|" in kwargs["llm_reasoning"]
+        economics = kwargs["economics_snapshot"]
+        assert economics["agent_response"]["fallback_applied"] is True
+        assert economics["agent_response"]["first_failing_stage"] == "local_agent_runtime_timeout"
+        assert economics["agent_response"]["next_action"] == "local_runtime_fallback_continue"
+
+    @pytest.mark.asyncio
+    async def test_non_trader_quality_drift_is_repaired_in_cycle_record(self):
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
+        recorder = _make_recorder()
+        mock_agent = MagicMock()
+        mock_agent.ainvoke = AsyncMock(return_value={
+            "messages": [
+                AIMessage(
+                    content=(
+                        "The current market status is KRX regular. "
+                        "If you need further assistance, please provide a stock symbol."
+                    )
+                )
+            ]
+        })
+
+        with patch("agentic_capital.graph.workflow.create_react_agent", return_value=mock_agent), \
+             patch("agentic_capital.graph.workflow._get_langchain_llm", return_value=MagicMock()), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock):
+            result = await run_agent_cycle(
+                ceo,
+                cycle_number=4,
+                recorder=recorder,
+                symbols=["005930"],
+                open_markets=["KRX:REGULAR"],
+            )
+
+        assert result["first_failing_stage"] == "local_agent_response_quality"
+        kwargs = recorder.record_agent_cycle.await_args.kwargs
+        assert "response_repaired=true" in kwargs["llm_reasoning"]
+        assert "TRADER_TASK|" in kwargs["llm_reasoning"]
+        economics = kwargs["economics_snapshot"]
+        assert economics["agent_response"]["repair_applied"] is True
+        assert "market_status_as_final_answer" in economics["agent_response"]["quality_issues"]
 
     def test_exception_summary_uses_type_when_message_empty(self):
         assert _exception_summary(TimeoutError()) == "TimeoutError"

@@ -333,6 +333,26 @@ class SimulationEngine:
                 "failure_type": record.get("failure_type"),
                 "agent": result.get("agent_name"),
             }
+        for result in cycle_results:
+            if not result or not result.get("errors"):
+                continue
+            errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+            first_error = str(errors[0]) if errors else "unknown_agent_error"
+            first_failing_stage = result.get("first_failing_stage")
+            if not first_failing_stage:
+                normalized = first_error.lower()
+                if "timeout" in normalized or "readtimeout" in normalized or first_error == "TimeoutError":
+                    first_failing_stage = "local_agent_runtime_timeout"
+                elif "connect" in normalized or "connection" in normalized:
+                    first_failing_stage = "local_agent_runtime_connection"
+                else:
+                    first_failing_stage = "local_agent_runtime"
+            return {
+                "cause_classification": "local_agent_runtime_failure",
+                "first_failing_stage": first_failing_stage,
+                "failure_type": first_error[:160],
+                "agent": result.get("agent_name"),
+            }
         return {"cause_classification": "agent_no_decision"}
 
     def _apply_cycle_guards(
