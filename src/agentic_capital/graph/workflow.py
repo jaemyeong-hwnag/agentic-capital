@@ -362,6 +362,8 @@ def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
     issues: list[str] = []
     if normalized.startswith('{"tool_calls"') or '"tool_calls"' in normalized:
         issues.append("raw_tool_call_json_final_answer")
+    if 'trader_task|{"name"' in normalized or 'trader_task|{"tool_calls"' in normalized:
+        issues.append("raw_tool_call_json_in_task")
     if any(phrase in normalized for phrase in _GENERIC_ASSISTANT_PHRASES):
         issues.append("generic_assistant_response")
     if any(phrase in normalized for phrase in _MARKET_STATUS_ANSWER_PHRASES):

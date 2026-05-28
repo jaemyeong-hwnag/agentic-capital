@@ -310,6 +310,10 @@ class TestAgentToolFiltering:
             "ceo",
             '{"tool_calls":[{"name":"get_market_status","parameters":{"properties":{}}}]}',
         )
+        assert "raw_tool_call_json_in_task" in _agent_response_quality_issues(
+            "analyst",
+            'OBS|KRX:POST|TRADER_TASK|{"name":"get_quote","args":{"symbol":"005930"}}|NEXT|...',
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
