@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-FORGE_ROOT="${DOMAIN_LLM_FORGE_ROOT:-/Users/tpirates/workspace-hjm/domain-llm-forge}"
+FORGE_ROOT="${DOMAIN_LLM_FORGE_ROOT:-/Users/tpirates/.codex/worktrees/dd25/domain-llm-forge}"
 LLM_ENV="${DOMAIN_LLM_FORGE_ENV:-$FORGE_ROOT/.env}"
 MODEL_ENV="${DOMAIN_MODEL_FORGE_ENV:-/Users/tpirates/workspace-hjm/domain-model-forge/.env}"
 SERVICE="${RAG_SERVICE:-finance_decision_model}"

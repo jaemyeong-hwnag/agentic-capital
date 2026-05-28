@@ -314,6 +314,14 @@ class TestAgentToolFiltering:
             "analyst",
             'OBS|KRX:POST|TRADER_TASK|{"name":"get_quote","args":{"symbol":"005930"}}|NEXT|...',
         )
+        assert "generic_assistant_response" in _agent_response_quality_issues(
+            "ceo",
+            "It seems there was an attempt to invoke get_ohlcv with an invalid placeholder symbol.",
+        )
+        assert "market_status_as_final_answer" in _agent_response_quality_issues(
+            "analyst",
+            "The previous tool call used an invalid placeholder symbol for KRX:POST.",
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
@@ -496,6 +504,85 @@ class TestRunAgentCycle:
         assert result["finance_no_context"] is True
         assert result["first_failing_stage"] == "finance_tool_planner_model"
         assert result["decisions"] == []
+
+    @pytest.mark.asyncio
+    async def test_local_finance_recoverable_raw_failure_records_hold_decision(self):
+        trading = _make_trading()
+        market_data = _make_market_data()
+        trader = TraderAgent(
+            profile=_make_profile("Trader"),
+            personality=create_random_personality(42),
+            llm=_make_llm(),
+            trading=trading,
+        )
+        recorder = _make_recorder()
+        recorder.record_raw_model_failure = AsyncMock()
+        recorder.record_agent_cycle = AsyncMock()
+        pipeline_result = {
+            "record_type": "raw_model_failure",
+            "record": {
+                "record_type": "raw_model_failure",
+                "failure_type": "call_tool_loop_with_sufficient_tool_evidence",
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "evidence_ids": ["ev-1"],
+            },
+            "decision": {"action": "CALL_TOOL", "reason": "missing_evidence_review"},
+            "tool_results": {
+                "get_balance": {"available": 1_000_000},
+                "get_positions": [],
+                "get_quote": {"symbol": "005930", "price": 70000},
+                "get_market_session": {"state": "regular"},
+                "get_risk_limit": {"max_order_value": 300000},
+                "search_rag": {"evidence_ids": ["ev-1"]},
+            },
+            "evidence_ids": ["ev-1"],
+            "risk_flags": ["missing_evidence_review"],
+            "sidecar_latency_ms": 18,
+            "sidecar_calls": [{"stage": "finance_decision_model", "ok": True, "status_code": 200}],
+            "first_failing_stage": "finance_decision_model",
+        }
+
+        with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
+             patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock), \
+             patch(
+                 "agentic_capital.adapters.llm.local_finance_runtime.run_local_finance_decision_pipeline",
+                 AsyncMock(return_value=pipeline_result),
+             ):
+            result = await run_agent_cycle(
+                trader,
+                cycle_number=2,
+                trading=trading,
+                market_data=market_data,
+                symbols=["005930"],
+                open_markets=["KRX"],
+                recorder=recorder,
+                capital_limit=1_000_000,
+            )
+
+        recorder.record_raw_model_failure.assert_awaited_once()
+        cycle_kwargs = recorder.record_agent_cycle.await_args.kwargs
+        assert cycle_kwargs["decisions_count"] == 1
+        assert cycle_kwargs["economics_snapshot"]["finance_recovery_applied"] is True
+        assert result["finance_no_context"] is True
+        assert result["decisions"] == [{
+            "type": "finance_failure_recovery_hold",
+            "action": "HOLD",
+            "symbol": "005930",
+            "reason": (
+                "blocked finance raw model failure:call_tool_loop_with_sufficient_tool_evidence; "
+                "paper loop continues without order"
+            ),
+            "confidence": 0.0,
+            "evidence_ids": ["ev-1"],
+            "risk_flags": [
+                "call_tool_loop_with_sufficient_tool_evidence",
+                "missing_evidence_review",
+            ],
+            "paper_trade_only": True,
+            "would_submit_order": False,
+        }]
 
     @pytest.mark.asyncio
     async def test_agent_cycle_records_pre_post_psychology_context(self):

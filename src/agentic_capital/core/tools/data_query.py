@@ -221,6 +221,18 @@ def _serialise_balance(balance: Any) -> dict[str, Any]:
 
 def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
     """Return the structure expected by the finance decision sidecar."""
+    tool_result_ids = sorted(
+        name
+        for name in (
+            "search_rag",
+            "get_market_session",
+            "get_balance",
+            "get_positions",
+            "get_quote",
+            "get_risk_limit",
+        )
+        if name in results
+    )
     return {
         "balance": results.get("get_balance", {}),
         "positions": results.get("get_positions", []),
@@ -228,16 +240,10 @@ def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
         "market_session": results.get("get_market_session", {}),
         "risk_limit": results.get("get_risk_limit", {}),
         "rag": results.get("search_rag", {}),
+        "tool_result_ids": tool_result_ids,
         "tool_results": {
             name: results.get(name)
-            for name in (
-                "search_rag",
-                "get_market_session",
-                "get_balance",
-                "get_positions",
-                "get_quote",
-                "get_risk_limit",
-            )
+            for name in tool_result_ids
             if name in results
         },
     }

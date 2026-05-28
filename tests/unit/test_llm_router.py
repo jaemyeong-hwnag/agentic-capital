@@ -377,7 +377,6 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
             captured_decision_payload.update(payload)
             assert payload["finance_context"]["balance"]["available"] == 1_000_000
             assert payload["tool_results"]["available"] == sorted([
-                "finance_decision_payload",
                 "get_balance",
                 "get_market_session",
                 "get_positions",
@@ -385,6 +384,8 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
                 "get_risk_limit",
                 "search_rag",
             ])
+            assert payload["tool_result_ids"] == payload["tool_results"]["tool_result_ids"]
+            assert payload["finance_context"]["tool_result_ids"] == payload["tool_result_ids"]
             assert "tool_results" not in payload["finance_context"]
             assert len(payload["user_question"]) < 350
             return {
@@ -450,6 +451,124 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
     failed_stage = next(call for call in result["sidecar_calls"] if call.get("ok") is False)
     assert failed_stage["status_code"] == 503
     assert failed_stage["failure_body_summary"] == "service unavailable"
+
+
+@pytest.mark.asyncio
+async def test_local_finance_call_tool_loop_with_complete_tools_is_raw_failure():
+    captured_decision_system = {}
+
+    async def collect_tool_results(payload):
+        return {
+            "get_balance": {"available": 1_000_000, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+            "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
+            "get_risk_limit": {"max_order_value": 1_000_000},
+            "search_rag": {
+                "evidence_ids": payload["evidence_ids"],
+                "evidence_count": len(payload["evidence"]),
+            },
+            "finance_decision_payload": {
+                "balance": {"available": 1_000_000, "currency": "KRW"},
+                "positions": [],
+                "quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
+                "market_session": {"state": "regular", "is_open": True, "regular_session": True},
+                "risk_limit": {"max_order_value": 1_000_000},
+                "rag": {"evidence_ids": payload["evidence_ids"], "evidence_count": len(payload["evidence"])},
+                "tool_result_ids": [
+                    "get_balance",
+                    "get_market_session",
+                    "get_positions",
+                    "get_quote",
+                    "get_risk_limit",
+                    "search_rag",
+                ],
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {"queries": ["005930 complete tool evidence"], "symbol": "005930"}, {
+                "model": model,
+                "stage": model,
+                "latency_ms": 1,
+                "ok": True,
+            }
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_risk_limit"},
+                ],
+            }, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            assert payload["tool_result_ids"] == sorted([
+                "get_balance",
+                "get_market_session",
+                "get_positions",
+                "get_quote",
+                "get_risk_limit",
+                "search_rag",
+            ])
+            return {
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "required_tools": payload["tool_result_ids"],
+                "evidence_ids": [],
+                "no_trade_reason": "missing_evidence_review",
+                "reason": "request more evidence despite complete required tools",
+            }, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+        return {
+            "risk_flags": ["missing_evidence_review"],
+            "hard_fail": False,
+            "explanation": "model requested review",
+        }, {"model": model, "stage": model, "latency_ms": 1, "ok": True}
+
+    async def capture_system(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            captured_decision_system["system"] = system
+        return await fake_stage(model=model, payload=payload, system=system)
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=capture_system),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=(
+            [],
+            {"model": "rag_search", "stage": "rag_search", "latency_ms": 1, "ok": True},
+        )),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-call-tool-loop",
+            user_question="005930 tool 결과가 모두 있는데 계속 CALL_TOOL?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True, "require_evidence_ids": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["ok"] is False
+    assert result["record_type"] == "raw_model_failure"
+    assert result["record"]["failure_type"] == "call_tool_loop_with_sufficient_tool_evidence"
+    assert result["record"]["retrain_candidate"] is True
+    assert result["first_failing_stage"] == local_finance_runtime.FINANCE_DECISION_MODEL
+    assert result["record"]["details"]["risk_flags"] == ["missing_evidence_review"]
+    assert result["record"]["details"]["evidence_ids"] == []
+    assert result["record"]["details"]["tool_result_ids"] == sorted([
+        "get_balance",
+        "get_market_session",
+        "get_positions",
+        "get_quote",
+        "get_risk_limit",
+        "search_rag",
+    ])
+    assert "Treat tool_result_ids and finance_context as runtime evidence" in captured_decision_system["system"]
+    assert "do not return CALL_TOOL or missing_evidence_review" in captured_decision_system["system"]
 
 
 @pytest.mark.asyncio

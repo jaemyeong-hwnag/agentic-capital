@@ -50,6 +50,8 @@ _GENERIC_ASSISTANT_PHRASES = (
     "please let me know",
     "feel free to let me know",
     "how can i help",
+    "it seems there was an attempt to invoke",
+    "there was an attempt to invoke",
 )
 
 _MARKET_STATUS_ANSWER_PHRASES = (
@@ -57,6 +59,7 @@ _MARKET_STATUS_ANSWER_PHRASES = (
     "market status update indicating",
     "you've provided a market status update",
     "you have provided a market status update",
+    "invalid placeholder symbol",
 )
 
 _NON_KO_EN_MARKERS = (
@@ -83,6 +86,10 @@ _MARKET_STATUS_TOKENS = (
     "nyse:regular",
     "nyse:closed",
 )
+
+_RECOVERABLE_FINANCE_RAW_FAILURES = frozenset({
+    "call_tool_loop_with_sufficient_tool_evidence",
+})
 
 
 def _compact_text(value: Any, *, limit: int = 500) -> str:
@@ -428,6 +435,30 @@ def _extract_psychology_context(decisions: list[dict]) -> dict | None:
     return None
 
 
+def _finance_failure_recovery_decision(
+    *,
+    record: dict[str, Any],
+    symbol: str,
+    evidence_ids: list[str],
+    risk_flags: list[str],
+) -> dict[str, Any] | None:
+    """Keep the paper loop alive after a recorded, blocked, non-order finance failure."""
+    failure_type = str(record.get("failure_type") or "")
+    if failure_type not in _RECOVERABLE_FINANCE_RAW_FAILURES:
+        return None
+    return {
+        "type": "finance_failure_recovery_hold",
+        "action": "HOLD",
+        "symbol": record.get("symbol") or symbol,
+        "reason": f"blocked finance raw model failure:{failure_type}; paper loop continues without order",
+        "confidence": 0.0,
+        "evidence_ids": evidence_ids,
+        "risk_flags": sorted(set([*risk_flags, failure_type])),
+        "paper_trade_only": True,
+        "would_submit_order": False,
+    }
+
+
 def _compact_psychology_decisions(decisions: list[dict] | None) -> list[dict]:
     compact: list[dict] = []
     for decision in (decisions or [])[:4]:
@@ -720,6 +751,14 @@ async def _run_local_finance_agent_cycle(
             "evidence_ids": evidence_ids,
             "risk_flags": risk_flags,
         })
+    recovery_decision = _finance_failure_recovery_decision(
+        record=record,
+        symbol=primary_symbol,
+        evidence_ids=evidence_ids,
+        risk_flags=risk_flags,
+    )
+    if recovery_decision:
+        all_decisions.append(recovery_decision)
 
     await record_cycle(
         agent=agent,
@@ -774,6 +813,7 @@ async def _run_local_finance_agent_cycle(
         "risk_flags": risk_flags,
         "sidecar_calls": sidecar_calls,
         "first_failing_stage": first_failing_stage,
+        "finance_recovery_applied": recovery_decision is not None,
         "psychology_context": (
             post_psychology.get("soft_context")
             if isinstance(post_psychology, dict) and isinstance(post_psychology.get("soft_context"), dict)

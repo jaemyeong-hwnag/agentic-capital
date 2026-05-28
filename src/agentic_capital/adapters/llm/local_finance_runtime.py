@@ -33,6 +33,14 @@ FINANCE_RAG_QUERY_MODEL = "finance_rag_query_model"
 FINANCE_TOOL_PLANNER_MODEL = "finance_tool_planner_model"
 FINANCE_DECISION_MODEL = "finance_decision_model"
 FINANCE_RISK_GUARD_MODEL = "finance_risk_guard_model"
+REQUIRED_FINANCE_TOOL_RESULT_IDS = (
+    "get_balance",
+    "get_positions",
+    "get_quote",
+    "get_market_session",
+    "get_risk_limit",
+    "search_rag",
+)
 FINANCE_STAGE_BASE_URL_SETTINGS = {
     FINANCE_RAG_QUERY_MODEL: "local_finance_rag_query_base_url",
     FINANCE_TOOL_PLANNER_MODEL: "local_finance_tool_planner_base_url",
@@ -475,8 +483,10 @@ def _compact_tool_plan_payload(tool_plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_result_stage_summary(tool_results: dict[str, Any]) -> dict[str, Any]:
+    tool_result_ids = _available_tool_result_ids(tool_results)
     return {
-        "available": sorted(key for key in tool_results if not key.startswith("_")),
+        "available": tool_result_ids,
+        "tool_result_ids": tool_result_ids,
         "errors": tool_results.get("_errors", []),
         "meta": tool_results.get("_meta", {}),
     }
@@ -493,8 +503,10 @@ def _compact_decision_for_risk_guard(decision: dict[str, Any]) -> dict[str, Any]
         "price",
         "confidence",
         "evidence_ids",
+        "tool_result_ids",
         "required_tools",
         "risk_tags",
+        "no_trade_reason",
     ):
         if key in decision:
             compact[key] = decision[key]
@@ -519,7 +531,44 @@ def _risk_guard_finance_context(finance_context: dict[str, Any]) -> dict[str, An
         "market_session": finance_context.get("market_session", {}),
         "risk_limit": finance_context.get("risk_limit", {}),
         "rag": compact_rag,
+        "tool_result_ids": finance_context.get("tool_result_ids", []),
     }
+
+
+def _available_tool_result_ids(tool_results: dict[str, Any]) -> list[str]:
+    """Return model-facing ids for read-only runtime tool evidence."""
+    return sorted(
+        key
+        for key in tool_results
+        if not key.startswith("_") and key != "finance_decision_payload"
+    )
+
+
+def _has_complete_runtime_tool_evidence(tool_results: dict[str, Any], evidence_ids: list[str]) -> bool:
+    errors = tool_results.get("_errors")
+    return (
+        not errors
+        and set(REQUIRED_FINANCE_TOOL_RESULT_IDS).issubset(set(_available_tool_result_ids(tool_results)))
+    )
+
+
+def _call_tool_loop_with_sufficient_evidence(
+    *,
+    decision: dict[str, Any],
+    risk_flags: list[str],
+    tool_results: dict[str, Any],
+    evidence_ids: list[str],
+) -> bool:
+    """Detect a finance model asking for already-supplied required evidence."""
+    action = _normalize_action(decision.get("action"))
+    if action != "CALL_TOOL":
+        return False
+    if not _has_complete_runtime_tool_evidence(tool_results, evidence_ids):
+        return False
+    if any("missing_evidence" in str(flag) for flag in risk_flags):
+        return True
+    no_trade_reason = str(decision.get("no_trade_reason") or "")
+    return no_trade_reason in {"missing_evidence_review", "missing_evidence", "missing_tool_results"}
 
 
 def _deterministic_paper_tool_plan(agent_state: dict[str, Any]) -> dict[str, Any]:
@@ -671,6 +720,7 @@ def _normalise_decision_payload(
         **decision_payload,
         "action": action,
         "evidence_ids": decision_payload.get("evidence_ids") or evidence_ids,
+        "tool_result_ids": decision_payload.get("tool_result_ids") or _available_tool_result_ids(tool_results),
         "required_tools": decision_payload.get("required_tools")
         or decision_payload.get("tools")
         or list(tool_results.keys()),
@@ -766,6 +816,12 @@ async def run_local_finance_decision_pipeline(
             tool_results = {"_errors": [{"tool": "collector", "error": "invalid_tool_results"}]}
         compact_tool_results = _compact_finance_tool_results(tool_results)
         compact_finance_context = compact_tool_results.get("finance_decision_payload", {})
+        tool_result_ids = _available_tool_result_ids(tool_results)
+        if isinstance(compact_finance_context, dict):
+            compact_finance_context = {
+                **compact_finance_context,
+                "tool_result_ids": compact_finance_context.get("tool_result_ids") or tool_result_ids,
+            }
         compact_base_payload = {
             "request_id": request_id,
             "user_question": _summary_text(user_question, limit=300),
@@ -782,14 +838,20 @@ async def run_local_finance_decision_pipeline(
             "evidence": compact_evidence[:3],
             "evidence_count": len(evidence),
             "evidence_ids": evidence_ids,
+            "tool_result_ids": tool_result_ids,
         }
         decision, meta = await _call_finance_stage(
             model=FINANCE_DECISION_MODEL,
             payload=decision_payload,
             system=(
                 "Return only JSON. Output action must be BUY, SELL, HOLD, WAIT, OBSERVE, "
-                "REJECT, CALL_TOOL, or NO_CONTEXT. If balance, positions, quote, risk limit, "
-                "or evidence is insufficient, do not return BUY or SELL."
+                "REJECT, CALL_TOOL, or NO_CONTEXT. Treat tool_result_ids and finance_context as "
+                "runtime evidence. If tool_result_ids cover search_rag, get_market_session, "
+                "get_balance, get_positions, get_quote, and get_risk_limit, do not return "
+                "CALL_TOOL or missing_evidence_review only because service-document evidence_ids "
+                "are sparse; return HOLD or WAIT with no_trade_reason=insufficient_edge unless "
+                "a paper BUY/SELL is justified. If balance, positions, quote, risk limit, or "
+                "runtime evidence is insufficient, do not return BUY or SELL."
             ),
         )
         sidecar_calls.append(meta)
@@ -852,6 +914,30 @@ async def run_local_finance_decision_pipeline(
                     },
                 ),
                 decision,
+                tool_results=tool_results,
+            )
+        elif _call_tool_loop_with_sufficient_evidence(
+            decision=decision,
+            risk_flags=risk_flags,
+            tool_results=tool_results,
+            evidence_ids=evidence_ids,
+        ):
+            first_failing_stage = first_failing_stage or FINANCE_DECISION_MODEL
+            record = build_finance_shadow_failure_record(
+                FinanceShadowValidationError(
+                    "call_tool_loop_with_sufficient_tool_evidence",
+                    details={
+                        "risk_flags": risk_flags,
+                        "tool_result_ids": _available_tool_result_ids(tool_results),
+                        "evidence_ids": evidence_ids,
+                    },
+                ),
+                {
+                    **decision,
+                    "first_failing_stage": first_failing_stage,
+                    "risk_tags": sorted(set(["call_tool_loop", *risk_flags, *decision.get("risk_tags", [])])),
+                    "no_trade_reason": "call_tool_loop_with_sufficient_tool_evidence",
+                },
                 tool_results=tool_results,
             )
         elif _normalize_action(decision.get("action")) == "NO_CONTEXT":

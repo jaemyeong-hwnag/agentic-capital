@@ -204,6 +204,7 @@ def build_finance_shadow_failure_record(
             "trade_missing_position_quantity",
             "trade_exceeds_position",
             "trade_when_market_closed",
+            "call_tool_loop_with_sufficient_tool_evidence",
             "profit_guarantee_expression",
             "risk_guard_hard_fail",
         },

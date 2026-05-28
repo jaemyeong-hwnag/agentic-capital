@@ -77,6 +77,20 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   `tool_collection_only`, `insufficient_edge`, `missing_evidence_review`,
   `tool_error:<tool>:<error>`, `risk_guard_block`, `blocked:<failure_type>`.
   이 값은 "모델이 왜 주문 후보를 만들지 않았는지"를 모니터링과 재학습 후보 분류에서 바로 쓰기 위한 운영 필드다.
+- finance decision payload와 risk guard payload에는 runtime read-only tool evidence를
+  `tool_result_ids`로 명시한다. finance 모델이 `balance`, `positions`, `quote`,
+  `market_session`, `risk_limit`, `search_rag`를 모두 받은 뒤에도 `CALL_TOOL` 또는
+  `missing_evidence_review`를 반복하면 정상 shadow decision으로 숨기지 않고
+  `raw_model_failure(failure_type=call_tool_loop_with_sufficient_tool_evidence,
+  first_failing_stage=finance_decision_model)`로 기록한다.
+- 이 감지는 RAG 문서 `evidence_ids`가 비어 있어도 적용된다. paper loop에서 read-only
+  tool evidence가 완전하면 `tool_result_ids` 자체가 runtime evidence이고, decision stage
+  system instruction은 `CALL_TOOL` 반복 대신 `HOLD`/`WAIT`와
+  `no_trade_reason=insufficient_edge`를 요구한다.
+- `call_tool_loop_with_sufficient_tool_evidence`는 raw model failure로 반드시 기록하되,
+  주문 없는 `finance_failure_recovery_hold`를 `decisions_count`에 반영해 paper loop가
+  동일 실패를 관찰/기록하며 계속 돌 수 있게 한다. 이 recovery decision은
+  `paper_trade_only=true`, `would_submit_order=false`이고 주문 권한이 아니다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
   paper/shadow mode에서는 deterministic fallback plan을 사용한다:
   `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.
@@ -107,7 +121,7 @@ agent role tool boundary:
 - CEO/Analyst: 조직 운영, 분석, memory, market/account read-only 조회, 메시지 도구를 사용할 수 있다. `submit_order`, `cancel_order`, `get_fills`, `evaluate_reallocation`, `set_position_policy`는 ReAct tool list에서 제거된다.
 - CEO/Analyst가 주문 의도나 리밸런싱 아이디어를 낼 때는 직접 실행하지 않고 `send_message`로 Trader에게 지시 또는 분석을 전달한다.
 - CEO/Analyst local agent runtime이 timeout/connection error를 내면 `first_failing_stage=local_agent_runtime_timeout|local_agent_runtime_connection|local_agent_runtime`으로 기록하고, 빈 응답 대신 deterministic `OBS|... TRADER_TASK|... NEXT|...` 운영 노트를 남긴다.
-- CEO/Analyst가 일반 비서 응답, raw `tool_calls` JSON, `TRADER_TASK` 안의 raw tool-call JSON, market-status 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
+- CEO/Analyst가 일반 비서 응답, raw `tool_calls` JSON, `TRADER_TASK` 안의 raw tool-call JSON, market-status 설명문, placeholder symbol/tool 호출 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
 - HR/message tool은 `target_name`, `reason`, `to_agent`, `content` 같은 placeholder 값을 runtime 결정으로 기록하지 않고 `ERR:placeholder_*`로 거절한다.
 
 read-only tool result schema:
@@ -117,7 +131,7 @@ read-only tool result schema:
 - finance decision payload alias: `finance_decision_payload.balance`,
   `finance_decision_payload.positions`, `finance_decision_payload.quote`,
   `finance_decision_payload.market_session`, `finance_decision_payload.risk_limit`,
-  `finance_decision_payload.rag`
+  `finance_decision_payload.rag`, `finance_decision_payload.tool_result_ids`
 - `get_balance`/`balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`,
   `source`. `FuturesGuard` 같은 capital limit wrapper가 적용되면 top-level
   `total`/`available`은 주문 가능 한도인 `effective_capital_limit`로 기록하고,
@@ -134,6 +148,9 @@ read-only tool result schema:
 tool planner가 `submit_order`, `submit_live_order`, `place_order`, `execute_trade` 같은 주문 tool을 요청하면 collector는 실행하지 않고 `_errors`에 `order_tool_blocked_in_shadow`를 남긴다.
 pipeline은 이 오류를 안전한 `CALL_TOOL` shadow decision으로 세지 않고
 `raw_model_failure(failure_type=order_tool_in_shadow_plan)`로 기록한다.
+완전한 read-only tool 결과가 있는데도 finance decision model이 추가 tool 호출만
+요구하는 경우도 같은 원칙으로 `raw_model_failure`에 기록해 finance worktree의
+회귀/eval 학습 대상으로 넘긴다.
 
 Agent ReAct cycle 기록은 local LLM이 동일한 `tool_call_id`를 재사용해도 message 순서와
 tool name으로 결과를 붙인다. 따라서 `agent_cycles.tool_sequence`에서 `get_balance`
