@@ -121,6 +121,18 @@ def test_finance_smoke_passes_safe_no_context_action():
     assert result["action"] == "CALL_TOOL"
 
 
+def test_finance_smoke_allows_call_tool_without_tool_plan_as_safe_warning():
+    result = local_finance_runtime.validate_finance_decision_payload({
+        "action": "CALL_TOOL",
+        "evidence_ids": ["source_reference.md"],
+        "risk_tags": ["missing_tool_results"],
+        "reason": "needs tools before any trade",
+    })
+
+    assert result["action"] == "CALL_TOOL"
+    assert result["shadow_warning"] == "call_tool_missing_required_tools"
+
+
 def test_finance_smoke_rejects_buy_without_evidence_and_tools():
     with pytest.raises(local_finance_runtime.LocalFinanceRuntimeError, match="unsafe_trade_action"):
         local_finance_runtime.validate_finance_decision_payload({

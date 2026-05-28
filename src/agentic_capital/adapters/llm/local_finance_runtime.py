@@ -248,6 +248,13 @@ def validate_finance_decision_payload(payload: dict[str, Any]) -> dict[str, Any]
             raise LocalFinanceRuntimeError(
                 f"local_finance_smoke_unsafe_trade_action: action={action} reason={exc.code}"
             ) from exc
+        if action == "CALL_TOOL" and exc.code == "call_tool_missing_required_tools":
+            return {
+                "action": action,
+                "evidence_count": len(evidence_ids) if isinstance(evidence_ids, list) else 0,
+                "required_tools_count": len(required_tools) if isinstance(required_tools, list) else 0,
+                "shadow_warning": exc.code,
+            }
         raise LocalFinanceRuntimeError(f"local_finance_smoke_shadow_guard_failed: {exc.code}") from exc
     return {
         "action": action,
