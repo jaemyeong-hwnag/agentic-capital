@@ -60,6 +60,22 @@ def _save_cached_token(app_key: str, is_paper: bool, token: str, expires_in: int
         pass  # Cache write failure is non-fatal
 
 
+def _clear_cached_token(app_key: str, is_paper: bool) -> None:
+    """Remove a cached token when the broker reports it as expired."""
+    try:
+        with open(_TOKEN_CACHE_PATH) as f:
+            data = json.load(f)
+        cache_key = f"{app_key[:8]}:{'paper' if is_paper else 'real'}"
+        if cache_key in data:
+            data.pop(cache_key, None)
+            with open(_TOKEN_CACHE_PATH, "w") as f:
+                json.dump(data, f)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+    except Exception:
+        logger.warning("kis_token_cache_clear_failed")
+
+
 class KISSession:
     """Shared session for KIS Open API.
 
@@ -174,6 +190,13 @@ class KISSession:
                 logger.exception("kis_token_failed")
                 raise
         raise RuntimeError("KIS token failed after retries")  # pragma: no cover
+
+    async def refresh_token(self) -> str:
+        """Discard cached token and acquire a fresh token."""
+        self._access_token = None
+        _clear_cached_token(self.app_key, self.is_paper)
+        logger.info("kis_token_refresh_requested")
+        return await self.ensure_token()
 
     def headers(self, tr_id: str) -> dict[str, str]:
         """Build request headers with current token."""

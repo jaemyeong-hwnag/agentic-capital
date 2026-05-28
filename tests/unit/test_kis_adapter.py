@@ -61,6 +61,25 @@ class TestKISSession:
         assert token == "cached-token"
 
     @pytest.mark.asyncio
+    async def test_refresh_token_clears_cached_token_before_reacquiring(self):
+        session = _make_session()
+        session._access_token = "expired-token"
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"access_token": "fresh-token"}
+        session.client = MagicMock()
+        session.client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch("agentic_capital.adapters.kis_session._clear_cached_token") as clear_cache,
+            patch("agentic_capital.adapters.kis_session._load_cached_token", return_value=None),
+            patch("agentic_capital.adapters.kis_session._save_cached_token"),
+        ):
+            token = await session.refresh_token()
+
+        assert token == "fresh-token"
+        clear_cache.assert_called_once_with("test-key", True)
+
+    @pytest.mark.asyncio
     async def test_ensure_token_failure(self):
         session = _make_session()
         mock_response = MagicMock()
@@ -132,6 +151,31 @@ class TestKISTradingAdapter:
         assert balance.total == 10_000_000.0
         assert balance.available == 5_000_000.0
         assert balance.currency == "KRW"
+
+    @pytest.mark.asyncio
+    async def test_get_balance_refreshes_once_on_expired_token(self):
+        adapter = self._make_adapter()
+        expired = MagicMock(status_code=500)
+        expired.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW00123",
+            "msg1": "기간이 만료된 token 입니다.",
+        }
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {
+            "rt_cd": "0",
+            "output2": [{"tot_evlu_amt": "10000000", "dnca_tot_amt": "5000000"}],
+        }
+        adapter._session.get = AsyncMock(side_effect=[expired, ok])
+        adapter._session.refresh_token = AsyncMock(return_value="fresh-token")
+        adapter._get_orderable_cash = AsyncMock(return_value=None)
+
+        balance = await adapter.get_balance()
+
+        assert balance.total == 10_000_000.0
+        assert balance.available == 5_000_000.0
+        assert adapter._session.get.call_count == 2
+        adapter._session.refresh_token.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_get_balance_error(self):

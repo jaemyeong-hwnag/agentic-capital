@@ -142,6 +142,7 @@ _DEFAULT_EXCHANGE: dict[Market, str] = {
 
 _OVERSEAS_MARKETS = {Market.US_STOCK, Market.HK_STOCK, Market.CN_STOCK, Market.JP_STOCK, Market.VN_STOCK}
 _FUTURES_MARKETS = {Market.KR_FUTURES, Market.KR_OPTIONS}
+_EXPIRED_TOKEN_CODES = {"EGW00123"}
 
 
 def _exchange_code(order: Order) -> str:
@@ -188,6 +189,40 @@ class KISTradingAdapter(TradingPort):
                 "ERR:paper_no_overseas|KIS_IS_PAPER=true blocks overseas orders|set KIS_IS_PAPER=false for real account"
             )
 
+    @staticmethod
+    def _token_expired(data: dict[str, Any]) -> bool:
+        msg = str(data.get("msg1", ""))
+        return data.get("msg_cd") in _EXPIRED_TOKEN_CODES or "만료된 token" in msg
+
+    async def _get_json_with_token_refresh(
+        self,
+        url: str,
+        *,
+        tr_id: str,
+        params: dict[str, Any],
+        operation: str,
+    ) -> dict[str, Any]:
+        """GET JSON and refresh the token once if KIS reports expiration."""
+        await self._session.ensure_token()
+        for attempt in range(2):
+            r = await self._session.get(
+                url,
+                headers=self._session.headers(tr_id),
+                params=params,
+            )
+            data = r.json()
+            if attempt == 0 and self._token_expired(data):
+                logger.warning(
+                    "kis_token_expired_refreshing",
+                    operation=operation,
+                    msg_cd=data.get("msg_cd", ""),
+                    status_code=getattr(r, "status_code", None),
+                )
+                await self._session.refresh_token()
+                continue
+            return data
+        return data  # pragma: no cover
+
     # ── Balance ───────────────────────────────────────────────────────────────
 
     async def _get_orderable_cash(self) -> float | None:
@@ -225,9 +260,10 @@ class KISTradingAdapter(TradingPort):
 
         선물/옵션 계좌(ACNT_PRDT_CD=03)는 주식 잔고 API 대신 이 메서드를 사용한다.
         """
-        r = await self._session.get(
+        data = await self._get_json_with_token_refresh(
             f"{self._session.base_url}/uapi/domestic-futureoption/v1/trading/inquire-balance",
-            headers=self._session.headers(self._fut_tr("balance")),
+            tr_id=self._fut_tr("balance"),
+            operation="futures_balance",
             params={
                 "CANO": self._session.cano,
                 "ACNT_PRDT_CD": self._session.prdt_cd,
@@ -237,7 +273,6 @@ class KISTradingAdapter(TradingPort):
                 "CTX_AREA_NK200": "",
             },
         )
-        data = r.json()
         if data.get("rt_cd") != "0":
             raise RuntimeError(f"KIS futures balance failed: {data.get('msg1', data)}")
         o2 = data.get("output2", {}) or {}
@@ -269,9 +304,10 @@ class KISTradingAdapter(TradingPort):
             except Exception:
                 logger.exception("kis_futures_balance_failed_falling_back")
         try:
-            r = await self._session.get(
+            data = await self._get_json_with_token_refresh(
                 f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
-                headers=self._session.headers(self._kr_tr("balance")),
+                tr_id=self._kr_tr("balance"),
+                operation="balance",
                 params={
                     "CANO": self._session.cano,
                     "ACNT_PRDT_CD": self._session.prdt_cd,
@@ -286,7 +322,6 @@ class KISTradingAdapter(TradingPort):
                     "CTX_AREA_NK100": "",
                 },
             )
-            data = r.json()
             if data.get("rt_cd") != "0":
                 raise RuntimeError(f"KIS balance failed: {data.get('msg1', data)}")
 
@@ -439,9 +474,10 @@ class KISTradingAdapter(TradingPort):
         """국내주식 보유 포지션 조회."""
         await self._session.ensure_token()
         try:
-            r = await self._session.get(
+            data = await self._get_json_with_token_refresh(
                 f"{self._session.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
-                headers=self._session.headers(self._kr_tr("balance")),
+                tr_id=self._kr_tr("balance"),
+                operation="domestic_positions",
                 params={
                     "CANO": self._session.cano,
                     "ACNT_PRDT_CD": self._session.prdt_cd,
@@ -456,7 +492,6 @@ class KISTradingAdapter(TradingPort):
                     "CTX_AREA_NK100": "",
                 },
             )
-            data = r.json()
             if data.get("rt_cd") != "0":
                 raise RuntimeError(f"KIS positions failed: {data.get('msg1', data)}")
 
