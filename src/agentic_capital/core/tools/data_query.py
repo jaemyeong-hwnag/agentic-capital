@@ -9,6 +9,7 @@ from __future__ import annotations
 import builtins
 import inspect
 import re
+import ast
 from typing import Any
 
 import structlog
@@ -31,7 +32,7 @@ _SAFE_BUILTINS: dict = {
         "abs", "round", "sorted", "reversed", "any", "all", "print", "repr",
         "isinstance", "issubclass", "type", "hasattr", "getattr", "setattr",
         "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
-        "AttributeError", "StopIteration", "True", "False", "None",
+        "AttributeError", "RuntimeError", "StopIteration", "True", "False", "None",
     ]
     if hasattr(builtins, name)
 }
@@ -432,6 +433,90 @@ def _make_tool_namespace(trading: Any, market_data: Any, recorder: Any) -> dict:
     }
 
 
+def _names_from_targets(target: ast.AST) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for item in target.elts:
+            names.update(_names_from_targets(item))
+        return names
+    if isinstance(target, ast.Starred):
+        return _names_from_targets(target.value)
+    return set()
+
+
+def _dynamic_tool_unresolved_names(code: str, fn_name: str, global_names: set[str]) -> list[str]:
+    """Find obvious undefined globals before persisting/running AI-created tools."""
+    tree = ast.parse(code)
+    module_defined: set[str] = set()
+    target_fn: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            module_defined.add(node.name)
+            if node.name == fn_name and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                target_fn = node
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                module_defined.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                module_defined.update(_names_from_targets(target))
+
+    if target_fn is None:
+        return []
+
+    local_names: set[str] = set()
+    for arg in [*target_fn.args.posonlyargs, *target_fn.args.args, *target_fn.args.kwonlyargs]:
+        local_names.add(arg.arg)
+    if target_fn.args.vararg:
+        local_names.add(target_fn.args.vararg.arg)
+    if target_fn.args.kwarg:
+        local_names.add(target_fn.args.kwarg.arg)
+
+    loaded: set[str] = set()
+
+    class NameVisitor(ast.NodeVisitor):
+        def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
+            if isinstance(node.ctx, ast.Load):
+                loaded.add(node.id)
+            elif isinstance(node.ctx, (ast.Store, ast.Del)):
+                local_names.add(node.id)
+
+        def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+            for alias in node.names:
+                local_names.add(alias.asname or alias.name.split(".", 1)[0])
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+            for alias in node.names:
+                local_names.add(alias.asname or alias.name)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            if node is target_fn:
+                self.generic_visit(node)
+            else:
+                local_names.add(node.name)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+            if node is target_fn:
+                self.generic_visit(node)
+            else:
+                local_names.add(node.name)
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+            if node.name:
+                local_names.add(node.name)
+            self.generic_visit(node)
+
+    for stmt in target_fn.body:
+        NameVisitor().visit(stmt)
+
+    allowed = set(global_names) | set(_SAFE_BUILTINS) | module_defined | local_names
+    return sorted(name for name in loaded if name not in allowed)
+
+
 def _build_dynamic_tool(
     spec: dict,
     trading: Any,
@@ -449,6 +534,15 @@ def _build_dynamic_tool(
             return None
 
     namespace = _make_tool_namespace(trading, market_data, recorder)
+    try:
+        unresolved = _dynamic_tool_unresolved_names(code, name, set(namespace))
+    except SyntaxError as exc:
+        logger.warning("dynamic_tool_syntax_error", name=name, error=str(exc))
+        return None
+    if unresolved:
+        logger.warning("dynamic_tool_unresolved_names", name=name, unresolved=unresolved)
+        return None
+
     try:
         exec(code, namespace)
     except Exception as exc:
@@ -1177,6 +1271,10 @@ def build_agent_tools(
 
         # Quick exec test in sandbox to catch runtime errors
         test_ns = _make_tool_namespace(trading, market_data, recorder)
+        unresolved = _dynamic_tool_unresolved_names(code, name, set(test_ns))
+        if unresolved:
+            return f"ERR:undefined_names:{','.join(unresolved)}"
+
         try:
             exec(code, test_ns)
         except Exception as exc:

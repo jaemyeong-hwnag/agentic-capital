@@ -50,6 +50,15 @@ class TestBuildDynamicTool:
         tool = _build_dynamic_tool(spec, trading=None, market_data=None, recorder=None)
         assert tool is None
 
+    def test_undefined_name_returns_none_before_runtime(self):
+        spec = {
+            "name": "bad_sentiment",
+            "description": "Broken generated tool",
+            "code": "async def bad_sentiment(symbol: str) -> str:\n    return sentiment_score",
+        }
+        tool = _build_dynamic_tool(spec, trading=None, market_data=None, recorder=None)
+        assert tool is None
+
     @pytest.mark.asyncio
     async def test_dynamic_tool_executes(self):
         spec = {
@@ -172,6 +181,22 @@ class TestCreateToolTool:
             code="async def different_name() -> str:\n    return 'hi'",
         )
         assert result.startswith("ERR:fn_not_found")
+
+    @pytest.mark.asyncio
+    async def test_create_tool_rejects_undefined_names(self):
+        recorder = MagicMock()
+        recorder.save_tool = AsyncMock()
+        tools, _, _, _ = build_agent_tools(recorder=recorder)
+        tool = next(t for t in tools if t.name == "create_tool")
+
+        result = await tool.coroutine(
+            name="bad_sentiment",
+            description="Broken generated tool",
+            code="async def bad_sentiment(symbol: str) -> str:\n    return sentiment_score",
+        )
+
+        assert result == "ERR:undefined_names:sentiment_score"
+        recorder.save_tool.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_no_recorder_still_validates(self):
