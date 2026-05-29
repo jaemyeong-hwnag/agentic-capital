@@ -88,6 +88,25 @@ class TestSimulationEngine:
         assert engine._stop_reason == "zero_decision_guard"
         assert engine._stop_diagnostics["first_failing_stage"] == "finance_tool_planner_model"
 
+    @pytest.mark.asyncio
+    async def test_run_cycle_reconciles_broker_positions_after_snapshot(self):
+        """Each cycle re-syncs broker positions so paper fills reach the recorder."""
+        engine = SimulationEngine()
+        engine._agents = []
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=10_000_000, available=9_000_000)
+        )
+        engine._recorder = MagicMock()
+        engine._recorder.record_company_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+        engine._reconcile_with_broker = AsyncMock()
+
+        await engine._run_cycle()
+
+        engine._recorder.record_company_snapshot.assert_awaited_once()
+        engine._reconcile_with_broker.assert_awaited_once()
+
     def test_guard_context_classifies_finance_first_failing_stage(self):
         engine = SimulationEngine()
         context = engine._classify_guard_context([

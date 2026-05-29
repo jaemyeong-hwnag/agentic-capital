@@ -126,6 +126,10 @@ paper order bridge:
 - recoverable `CALL_TOOL` loop나 complete evidence가 있는 `trade_missing_notional`은 raw failure로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
 - 정상 JSON인 `finance_paper_shadow_decision`이 `WAIT / would_submit_order=false`만 반환해 paper loop가 자본을 전혀 배치하지 못하는 경우도 운영 복구 대상이다. `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`, KIS paper, KRX open, evidence 존재, risk flag 없음, 무보유 종목, 1주 가격이 max order/capital gate 안에 들어오는 조건에서만 tiny scout BUY를 제출한다. 이는 live 주문 권한이 아니며, finance/psychology 모델이 주문 권한을 갖는다는 뜻도 아니다.
 - paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
+- 매 cycle 종료 후 `agentic-capital`은 broker/KIS 포지션을 다시 읽어 `positions` snapshot을 동기화한다.
+  따라서 KIS paper 주문 제출 이후 broker position count와 DB recorder가 장시간 갈라지면
+  `agentic-capital`의 reconciliation/recorder 문제로 분류한다. 이 동기화는 read-only broker 조회와
+  DB snapshot 기록만 수행하며, 수동 주문/취소/복구를 하지 않는다.
 
 agent role tool boundary:
 

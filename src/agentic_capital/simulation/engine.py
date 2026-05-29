@@ -272,6 +272,11 @@ class SimulationEngine:
             except Exception:
                 logger.exception("snapshot_recording_failed")
 
+        # Keep recorder positions aligned with broker/KIS after any paper order
+        # submitted during the cycle. The reconciliation path is read-only
+        # against the broker and records snapshots only; it never submits orders.
+        await self._reconcile_with_broker()
+
         # Collect agent-requested delays — use minimum (most urgent wins)
         delays = [r.get("next_cycle_seconds", 0) for r in cycle_results if r]
         requested_delay = min(delays) if delays else 0
@@ -561,10 +566,10 @@ class SimulationEngine:
         logger.info("role_abolished", name=role_name, abolished_by=ceo.name)
 
     async def _reconcile_with_broker(self) -> None:
-        """Reconcile DB positions with real broker account at startup.
+        """Reconcile DB positions with real broker account.
 
         Fetches the current real positions from KIS and records them as a
-        reconciliation snapshot so agents start with accurate ground truth.
+        reconciliation snapshot so agents use accurate ground truth.
         Logs any discrepancies between the last DB snapshot and real account.
         """
         if not self._trading or not self._recorder:
