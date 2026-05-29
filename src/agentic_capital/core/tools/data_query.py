@@ -183,8 +183,12 @@ def _symbol_from_plan(tool_plan_payload: dict[str, Any], fallback: str = "") -> 
 def _market_session_from_open_markets(open_markets: list[str] | None, market: str) -> dict[str, Any]:
     market_l = _market_key(market or "kr_stock")
     open_values = {str(item).upper() for item in (open_markets or [])}
-    exchange = "KRX" if market_l.startswith("kr_") else "NYSE"
-    is_open = exchange in open_values or market_l.upper() in open_values
+    exchange = "KRX" if market_l.startswith("kr_") else "NASDAQ" if market_l == "us_stock" else "NYSE"
+    is_open = (
+        exchange in open_values
+        or market_l.upper() in open_values
+        or any(item.startswith(f"{exchange}_") for item in open_values)
+    )
     return {
         "market": market_l or "kr_stock",
         "exchange": exchange,
@@ -836,11 +840,10 @@ def build_agent_tools(
             # Position policy is AI-decided and informational only (not enforced here)
             side_l = side.lower()
             market_l = market.lower()
-            if settings.kis_is_paper and market_l in {"us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}:
-                return (
-                    "ERR:paper_no_overseas|KIS_IS_PAPER=true blocks overseas orders|"
-                    "use kr_stock or futures paper tools, or switch to explicit real mode"
-                )
+            is_paper_overseas = (
+                settings.kis_is_paper
+                and market_l in {"us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
+            )
             if side_l == "sell" and market_l in {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}:
                 positions = await trading.get_positions()
                 owned_qty = sum(
@@ -875,6 +878,8 @@ def build_agent_tools(
                         f"need:{order_value:.0f}|avl:{effective_available:.0f}|"
                         f"max_qty:{int(effective_available // risk_price)}"
                     )
+                if is_paper_overseas and price is None:
+                    price = risk_price
 
             o = Order(
                 symbol=symbol,
@@ -1350,7 +1355,7 @@ def build_agent_tools(
             name="submit_order",
             description=(
                 "Submit a buy or sell order. You decide market, symbol, quantity, and price. "
-                "In KIS paper mode, overseas stock markets are blocked; use kr_stock or futures paper tools. "
+                "In KIS paper mode, KRX routes to KIS paper and overseas stock markets use local paper fills. "
                 "If cash is insufficient, first use evaluate_reallocation to compare HOLD vs SELL+BUY; "
                 "spot sell orders are limited to owned quantity."
             ),

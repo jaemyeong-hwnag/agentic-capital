@@ -183,6 +183,23 @@ class TestDataQueryTools:
 
 
 @pytest.mark.asyncio
+async def test_collect_finance_decision_tool_results_treats_us_premarket_as_open():
+    result = await collect_finance_decision_tool_results(
+        tool_plan_payload={"tool_plan": [{"tool": "get_market_session"}, {"tool": "get_quote"}]},
+        trading=_make_trading(),
+        market_data=_make_market_data(),
+        symbol="AAPL",
+        market="us_stock",
+        open_markets=["NASDAQ_PRE"],
+        capital_limit=1_000_000,
+    )
+
+    assert result["get_market_session"]["exchange"] == "NASDAQ"
+    assert result["get_market_session"]["is_open"] is True
+    assert result["get_market_session"]["state"] == "regular"
+
+
+@pytest.mark.asyncio
 async def test_collect_finance_decision_tool_results_adds_structured_payload():
     result = await collect_finance_decision_tool_results(
         tool_plan_payload={

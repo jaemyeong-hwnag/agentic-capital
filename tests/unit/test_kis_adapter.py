@@ -256,16 +256,24 @@ class TestKISTradingAdapter:
         assert result.status == "unknown"
 
     @pytest.mark.asyncio
-    async def test_submit_overseas_order_paper_raises(self):
-        """Overseas orders must raise NotImplementedError in paper mode."""
+    async def test_submit_overseas_order_paper_fills_locally(self):
+        """Overseas orders use local paper fills in paper mode."""
         from agentic_capital.ports.trading import Market
         adapter = self._make_adapter(is_paper=True)
+        domestic_resp = MagicMock()
+        domestic_resp.json.return_value = {"rt_cd": "0", "output1": []}
+        adapter._session.get = AsyncMock(return_value=domestic_resp)
         order = Order(
             symbol="AAPL", side=OrderSide.BUY, order_type=OrderType.LIMIT,
             quantity=5, price=185.0, market=Market.US_STOCK, exchange="NASD",
         )
-        with pytest.raises(NotImplementedError, match="paper"):
-            await adapter.submit_order(order)
+        result = await adapter.submit_order(order)
+        assert result.order_id.startswith("PAPER-OVS-")
+        assert result.status == "filled"
+        assert result.market == Market.US_STOCK
+        assert result.metadata["paper_virtual"] is True
+        positions = await adapter.get_positions()
+        assert any(p.symbol == "AAPL" and p.quantity == 5 for p in positions)
 
     @pytest.mark.asyncio
     async def test_cancel_order(self):
@@ -337,11 +345,17 @@ class TestKISTradingAdapterExtended:
         assert bal.currency == "USD"
 
     @pytest.mark.asyncio
-    async def test_get_overseas_balance_paper_raises(self):
-        """get_overseas_balance raises NotImplementedError in paper mode."""
+    async def test_get_overseas_balance_paper_returns_local_summary(self):
+        """get_overseas_balance summarizes local paper overseas positions."""
+        from agentic_capital.ports.trading import Market
         adapter = self._make_adapter(is_paper=True)
-        with pytest.raises(NotImplementedError, match="paper"):
-            await adapter.get_overseas_balance()
+        await adapter.submit_order(Order(
+            symbol="AAPL", side=OrderSide.BUY, order_type=OrderType.LIMIT,
+            quantity=2, price=100.0, market=Market.US_STOCK, exchange="NASD",
+        ))
+        bal = await adapter.get_overseas_balance()
+        assert bal.total == 200.0
+        assert bal.currency == "USD"
 
     @pytest.mark.asyncio
     async def test_get_positions_live_fetches_overseas(self):
@@ -414,11 +428,16 @@ class TestKISTradingAdapterExtended:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_cancel_overseas_order_paper_raises(self):
-        """cancel_overseas_order raises in paper mode."""
+    async def test_cancel_overseas_order_paper_filled_order_not_cancelable(self):
+        """Paper overseas orders fill immediately and cannot be cancelled."""
+        from agentic_capital.ports.trading import Market
         adapter = self._make_adapter(is_paper=True)
-        with pytest.raises(NotImplementedError, match="paper"):
-            await adapter.cancel_overseas_order("ORDER123", "NASD", "AAPL")
+        result = await adapter.submit_order(Order(
+            symbol="AAPL", side=OrderSide.BUY, order_type=OrderType.LIMIT,
+            quantity=1, price=100.0, market=Market.US_STOCK, exchange="NASD",
+        ))
+        cancelled = await adapter.cancel_overseas_order(result.order_id, "NASD", "AAPL")
+        assert cancelled is False
 
     @pytest.mark.asyncio
     async def test_cancel_overseas_order_live(self):
@@ -578,11 +597,18 @@ class TestKISTradingAdapterOrderStatus:
         assert fills[0].market.value == "us_stock"
 
     @pytest.mark.asyncio
-    async def test_get_overseas_fills_paper_raises(self):
-        """get_overseas_fills raises in paper mode."""
+    async def test_get_overseas_fills_paper_returns_local_fills(self):
+        """get_overseas_fills returns local paper overseas fills."""
+        from agentic_capital.ports.trading import Market
         adapter = self._make_adapter(is_paper=True)
-        with pytest.raises(NotImplementedError, match="paper"):
-            await adapter.get_overseas_fills()
+        await adapter.submit_order(Order(
+            symbol="AAPL", side=OrderSide.BUY, order_type=OrderType.LIMIT,
+            quantity=3, price=101.0, market=Market.US_STOCK, exchange="NASD",
+        ))
+        fills = await adapter.get_overseas_fills()
+        assert len(fills) == 1
+        assert fills[0].symbol == "AAPL"
+        assert fills[0].status == "filled"
 
 
 class TestGetActiveFuturesContracts:

@@ -90,10 +90,12 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_LLM_TEMPERATURE` | 선택 | 로컬 chat completion temperature |
 | `LOCAL_LLM_SEND_NATIVE_TOOLS` | 선택 | 기본값 `false`. domain-llm-forge RAG Gateway처럼 OpenAI native tool payload를 받지 않는 서버에는 tool schema를 compact system prompt로만 전달한다. vLLM/llama-server 등 native tool calling을 검증한 서버에서만 `true`로 켠다 |
 | `LOCAL_FINANCE_PIPELINE_ENABLED` | 선택 | 기본값 `true`. local provider + finance model + Trader cycle이면 ReAct 대신 `rag_query -> tool_plan -> tool 결과 -> decision -> risk_guard` 전용 flow 사용 |
-| `LOCAL_FINANCE_DEFAULT_SYMBOL` | 선택 | finance sidecar payload에 symbol이 없을 때 쓰는 기본 종목. 기본값 `005930` |
+| `LOCAL_FINANCE_DEFAULT_SYMBOL` | 선택 | finance sidecar payload에 symbol이 없을 때 쓰는 단일 fallback 종목. 기본값 `005930` |
+| `LOCAL_FINANCE_DEFAULT_SYMBOLS` | 선택 | Trader finance cycle이 순환 평가할 기본 종목 유니버스. `005930,us_stock:AAPL` 또는 `AAPL@us_stock` 형식을 지원하며 기본값은 `005930,AAPL` |
+| `LOCAL_FINANCE_DEFAULT_MARKET` | 선택 | market prefix가 없는 비-KRX symbol의 기본 market. 기본값 `kr_stock`; 6자리 숫자는 항상 `kr_stock`으로 추론한다 |
 | `LOCAL_FINANCE_RISK_PER_TRADE_PCT` | 선택 | finance sidecar용 risk metadata 기본값. `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`인 KIS paper 모드에서는 paper 주문 수량 산정에도 사용한다 |
-| `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED` | 선택 | 기본값 `true`. Trader finance sidecar가 검증된 BUY/SELL paper intent를 반환하고 KIS paper/live-futures 안전 조건을 통과하면 agentic-capital이 paper 주문을 제출한다. live 주문 권한이 아니다 |
-| `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP` | 선택 | 기본값 `true`. 모든 필수 tool evidence가 있는데 finance decision model이 `CALL_TOOL`만 반복하면 raw failure로 기록한 뒤, open KRX/cash/risk/quote 조건에서 작은 paper scout BUY를 자동 제출해 loop를 운영적으로 복구한다 |
+| `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED` | 선택 | 기본값 `true`. Trader finance sidecar가 검증된 BUY/SELL paper intent를 반환하고 KIS paper/live-futures 안전 조건을 통과하면 agentic-capital이 paper 주문을 제출한다. KRX 현물은 KIS paper API, 해외 현물은 로컬 paper fill로 기록하며 live 주문 권한이 아니다 |
+| `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP` | 선택 | 기본값 `true`. 모든 필수 tool evidence가 있는데 finance decision model이 `CALL_TOOL`만 반복하면 raw failure로 기록한 뒤, open market/cash/risk/quote 조건에서 작은 paper scout BUY를 자동 제출해 loop를 운영적으로 복구한다 |
 | `LOCAL_FINANCE_RAG_QUERY_BASE_URL` | 선택 | `finance_rag_query_model` 전용 OpenAI-compatible gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
 | `LOCAL_FINANCE_TOOL_PLANNER_BASE_URL` | 선택 | `finance_tool_planner_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
 | `LOCAL_FINANCE_DECISION_BASE_URL` | 선택 | `finance_decision_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용. `search_rag`도 기본적으로 이 gateway의 `/search`를 사용 |

@@ -544,6 +544,9 @@ def _owned_quantity(tool_results: dict[str, Any], symbol: str, market: str) -> f
     return owned
 
 
+_PAPER_SPOT_MARKETS = {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
+
+
 def _max_paper_order_value(
     *,
     tool_results: dict[str, Any],
@@ -585,6 +588,7 @@ def _finance_paper_order_plan(
     decision: dict[str, Any],
     tool_results: dict[str, Any],
     primary_symbol: str,
+    primary_market: str,
     open_markets: list[str] | None,
     capital_limit: float | None,
 ) -> dict[str, Any] | None:
@@ -597,8 +601,8 @@ def _finance_paper_order_plan(
         return None
     action = str(decision.get("action") or record.get("action") or "").upper()
     symbol = str(decision.get("symbol") or record.get("symbol") or primary_symbol).strip()
-    market = str(decision.get("market") or record.get("market") or "kr_stock").lower() or "kr_stock"
-    if action not in {"BUY", "SELL"} or not symbol or market != "kr_stock":
+    market = str(decision.get("market") or record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
+    if action not in {"BUY", "SELL"} or not symbol or market not in _PAPER_SPOT_MARKETS:
         return None
     if record.get("paper_trade_only") is not True:
         return None
@@ -631,8 +635,9 @@ def _finance_paper_order_plan(
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": None,
+        "price": price if market != "kr_stock" else None,
         "estimated_price": price,
+        "exchange": decision.get("exchange") or record.get("exchange"),
         "reason": str(decision.get("reason") or decision.get("rationale") or record.get("no_trade_reason") or ""),
         "recovery": False,
     }
@@ -643,6 +648,7 @@ def _finance_loop_probe_order_plan(
     record: dict[str, Any],
     tool_results: dict[str, Any],
     primary_symbol: str,
+    primary_market: str,
     open_markets: list[str] | None,
     capital_limit: float | None,
 ) -> dict[str, Any] | None:
@@ -659,12 +665,23 @@ def _finance_loop_probe_order_plan(
         return None
 
     symbol = str(record.get("symbol") or primary_symbol).strip()
-    market = str(record.get("market") or "kr_stock").lower() or "kr_stock"
+    market = str(record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
     price = _tool_quote_price(tool_results)
-    if not symbol or market != "kr_stock" or price <= 0:
+    if not symbol or market not in _PAPER_SPOT_MARKETS or price <= 0:
         return None
-    if _owned_quantity(tool_results, symbol, market) > 0:
-        return None
+    owned = int(_owned_quantity(tool_results, symbol, market))
+    if owned > 0:
+        return {
+            "action": "SELL",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": price if market != "kr_stock" else None,
+            "estimated_price": price,
+            "exchange": record.get("exchange"),
+            "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
+            "recovery": True,
+        }
     max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
     risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
     quantity = _paper_quantity_from_budget(
@@ -679,8 +696,9 @@ def _finance_loop_probe_order_plan(
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": None,
+        "price": price if market != "kr_stock" else None,
         "estimated_price": price,
+        "exchange": record.get("exchange"),
         "reason": "paper scout recovery after finance_decision_model CALL_TOOL loop with complete tool evidence",
         "recovery": True,
     }
@@ -691,6 +709,7 @@ def _finance_wait_probe_order_plan(
     record: dict[str, Any],
     tool_results: dict[str, Any],
     primary_symbol: str,
+    primary_market: str,
     open_markets: list[str] | None,
     capital_limit: float | None,
     evidence_ids: list[Any],
@@ -721,12 +740,23 @@ def _finance_wait_probe_order_plan(
         return None
 
     symbol = str(record.get("symbol") or primary_symbol).strip()
-    market = str(record.get("market") or "kr_stock").lower() or "kr_stock"
+    market = str(record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
     price = _tool_quote_price(tool_results)
-    if not symbol or market != "kr_stock" or price <= 0:
+    if not symbol or market not in _PAPER_SPOT_MARKETS or price <= 0:
         return None
-    if _owned_quantity(tool_results, symbol, market) > 0:
-        return None
+    owned = int(_owned_quantity(tool_results, symbol, market))
+    if owned > 0:
+        return {
+            "action": "SELL",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": price if market != "kr_stock" else None,
+            "estimated_price": price,
+            "exchange": record.get("exchange"),
+            "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
+            "recovery": True,
+        }
     max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
     risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
     quantity = _paper_quantity_from_budget(
@@ -741,8 +771,9 @@ def _finance_wait_probe_order_plan(
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": None,
+        "price": price if market != "kr_stock" else None,
         "estimated_price": price,
+        "exchange": record.get("exchange"),
         "reason": "paper scout recovery after complete WAIT/no-order finance decision",
         "recovery": True,
     }
@@ -766,10 +797,11 @@ async def _execute_finance_paper_order(
     order = Order(
         symbol=plan["symbol"],
         side=OrderSide(plan["action"].lower()),
-        order_type=OrderType.MARKET,
+        order_type=OrderType.LIMIT if plan.get("price") is not None else OrderType.MARKET,
         quantity=float(plan["quantity"]),
         price=plan.get("price"),
         market=Market(plan["market"]),
+        exchange=plan.get("exchange"),
     )
     result = await trading.submit_order(order)
     effective_price = float(result.filled_price or plan.get("estimated_price") or 0)
@@ -788,6 +820,7 @@ async def _execute_finance_paper_order(
         "filled_price": effective_price,
         "status": result.status,
         "market": result.market.value,
+        "exchange": plan.get("exchange") or result.metadata.get("exchange"),
         "paper_trade_only": True,
         "recovery": bool(plan.get("recovery")),
         "source_record_type": record.get("record_type"),
@@ -832,6 +865,7 @@ async def _execute_finance_paper_order(
         "action": plan["action"],
         "symbol": plan["symbol"],
         "quantity": plan["quantity"],
+        "market": plan["market"],
         "status": result.status,
         "order_id": result.order_id,
         "paper_trade_only": True,
@@ -1029,6 +1063,33 @@ def _should_use_local_finance_flow(agent: BaseAgent) -> bool:
     )
 
 
+def _parse_finance_symbol_spec(spec: str, fallback_market: str) -> tuple[str, str]:
+    value = spec.strip()
+    if not value:
+        return "", fallback_market
+    if ":" in value:
+        maybe_market, symbol = value.split(":", 1)
+        market = maybe_market.strip().lower() or fallback_market
+        return symbol.strip(), market
+    if "@" in value:
+        symbol, maybe_market = value.split("@", 1)
+        market = maybe_market.strip().lower() or fallback_market
+        return symbol.strip(), market
+    market = "kr_stock" if value.isdigit() and len(value) == 6 else fallback_market
+    return value, market
+
+
+def _finance_cycle_symbol_market(cycle_number: int, symbols: list[str] | None) -> tuple[str, str, list[str]]:
+    configured = [item.strip() for item in settings.local_finance_default_symbols.split(",") if item.strip()]
+    candidates = symbols or configured or [settings.local_finance_default_symbol]
+    selected = candidates[(max(cycle_number, 1) - 1) % len(candidates)]
+    symbol, market = _parse_finance_symbol_spec(selected, settings.local_finance_default_market)
+    if not symbol:
+        symbol = settings.local_finance_default_symbol
+        market = settings.local_finance_default_market
+    return symbol, market, candidates
+
+
 def _finance_cycle_prompt(agent: BaseAgent, cycle_number: int, symbols: list[str] | None) -> str:
     symbol_text = ",".join(symbols or []) if symbols else ""
     return (
@@ -1062,7 +1123,7 @@ async def _run_local_finance_agent_cycle(
         recorder=recorder,
         input_text="pre-cycle finance trader state observation before tool collection",
     )
-    primary_symbol = (symbols or [settings.local_finance_default_symbol])[0]
+    primary_symbol, primary_market, finance_symbols = _finance_cycle_symbol_market(cycle_number, symbols)
     agent_state = {
         "deployment_mode": "paper" if settings.kis_is_paper else "shadow",
         "live_order_enabled": False,
@@ -1070,8 +1131,8 @@ async def _run_local_finance_agent_cycle(
         "agent_id": str(agent.agent_id),
         "agent_name": agent.name,
         "symbol": primary_symbol,
-        "symbols": symbols or [primary_symbol],
-        "market": "kr_stock",
+        "symbols": finance_symbols,
+        "market": primary_market,
         "open_markets": open_markets or [],
         "capital_limit": capital_limit,
         "risk_per_trade_pct": settings.local_finance_risk_per_trade_pct,
@@ -1090,7 +1151,7 @@ async def _run_local_finance_agent_cycle(
             trading=trading,
             market_data=market_data,
             symbol=primary_symbol,
-            market="kr_stock",
+            market=primary_market,
             open_markets=open_markets,
             capital_limit=capital_limit,
             evidence=payload.get("evidence") if isinstance(payload.get("evidence"), list) else [],
@@ -1100,7 +1161,7 @@ async def _run_local_finance_agent_cycle(
     errors: list[str] = []
     result = await run_local_finance_decision_pipeline(
         request_id=f"{agent.agent_id}:{cycle_number}",
-        user_question=_finance_cycle_prompt(agent, cycle_number, symbols),
+        user_question=_finance_cycle_prompt(agent, cycle_number, finance_symbols),
         agent_state=agent_state,
         required_safety=required_safety,
         collect_tool_results=_collect_tool_results,
@@ -1149,6 +1210,7 @@ async def _run_local_finance_agent_cycle(
         decision=decision_payload,
         tool_results=tool_results,
         primary_symbol=primary_symbol,
+        primary_market=primary_market,
         open_markets=open_markets,
         capital_limit=capital_limit,
     )
@@ -1157,6 +1219,7 @@ async def _run_local_finance_agent_cycle(
             record=record,
             tool_results=tool_results,
             primary_symbol=primary_symbol,
+            primary_market=primary_market,
             open_markets=open_markets,
             capital_limit=capital_limit,
         )
@@ -1165,6 +1228,7 @@ async def _run_local_finance_agent_cycle(
             record=record,
             tool_results=tool_results,
             primary_symbol=primary_symbol,
+            primary_market=primary_market,
             open_markets=open_markets,
             capital_limit=capital_limit,
             evidence_ids=evidence_ids,

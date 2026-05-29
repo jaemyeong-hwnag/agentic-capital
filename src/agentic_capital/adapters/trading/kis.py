@@ -2,16 +2,18 @@
 
 Supported markets:
   - kr_stock   : 국내주식 (KOSPI/KOSDAQ) — paper + real
-  - us_stock   : 미국주식 (NYSE/NASDAQ/AMEX) — real only
-  - hk_stock   : 홍콩주식 — real only
-  - cn_stock   : 중국주식 (상하이/선전) — real only
-  - jp_stock   : 일본주식 — real only
-  - vn_stock   : 베트남주식 — real only
+  - us_stock   : 미국주식 (NYSE/NASDAQ/AMEX) — local paper fill + real
+  - hk_stock   : 홍콩주식 — local paper fill + real
+  - cn_stock   : 중국주식 (상하이/선전) — local paper fill + real
+  - jp_stock   : 일본주식 — local paper fill + real
+  - vn_stock   : 베트남주식 — local paper fill + real
   - kr_futures : 국내선물 — paper + real
   - kr_options : 국내옵션 — paper + real
 
-KIS paper trading (모의투자) only supports kr_stock and kr_futures/options.
-Overseas stock orders require a real trading account.
+KIS paper trading (모의투자) only supports kr_stock and kr_futures/options
+through the broker API. Overseas stock paper orders are executed by a local
+paper fill path so the agent workflow, recorder, and monitoring stay unified
+without switching to a real account.
 """
 
 from __future__ import annotations
@@ -156,7 +158,8 @@ class KISTradingAdapter(TradingPort):
     """KIS Open API adapter supporting all available markets.
 
     Domestic stocks support both paper and live modes.
-    Overseas stocks require a live (real) trading account.
+    Overseas stocks use local paper fills in paper mode and KIS endpoints in
+    live mode.
     Futures/options support both modes (limited paper support).
     """
 
@@ -164,6 +167,10 @@ class KISTradingAdapter(TradingPort):
         if session is None:
             session = KISSession()
         self._session = session
+        self._paper_overseas_positions: dict[tuple[Market, str, str], Position] = {}
+        self._paper_overseas_fills: list[OrderResult] = []
+        self._paper_overseas_orders: dict[str, OrderResult] = {}
+        self._paper_overseas_order_seq = 0
         logger.info(
             "kis_adapter_initialized",
             mode="paper" if session.is_paper else "LIVE",
@@ -186,8 +193,30 @@ class KISTradingAdapter(TradingPort):
     def _assert_real_for_overseas(self) -> None:
         if self._session.is_paper:
             raise NotImplementedError(
-                "ERR:paper_no_overseas|KIS_IS_PAPER=true blocks overseas orders|set KIS_IS_PAPER=false for real account"
+                "ERR:paper_no_broker_overseas|KIS paper API does not support overseas broker endpoints"
             )
+
+    @staticmethod
+    def _overseas_currency(market: Market) -> str:
+        return {
+            Market.US_STOCK: "USD",
+            Market.HK_STOCK: "HKD",
+            Market.CN_STOCK: "CNY",
+            Market.JP_STOCK: "JPY",
+            Market.VN_STOCK: "VND",
+        }.get(market, "USD")
+
+    @staticmethod
+    def _paper_overseas_key(order: Order) -> tuple[Market, str, str]:
+        exchange = _exchange_code(order)
+        return (order.market, exchange, order.symbol)
+
+    def _paper_overseas_position_list(self) -> list[Position]:
+        return [
+            p
+            for p in self._paper_overseas_positions.values()
+            if p.quantity > 0
+        ]
 
     @staticmethod
     def _token_expired(data: dict[str, Any]) -> bool:
@@ -385,9 +414,18 @@ class KISTradingAdapter(TradingPort):
         Args:
             currency: Account currency code (e.g., "USD", "HKD", "CNY", "JPY").
 
-        Raises:
-            NotImplementedError: In paper mode.
+        In paper mode this returns a local paper balance summary for virtual
+        overseas fills, because KIS does not expose overseas paper endpoints.
         """
+        if self._session.is_paper:
+            positions = [
+                p for p in self._paper_overseas_position_list()
+                if p.currency == currency
+            ]
+            total = sum(p.current_price * p.quantity for p in positions)
+            pnl = sum(p.unrealized_pnl for p in positions)
+            return Balance(total=total, available=0.0, currency=currency, daily_pnl=pnl)
+
         self._assert_real_for_overseas()
         await self._session.ensure_token()
         try:
@@ -458,8 +496,10 @@ class KISTradingAdapter(TradingPort):
         else:
             futures = []
 
-        # Overseas positions: real account only
-        if not self._session.is_paper and not is_futures_account:
+        # Overseas positions: real account via KIS, paper mode via local virtual fills.
+        if self._session.is_paper:
+            overseas = self._paper_overseas_position_list()
+        elif not is_futures_account:
             try:
                 overseas = await self._get_overseas_positions()
             except Exception:
@@ -869,7 +909,14 @@ class KISTradingAdapter(TradingPort):
             raise
 
     async def _submit_overseas_order(self, order: Order) -> OrderResult:
-        """해외주식 주문 (real mode only)."""
+        """해외주식 주문.
+
+        KIS paper does not provide overseas spot broker endpoints, so paper
+        mode is filled locally and returned through the same OrderResult path.
+        """
+        if self._session.is_paper:
+            return self._submit_paper_overseas_order(order)
+
         self._assert_real_for_overseas()
         await self._session.ensure_token()
         excg_cd = _exchange_code(order)
@@ -920,6 +967,112 @@ class KISTradingAdapter(TradingPort):
         except Exception:
             logger.exception("kis_submit_overseas_order_failed", symbol=order.symbol, exchange=excg_cd)
             raise
+
+    def _submit_paper_overseas_order(self, order: Order) -> OrderResult:
+        excg_cd = _exchange_code(order)
+        key = self._paper_overseas_key(order)
+        existing = self._paper_overseas_positions.get(key)
+        fill_price = float(order.price or 0.0)
+
+        if order.side == OrderSide.SELL:
+            owned_qty = existing.quantity if existing else 0.0
+            if order.quantity > owned_qty:
+                return OrderResult(
+                    order_id="",
+                    symbol=order.symbol,
+                    side=order.side,
+                    quantity=0.0,
+                    filled_price=0.0,
+                    status="rejected",
+                    market=order.market,
+                    metadata={
+                        "exchange": excg_cd,
+                        "paper_virtual": True,
+                        "reason": "insufficient_position",
+                    },
+                )
+            fill_price = fill_price or (existing.current_price if existing else 0.0)
+        elif fill_price <= 0:
+            return OrderResult(
+                order_id="",
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                filled_price=0.0,
+                status="rejected",
+                market=order.market,
+                metadata={
+                    "exchange": excg_cd,
+                    "paper_virtual": True,
+                    "reason": "price_required_for_paper_overseas",
+                },
+            )
+
+        self._paper_overseas_order_seq += 1
+        order_id = f"PAPER-OVS-{datetime.now().strftime('%Y%m%d%H%M%S')}-{self._paper_overseas_order_seq:04d}"
+        currency = self._overseas_currency(order.market)
+
+        if order.side == OrderSide.BUY:
+            old_qty = existing.quantity if existing else 0.0
+            old_avg = existing.avg_price if existing else 0.0
+            new_qty = old_qty + order.quantity
+            new_avg = ((old_qty * old_avg) + (order.quantity * fill_price)) / new_qty
+            self._paper_overseas_positions[key] = Position(
+                symbol=order.symbol,
+                quantity=new_qty,
+                avg_price=new_avg,
+                current_price=fill_price,
+                unrealized_pnl=(fill_price - new_avg) * new_qty,
+                unrealized_pnl_pct=((fill_price - new_avg) / new_avg * 100) if new_avg else 0.0,
+                market=order.market,
+                exchange=excg_cd,
+                currency=currency,
+            )
+        else:
+            remaining_qty = (existing.quantity if existing else 0.0) - order.quantity
+            if remaining_qty <= 0:
+                self._paper_overseas_positions.pop(key, None)
+            elif existing:
+                self._paper_overseas_positions[key] = Position(
+                    symbol=existing.symbol,
+                    quantity=remaining_qty,
+                    avg_price=existing.avg_price,
+                    current_price=fill_price,
+                    unrealized_pnl=(fill_price - existing.avg_price) * remaining_qty,
+                    unrealized_pnl_pct=((fill_price - existing.avg_price) / existing.avg_price * 100)
+                    if existing.avg_price else 0.0,
+                    market=existing.market,
+                    exchange=existing.exchange,
+                    currency=existing.currency,
+                )
+
+        result = OrderResult(
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_price=fill_price,
+            status="filled",
+            market=order.market,
+            metadata={
+                "exchange": excg_cd,
+                "paper_virtual": True,
+                "broker": "local_paper_overseas",
+                "currency": currency,
+            },
+        )
+        self._paper_overseas_orders[order_id] = result
+        self._paper_overseas_fills.append(result)
+        logger.info(
+            "kis_paper_overseas_order_filled",
+            order_id=order_id,
+            symbol=order.symbol,
+            exchange=excg_cd,
+            side=order.side.value,
+            quantity=order.quantity,
+            price=fill_price,
+        )
+        return result
 
     async def _submit_futures_order(self, order: Order) -> OrderResult:
         """국내선물/옵션 주문."""
@@ -1094,13 +1247,17 @@ class KISTradingAdapter(TradingPort):
             raise
 
     async def cancel_overseas_order(self, order_id: str, exchange: str, symbol: str) -> bool:
-        """Cancel an overseas stock order (real mode only).
+        """Cancel an overseas stock order.
 
         Args:
             order_id: Original order number (ODNO).
             exchange: Exchange code (e.g., "NASD", "NYSE").
             symbol: Stock symbol.
         """
+        if self._session.is_paper:
+            result = self._paper_overseas_orders.get(order_id)
+            return bool(result and result.status == "submitted")
+
         self._assert_real_for_overseas()
         await self._session.ensure_token()
         try:
@@ -1285,12 +1442,15 @@ class KISTradingAdapter(TradingPort):
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> list[OrderResult]:
-        """Get overseas stock order fill history (real mode only).
+        """Get overseas stock order fill history.
 
         Args:
             start_date: YYYYMMDD format. Defaults to today.
             end_date: YYYYMMDD format. Defaults to today.
         """
+        if self._session.is_paper:
+            return list(self._paper_overseas_fills)
+
         self._assert_real_for_overseas()
         await self._session.ensure_token()
         today = datetime.now().strftime("%Y%m%d")

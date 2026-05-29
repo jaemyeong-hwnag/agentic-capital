@@ -226,17 +226,44 @@ class TestBuildAgentTools:
         assert result.startswith("ERR:")
 
     @pytest.mark.asyncio
-    async def test_submit_order_blocks_overseas_in_kis_paper_mode(self):
+    async def test_submit_order_allows_overseas_local_paper_fill_in_kis_paper_mode(self):
+        from agentic_capital.ports.trading import Market, OrderResult, OrderSide
+
         trading = _make_trading()
+        trading.submit_order = AsyncMock(return_value=OrderResult(
+            order_id="PAPER-OVS-1",
+            symbol="AAPL",
+            side=OrderSide.BUY,
+            quantity=1,
+            filled_price=185.0,
+            status="filled",
+            market=Market.US_STOCK,
+            metadata={"paper_virtual": True, "exchange": "NASD"},
+        ))
+        market_data = _make_market_data(price=185.0)
         with patch("agentic_capital.core.tools.data_query.settings.kis_is_paper", True):
-            tools, decisions, _, _ = build_agent_tools(trading=trading, agent_name="Trader-1")
+            tools, decisions, _, _ = build_agent_tools(
+                trading=trading,
+                market_data=market_data,
+                agent_name="Trader-1",
+            )
             tool = next(t for t in tools if t.name == "submit_order")
 
-            result = await tool.coroutine(symbol="AAPL", side="buy", quantity=1, market="us_stock")
+            result = await tool.coroutine(
+                symbol="AAPL",
+                side="buy",
+                quantity=1,
+                market="us_stock",
+                exchange="NASD",
+            )
 
-        assert "ERR:paper_no_overseas" in result
-        trading.submit_order.assert_not_awaited()
-        assert decisions == []
+        assert "PAPER-OVS-1" in result
+        assert "filled" in result
+        submitted = trading.submit_order.await_args.args[0]
+        assert submitted.market == Market.US_STOCK
+        assert submitted.price == 185.0
+        assert decisions[0]["symbol"] == "AAPL"
+        assert decisions[0]["market"] == "us_stock"
 
     @pytest.mark.asyncio
     async def test_cancel_order_tool(self):

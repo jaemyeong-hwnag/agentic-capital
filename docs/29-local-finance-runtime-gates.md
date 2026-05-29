@@ -42,7 +42,7 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 - `SIMULATION_ZERO_DECISION_MAX_CYCLES`: 연속 `decisions=0` cycle이 임계값 이상이면 자동 stop
 - `SIMULATION_MIN_CYCLE_SECONDS`: agent가 `next_cycle_seconds=0`을 반환해도 최소 sleep으로 clamp
 - `SIMULATION_STOP_WHEN_MARKET_CLOSED`: 켜져 있으면 장 마감 상태에서 0초 재시도 대신 stop
-- `KIS_IS_PAPER=true`에서 `submit_order`가 해외 현물 시장(`us_stock`, `hk_stock`, `cn_stock`, `jp_stock`, `vn_stock`)을 받으면 broker 호출 전에 `ERR:paper_no_overseas`로 중단한다.
+- `KIS_IS_PAPER=true`에서 KRX 현물은 KIS paper API로 제출하고, 해외 현물 시장(`us_stock`, `hk_stock`, `cn_stock`, `jp_stock`, `vn_stock`)은 KIS broker 해외 API를 호출하지 않고 로컬 paper fill로 체결/포지션/체결내역을 기록한다.
 
 기본값은 zero-decision 5 cycles, minimum pacing 60 seconds다.
 
@@ -88,11 +88,11 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   system instruction은 `CALL_TOOL` 반복 대신 `HOLD`/`WAIT`와
   `no_trade_reason=insufficient_edge`를 요구한다.
 - `call_tool_loop_with_sufficient_tool_evidence`는 raw model failure로 반드시 기록하되,
-  complete tool evidence, open KRX session, cash, quote, risk limit, empty position이 확인되면
+  complete tool evidence, open market session, cash, quote, risk limit, empty position이 확인되면
   agentic-capital이 tiny paper scout order를 제출해 운영 loop를 복구할 수 있다. 이 주문 브리지는
   `KIS_IS_PAPER=true`, `FUTURES_LIVE_ORDERS_ENABLED=false`,
   `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`일 때만 동작하고 live 주문 권한이 아니다.
-- KRX 종목 1주 가격이 `LOCAL_FINANCE_RISK_PER_TRADE_PCT`로 산정한 risk budget보다 커도,
+- KRX/해외 현물 종목 1주 가격이 `LOCAL_FINANCE_RISK_PER_TRADE_PCT`로 산정한 risk budget보다 커도,
   총 주문 가능 한도(`available`, `max_order_value`, `capital_limit`) 안에 1주가 들어오면
   minimum board-lot paper scout로 1주를 제출한다. 그렇지 않으면 quantity는 0으로 유지되고 주문하지 않는다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
@@ -124,8 +124,9 @@ paper order bridge:
 - finance sidecar는 주문을 직접 실행하지 않는다. `finance_decision_model`은 `paper_order_intent`와 `would_submit_order=true` 같은 intent telemetry만 반환한다.
 - agentic-capital은 Trader finance cycle 안에서만 `paper_order_intent`를 읽고, market open, risk limit, available cash, position cap, paper-only safety를 다시 검증한 뒤 `trading.submit_order`를 호출한다.
 - recoverable `CALL_TOOL` loop나 complete evidence가 있는 `trade_missing_notional`은 raw failure로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
-- 정상 JSON인 `finance_paper_shadow_decision`이 `WAIT / would_submit_order=false`만 반환해 paper loop가 자본을 전혀 배치하지 못하는 경우도 운영 복구 대상이다. `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`, KIS paper, KRX open, evidence 존재, risk flag 없음, 무보유 종목, 1주 가격이 max order/capital gate 안에 들어오는 조건에서만 tiny scout BUY를 제출한다. 이는 live 주문 권한이 아니며, finance/psychology 모델이 주문 권한을 갖는다는 뜻도 아니다.
+- 정상 JSON인 `finance_paper_shadow_decision`이 `WAIT / would_submit_order=false`만 반환해 paper loop가 자본을 전혀 배치하지 못하는 경우도 운영 복구 대상이다. `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`, KIS paper, 대상 market open, evidence 존재, risk flag 없음, 무보유 종목, 1주 가격이 max order/capital gate 안에 들어오는 조건에서만 tiny scout BUY를 제출한다. 이는 live 주문 권한이 아니며, finance/psychology 모델이 주문 권한을 갖는다는 뜻도 아니다.
 - paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
+- 해외 현물 paper order는 `PAPER-OVS-*` 주문번호와 `paper_virtual=true`, `broker=local_paper_overseas` metadata를 남긴다. KIS 실전 해외 broker endpoint는 `KIS_IS_PAPER=false`일 때만 사용된다.
 - 매 cycle 종료 후 `agentic-capital`은 broker/KIS 포지션을 다시 읽어 `positions` snapshot을 동기화한다.
   따라서 KIS paper 주문 제출 이후 broker position count와 DB recorder가 장시간 갈라지면
   `agentic-capital`의 reconciliation/recorder 문제로 분류한다. 이 동기화는 read-only broker 조회와
