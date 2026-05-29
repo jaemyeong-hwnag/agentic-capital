@@ -22,6 +22,7 @@ from agentic_capital.graph.workflow import (
     _extract_psychology_context,
     _extract_tool_sequence,
     _filter_tools_for_agent,
+    _paper_quantity_from_budget,
     _psychology_cycle_input,
     run_agent_cycle,
 )
@@ -112,6 +113,16 @@ def _psychology_result(phase: str = "post_agent_cycle") -> dict:
             ],
         },
     }
+
+
+def test_paper_quantity_uses_minimum_share_when_within_order_limit() -> None:
+    quantity = _paper_quantity_from_budget(
+        price=314_000,
+        max_order_value=5_000_000,
+        risk_budget=250_000,
+    )
+
+    assert quantity == 1
 
 
 def test_extract_tool_sequence_preserves_duplicate_local_call_ids_in_order() -> None:

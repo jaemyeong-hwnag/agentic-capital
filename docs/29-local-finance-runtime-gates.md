@@ -92,6 +92,9 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   agentic-capital이 tiny paper scout order를 제출해 운영 loop를 복구할 수 있다. 이 주문 브리지는
   `KIS_IS_PAPER=true`, `FUTURES_LIVE_ORDERS_ENABLED=false`,
   `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`일 때만 동작하고 live 주문 권한이 아니다.
+- KRX 종목 1주 가격이 `LOCAL_FINANCE_RISK_PER_TRADE_PCT`로 산정한 risk budget보다 커도,
+  총 주문 가능 한도(`available`, `max_order_value`, `capital_limit`) 안에 1주가 들어오면
+  minimum board-lot paper scout로 1주를 제출한다. 그렇지 않으면 quantity는 0으로 유지되고 주문하지 않는다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
   paper/shadow mode에서는 deterministic fallback plan을 사용한다:
   `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.

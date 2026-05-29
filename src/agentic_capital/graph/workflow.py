@@ -571,6 +571,14 @@ def _max_paper_order_value(
     return min(positive) if positive else 0.0
 
 
+def _paper_quantity_from_budget(*, price: float, max_order_value: float, risk_budget: float) -> int:
+    if price <= 0 or max_order_value < price or risk_budget <= 0:
+        return 0
+    if risk_budget < price:
+        return 1
+    return max(1, int(risk_budget // price))
+
+
 def _finance_paper_order_plan(
     *,
     record: dict[str, Any],
@@ -608,7 +616,11 @@ def _finance_paper_order_plan(
     if quantity <= 0 and action == "BUY" and price > 0:
         max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
         risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
-        quantity = max(1, int(risk_budget // price)) if risk_budget >= price else 0
+        quantity = _paper_quantity_from_budget(
+            price=price,
+            max_order_value=max_order_value,
+            risk_budget=risk_budget,
+        )
     if action == "SELL":
         owned = int(_owned_quantity(tool_results, symbol, market))
         quantity = min(quantity, owned)
@@ -655,7 +667,11 @@ def _finance_loop_probe_order_plan(
         return None
     max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
     risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
-    quantity = max(1, int(risk_budget // price)) if risk_budget >= price else 0
+    quantity = _paper_quantity_from_budget(
+        price=price,
+        max_order_value=max_order_value,
+        risk_budget=risk_budget,
+    )
     if quantity <= 0:
         return None
     return {
