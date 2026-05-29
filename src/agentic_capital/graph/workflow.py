@@ -68,6 +68,18 @@ _MARKET_STATUS_ANSWER_PHRASES = (
     "현재 세션으로는",
 )
 
+_PORTFOLIO_STATE_CLAIM_PHRASES = (
+    "current positions:",
+    "avg prices:",
+    "average prices:",
+    "unrealized p&l",
+    "unrealized p&ls",
+    "unrealized pnl",
+    "보유 포지션:",
+    "평균 단가:",
+    "미실현 손익",
+)
+
 _NON_KO_EN_MARKERS = (
     "¿",
     "¡",
@@ -398,6 +410,9 @@ def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
         issues.append("generic_assistant_response")
     if any(phrase in normalized for phrase in _MARKET_STATUS_ANSWER_PHRASES):
         issues.append("market_status_as_final_answer")
+    portfolio_state_claims = sum(1 for phrase in _PORTFOLIO_STATE_CLAIM_PHRASES if phrase in normalized)
+    if portfolio_state_claims >= 2:
+        issues.append("unsupported_portfolio_state_claim")
     if any(marker in normalized for marker in _NON_KO_EN_MARKERS) or any(
         "\u0900" <= char <= "\u097f" for char in reasoning
     ):

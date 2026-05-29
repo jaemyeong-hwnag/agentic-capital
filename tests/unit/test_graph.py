@@ -338,6 +338,14 @@ class TestAgentToolFiltering:
             "ceo",
             "OBS|가상_symbol|현재 세션으로는 거래되지 않는 symbol 입니다. TRADER_TASK|대기.",
         )
+        assert "unsupported_portfolio_state_claim" in _agent_response_quality_issues(
+            "ceo",
+            (
+                "OBS|KRX market session: POST|Current positions: 0.7/0.45|"
+                "Avg prices: KRX: 1,200.00 KRX: 3,500.00|"
+                "Unrealized P&Ls: KRX: -300 KRX: 1,000|NEXT|"
+            ),
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
