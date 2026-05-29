@@ -277,7 +277,7 @@ def test_sell_over_owned_position_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
-def test_small_trade_with_evidence_tools_and_risk_limit_is_record_only() -> None:
+def test_small_trade_with_evidence_tools_and_risk_limit_marks_paper_order_intent() -> None:
     record = build_finance_shadow_record(
         {
             "action": "BUY",
@@ -294,7 +294,9 @@ def test_small_trade_with_evidence_tools_and_risk_limit_is_record_only() -> None
     assert record["notional"] == 140_000
     assert record["within_risk_limit"] is True
     assert record["paper_trade_only"] is True
-    assert record["would_submit_order"] is False
+    assert record["would_submit_order"] is True
+    assert record["quantity"] == 2
+    assert record["price"] == 70_000
     assert set(record["tool_result_names"]) == {
         "get_balance",
         "get_positions",

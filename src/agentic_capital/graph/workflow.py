@@ -498,6 +498,270 @@ def _finance_failure_recovery_decision(
     }
 
 
+def _market_session_open(tool_results: dict[str, Any], open_markets: list[str] | None) -> bool:
+    session = tool_results.get("get_market_session")
+    if isinstance(session, dict):
+        state = str(session.get("state") or session.get("status") or "").lower()
+        if state in {"open", "regular", "regular_open"}:
+            return True
+        if state in {"closed", "halted", "suspended", "pre", "preopen", "post", "after_hours"}:
+            return False
+    return any(str(market).upper() == "KRX" for market in (open_markets or []))
+
+
+def _tool_quote_price(tool_results: dict[str, Any]) -> float:
+    quote = tool_results.get("get_quote")
+    if not isinstance(quote, dict):
+        return 0.0
+    for key in ("price", "last", "close"):
+        try:
+            value = float(quote.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _owned_quantity(tool_results: dict[str, Any], symbol: str, market: str) -> float:
+    positions = tool_results.get("get_positions")
+    if not isinstance(positions, list):
+        return 0.0
+    owned = 0.0
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        if str(position.get("symbol") or "") != symbol:
+            continue
+        position_market = str(position.get("market") or market or "kr_stock").lower()
+        if market and position_market != market:
+            continue
+        try:
+            owned += float(position.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+    return owned
+
+
+def _max_paper_order_value(
+    *,
+    tool_results: dict[str, Any],
+    capital_limit: float | None,
+) -> float:
+    balance = tool_results.get("get_balance")
+    risk_limit = tool_results.get("get_risk_limit")
+    values: list[float] = []
+    if isinstance(balance, dict):
+        try:
+            values.append(float(balance.get("available") or 0))
+        except (TypeError, ValueError):
+            pass
+    if isinstance(risk_limit, dict):
+        for key in ("max_order_value", "max_trade_value"):
+            try:
+                value = float(risk_limit.get(key) or 0)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > 0:
+                values.append(value)
+    if capital_limit is not None:
+        values.append(float(capital_limit))
+    positive = [value for value in values if value > 0]
+    return min(positive) if positive else 0.0
+
+
+def _finance_paper_order_plan(
+    *,
+    record: dict[str, Any],
+    decision: dict[str, Any],
+    tool_results: dict[str, Any],
+    primary_symbol: str,
+    open_markets: list[str] | None,
+    capital_limit: float | None,
+) -> dict[str, Any] | None:
+    """Build a strict paper-only order plan from validated finance output."""
+    if not settings.local_finance_paper_order_execution_enabled:
+        return None
+    if not settings.kis_is_paper or settings.futures_live_orders_enabled:
+        return None
+    if not _market_session_open(tool_results, open_markets):
+        return None
+    action = str(decision.get("action") or record.get("action") or "").upper()
+    symbol = str(decision.get("symbol") or record.get("symbol") or primary_symbol).strip()
+    market = str(decision.get("market") or record.get("market") or "kr_stock").lower() or "kr_stock"
+    if action not in {"BUY", "SELL"} or not symbol or market != "kr_stock":
+        return None
+    if record.get("paper_trade_only") is not True:
+        return None
+    if record.get("within_risk_limit") is False:
+        return None
+    if record.get("would_submit_order") is not True:
+        return None
+
+    price = _tool_quote_price(tool_results)
+    requested_quantity = decision.get("quantity") or record.get("quantity") or decision.get("qty") or 0
+    try:
+        quantity = int(float(requested_quantity or 0))
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity <= 0 and action == "BUY" and price > 0:
+        max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
+        risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
+        quantity = max(1, int(risk_budget // price)) if risk_budget >= price else 0
+    if action == "SELL":
+        owned = int(_owned_quantity(tool_results, symbol, market))
+        quantity = min(quantity, owned)
+    if quantity <= 0:
+        return None
+    return {
+        "action": action,
+        "symbol": symbol,
+        "market": market,
+        "quantity": quantity,
+        "price": None,
+        "estimated_price": price,
+        "reason": str(decision.get("reason") or decision.get("rationale") or record.get("no_trade_reason") or ""),
+        "recovery": False,
+    }
+
+
+def _finance_loop_probe_order_plan(
+    *,
+    record: dict[str, Any],
+    tool_results: dict[str, Any],
+    primary_symbol: str,
+    open_markets: list[str] | None,
+    capital_limit: float | None,
+) -> dict[str, Any] | None:
+    """Recover repeated local finance CALL_TOOL loops with a tiny paper scout order."""
+    if not settings.local_finance_paper_probe_on_model_loop:
+        return None
+    if str(record.get("failure_type") or "") not in _RECOVERABLE_FINANCE_RAW_FAILURES:
+        return None
+    if not settings.local_finance_paper_order_execution_enabled:
+        return None
+    if not settings.kis_is_paper or settings.futures_live_orders_enabled:
+        return None
+    if not _market_session_open(tool_results, open_markets):
+        return None
+
+    symbol = str(record.get("symbol") or primary_symbol).strip()
+    market = str(record.get("market") or "kr_stock").lower() or "kr_stock"
+    price = _tool_quote_price(tool_results)
+    if not symbol or market != "kr_stock" or price <= 0:
+        return None
+    if _owned_quantity(tool_results, symbol, market) > 0:
+        return None
+    max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
+    risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
+    quantity = max(1, int(risk_budget // price)) if risk_budget >= price else 0
+    if quantity <= 0:
+        return None
+    return {
+        "action": "BUY",
+        "symbol": symbol,
+        "market": market,
+        "quantity": quantity,
+        "price": None,
+        "estimated_price": price,
+        "reason": "paper scout recovery after finance_decision_model CALL_TOOL loop with complete tool evidence",
+        "recovery": True,
+    }
+
+
+async def _execute_finance_paper_order(
+    *,
+    agent: BaseAgent,
+    plan: dict[str, Any],
+    trading: Any,
+    market_data: Any,
+    recorder: Any,
+    cycle_number: int,
+    record: dict[str, Any],
+    sidecar_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Submit and record an autonomous Trader paper order under local-only safety."""
+    from agentic_capital.core.decision.pipeline import TradingDecision
+    from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
+
+    order = Order(
+        symbol=plan["symbol"],
+        side=OrderSide(plan["action"].lower()),
+        order_type=OrderType.MARKET,
+        quantity=float(plan["quantity"]),
+        price=plan.get("price"),
+        market=Market(plan["market"]),
+    )
+    result = await trading.submit_order(order)
+    effective_price = float(result.filled_price or plan.get("estimated_price") or 0)
+    if not effective_price and market_data:
+        try:
+            quote = await market_data.get_quote(plan["symbol"])
+            effective_price = float(getattr(quote, "price", 0) or 0)
+        except Exception:
+            effective_price = 0.0
+
+    outcome = {
+        "order_id": result.order_id,
+        "symbol": result.symbol,
+        "side": result.side.value,
+        "quantity": result.quantity,
+        "filled_price": effective_price,
+        "status": result.status,
+        "market": result.market.value,
+        "paper_trade_only": True,
+        "recovery": bool(plan.get("recovery")),
+        "source_record_type": record.get("record_type"),
+        "source_failure_type": record.get("failure_type"),
+    }
+    decision = TradingDecision(
+        action=plan["action"],
+        symbol=plan["symbol"],
+        quantity=int(plan["quantity"]),
+        reason=plan["reason"],
+        confidence=0.0 if plan.get("recovery") else float(record.get("confidence") or 0.5),
+    )
+    if recorder:
+        await recorder.record_decision(
+            agent_id=agent.agent_id,
+            decision=decision,
+            personality=agent.personality,
+            emotion=agent.emotion,
+            status=str(result.status),
+            price=effective_price,
+            market=plan["market"],
+            context_snapshot={
+                "cycle_number": cycle_number,
+                "finance_record": record,
+                "paper_order_plan": plan,
+                "sidecar_stage_metrics": sidecar_calls,
+            },
+            outcome=outcome,
+        )
+    logger.info(
+        "local_finance_paper_order_submitted",
+        agent=agent.name,
+        cycle=cycle_number,
+        symbol=plan["symbol"],
+        side=plan["action"],
+        quantity=plan["quantity"],
+        status=result.status,
+        recovery=bool(plan.get("recovery")),
+    )
+    return {
+        "type": "paper_order_result",
+        "action": plan["action"],
+        "symbol": plan["symbol"],
+        "quantity": plan["quantity"],
+        "status": result.status,
+        "order_id": result.order_id,
+        "paper_trade_only": True,
+        "would_submit_order": True,
+        "recovery": bool(plan.get("recovery")),
+        "reason": plan["reason"],
+    }
+
+
 def _compact_psychology_decisions(decisions: list[dict] | None) -> list[dict]:
     compact: list[dict] = []
     for decision in (decisions or [])[:4]:
@@ -778,6 +1042,8 @@ async def _run_local_finance_agent_cycle(
     sidecar_latency_ms = result.get("sidecar_latency_ms")
     sidecar_calls = result.get("sidecar_calls", []) if isinstance(result.get("sidecar_calls"), list) else []
     first_failing_stage = result.get("first_failing_stage")
+    decision_payload = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+    tool_results = result.get("tool_results") if isinstance(result.get("tool_results"), dict) else {}
 
     all_decisions: list[dict[str, Any]] = []
     if record_type == "finance_paper_shadow_decision" and action.upper() != "NO_CONTEXT":
@@ -799,6 +1065,56 @@ async def _run_local_finance_agent_cycle(
     if recovery_decision:
         all_decisions.append(recovery_decision)
 
+    paper_order_plan = _finance_paper_order_plan(
+        record=record,
+        decision=decision_payload,
+        tool_results=tool_results,
+        primary_symbol=primary_symbol,
+        open_markets=open_markets,
+        capital_limit=capital_limit,
+    )
+    if paper_order_plan is None:
+        paper_order_plan = _finance_loop_probe_order_plan(
+            record=record,
+            tool_results=tool_results,
+            primary_symbol=primary_symbol,
+            open_markets=open_markets,
+            capital_limit=capital_limit,
+        )
+    if paper_order_plan is not None:
+        if trading is None:
+            errors.append("paper_order_execution_failed:no_trading")
+        else:
+            try:
+                order_decision = await _execute_finance_paper_order(
+                    agent=agent,
+                    plan=paper_order_plan,
+                    trading=trading,
+                    market_data=market_data,
+                    recorder=recorder,
+                    cycle_number=cycle_number,
+                    record=record,
+                    sidecar_calls=sidecar_calls,
+                )
+                all_decisions.append(order_decision)
+                tool_results["submit_order"] = {
+                    "status": order_decision["status"],
+                    "order_id": order_decision["order_id"],
+                    "symbol": order_decision["symbol"],
+                    "side": order_decision["action"],
+                    "quantity": order_decision["quantity"],
+                    "paper_trade_only": True,
+                    "recovery": order_decision["recovery"],
+                }
+            except Exception as exc:
+                errors.append(f"paper_order_execution_failed:{type(exc).__name__}")
+                logger.warning(
+                    "local_finance_paper_order_failed",
+                    agent=agent.name,
+                    cycle=cycle_number,
+                    error=type(exc).__name__,
+                )
+
     await record_cycle(
         agent=agent,
         cycle_number=cycle_number,
@@ -809,7 +1125,6 @@ async def _run_local_finance_agent_cycle(
 
     cycle_completed_at = datetime.now()
     next_cycle_seconds = max(int(settings.simulation_min_cycle_seconds), 1)
-    tool_results = result.get("tool_results") if isinstance(result.get("tool_results"), dict) else {}
     tool_seq = [
         {"t": name, "in": "", "out": json.dumps(value, ensure_ascii=False, default=str)[:300]}
         for name, value in tool_results.items()

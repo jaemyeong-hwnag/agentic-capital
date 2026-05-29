@@ -26,6 +26,7 @@ from agentic_capital.graph.workflow import (
     run_agent_cycle,
 )
 from agentic_capital.ports.llm import LLMPort
+from agentic_capital.ports.trading import Market, OrderResult, OrderSide
 
 
 def _make_profile(name="Test"):
@@ -569,6 +570,7 @@ class TestRunAgentCycle:
 
         with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
              patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
+             patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", False), \
              patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock), \
              patch(
                  "agentic_capital.adapters.llm.local_finance_runtime.run_local_finance_decision_pipeline",
@@ -607,6 +609,84 @@ class TestRunAgentCycle:
             "paper_trade_only": True,
             "would_submit_order": False,
         }]
+
+    @pytest.mark.asyncio
+    async def test_local_finance_recoverable_loop_submits_paper_probe_order(self):
+        trading = _make_trading()
+        trading.submit_order = AsyncMock(return_value=OrderResult(
+            order_id="paper-1",
+            symbol="005930",
+            side=OrderSide.BUY,
+            quantity=3,
+            filled_price=0.0,
+            status="submitted",
+            market=Market.KR_STOCK,
+        ))
+        market_data = _make_market_data()
+        trader = TraderAgent(
+            profile=_make_profile("Trader"),
+            personality=create_random_personality(42),
+            llm=_make_llm(),
+            trading=trading,
+        )
+        recorder = _make_recorder()
+        recorder.record_raw_model_failure = AsyncMock()
+        recorder.record_agent_cycle = AsyncMock()
+        recorder.record_decision = AsyncMock()
+        pipeline_result = {
+            "record_type": "raw_model_failure",
+            "record": {
+                "record_type": "raw_model_failure",
+                "failure_type": "call_tool_loop_with_sufficient_tool_evidence",
+                "action": "CALL_TOOL",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "evidence_ids": ["ev-1"],
+            },
+            "decision": {"action": "CALL_TOOL", "reason": "missing_signal"},
+            "tool_results": {
+                "get_balance": {"available": 1_000_000},
+                "get_positions": [],
+                "get_quote": {"symbol": "005930", "price": 70000, "market": "kr_stock"},
+                "get_market_session": {"state": "regular"},
+                "get_risk_limit": {"max_order_value": 1_000_000},
+                "search_rag": {"evidence_ids": ["ev-1"]},
+            },
+            "evidence_ids": ["ev-1"],
+            "risk_flags": [],
+            "sidecar_latency_ms": 18,
+            "sidecar_calls": [{"stage": "finance_decision_model", "ok": True, "status_code": 200}],
+            "first_failing_stage": "finance_decision_model",
+        }
+
+        with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
+             patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
+             patch("agentic_capital.graph.workflow.settings.kis_is_paper", True), \
+             patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False), \
+             patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.25), \
+             patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock), \
+             patch(
+                 "agentic_capital.adapters.llm.local_finance_runtime.run_local_finance_decision_pipeline",
+                 AsyncMock(return_value=pipeline_result),
+             ):
+            result = await run_agent_cycle(
+                trader,
+                cycle_number=3,
+                trading=trading,
+                market_data=market_data,
+                symbols=["005930"],
+                open_markets=["KRX"],
+                recorder=recorder,
+                capital_limit=1_000_000,
+            )
+
+        trading.submit_order.assert_awaited_once()
+        submitted = trading.submit_order.await_args.args[0]
+        assert submitted.symbol == "005930"
+        assert submitted.side == OrderSide.BUY
+        assert submitted.quantity == 3
+        recorder.record_decision.assert_awaited_once()
+        assert any(item["type"] == "paper_order_result" for item in result["decisions"])
 
     @pytest.mark.asyncio
     async def test_agent_cycle_records_pre_post_psychology_context(self):

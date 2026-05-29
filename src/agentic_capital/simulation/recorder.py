@@ -490,7 +490,7 @@ class SimulationRecorder:
         sidecar_calls: list[dict[str, Any]] | None = None,
         first_failing_stage: str | None = None,
     ) -> None:
-        """Persist a local finance paper-shadow decision without creating trades."""
+        """Persist a local finance paper-shadow decision and intent telemetry."""
         action = str(record.get("action") or "")
         symbol = str(record.get("symbol") or "")
         evidence = evidence_ids if evidence_ids is not None else record.get("evidence_ids", [])
@@ -518,7 +518,8 @@ class SimulationRecorder:
                 outcome={
                     "record_type": "finance_paper_shadow_decision",
                     "paper_trade_only": True,
-                    "would_submit_order": False,
+                    "would_submit_order": bool(record.get("would_submit_order")),
+                    "order_status": record.get("order_status"),
                     "evidence_ids": evidence,
                     "risk_flags": risks,
                     "sidecar_stage_metrics": stage_metrics,

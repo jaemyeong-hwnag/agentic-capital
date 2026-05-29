@@ -575,7 +575,22 @@ def _call_tool_loop_with_sufficient_evidence(
     if any("missing_evidence" in str(flag) for flag in risk_flags):
         return True
     no_trade_reason = str(decision.get("no_trade_reason") or "")
-    return no_trade_reason in {"missing_evidence_review", "missing_evidence", "missing_tool_results"}
+    if no_trade_reason in {
+        "missing_evidence_review",
+        "missing_evidence",
+        "missing_tool_results",
+        "missing_signal",
+        "tool_collection_only",
+    }:
+        return True
+    requested_raw = decision.get("required_tools") or decision.get("tools") or []
+    if isinstance(requested_raw, str):
+        requested = {requested_raw}
+    elif isinstance(requested_raw, list):
+        requested = {str(item) for item in requested_raw if str(item)}
+    else:
+        requested = set()
+    return bool(requested & set(REQUIRED_FINANCE_TOOL_RESULT_IDS))
 
 
 def _deterministic_paper_tool_plan(agent_state: dict[str, Any]) -> dict[str, Any]:

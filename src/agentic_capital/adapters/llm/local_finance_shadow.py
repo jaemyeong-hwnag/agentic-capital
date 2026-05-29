@@ -146,13 +146,16 @@ def validate_finance_shadow_payload(
         "action": action,
         "symbol": str(payload.get("symbol") or payload.get("ticker") or ""),
         "market": str(payload.get("market") or ""),
+        "quantity": _trade_quantity(payload) if action in TRADE_ACTIONS else 0.0,
+        "price": _trade_price(payload, merged_tool_results) if action in TRADE_ACTIONS else 0.0,
+        "order_type": str(payload.get("order_type") or "market"),
         "planned_tools": sorted(planned_tools),
         "missing_tool_results": missing_results,
         "evidence_ids": evidence_ids,
         "notional": notional,
         "within_risk_limit": within_risk_limit,
         "paper_trade_only": True,
-        "would_submit_order": False,
+        "would_submit_order": action in TRADE_ACTIONS,
     }
 
 
@@ -277,6 +280,13 @@ def _trade_notional(payload: dict[str, Any], tool_results: dict[str, Any]) -> fl
 
 def _trade_quantity(payload: dict[str, Any]) -> float:
     return _float(payload.get("quantity") or payload.get("qty") or _nested(payload, "order", "quantity"))
+
+
+def _trade_price(payload: dict[str, Any], tool_results: dict[str, Any]) -> float:
+    explicit = _float(payload.get("price") or _nested(payload, "order", "price"))
+    if explicit > 0:
+        return explicit
+    return _float(_nested(tool_results, "get_quote", "price"))
 
 
 def _quote_context_mismatch(payload: dict[str, Any], tool_results: dict[str, Any]) -> dict[str, Any] | None:

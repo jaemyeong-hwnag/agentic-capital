@@ -88,9 +88,10 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   system instruction은 `CALL_TOOL` 반복 대신 `HOLD`/`WAIT`와
   `no_trade_reason=insufficient_edge`를 요구한다.
 - `call_tool_loop_with_sufficient_tool_evidence`는 raw model failure로 반드시 기록하되,
-  주문 없는 `finance_failure_recovery_hold`를 `decisions_count`에 반영해 paper loop가
-  동일 실패를 관찰/기록하며 계속 돌 수 있게 한다. 이 recovery decision은
-  `paper_trade_only=true`, `would_submit_order=false`이고 주문 권한이 아니다.
+  complete tool evidence, open KRX session, cash, quote, risk limit, empty position이 확인되면
+  agentic-capital이 tiny paper scout order를 제출해 운영 loop를 복구할 수 있다. 이 주문 브리지는
+  `KIS_IS_PAPER=true`, `FUTURES_LIVE_ORDERS_ENABLED=false`,
+  `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`일 때만 동작하고 live 주문 권한이 아니다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
   paper/shadow mode에서는 deterministic fallback plan을 사용한다:
   `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.
@@ -104,7 +105,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 2. `finance_tool_planner_model`: `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 계획
 3. `finance_decision_model`: `BUY | SELL | HOLD | WAIT | OBSERVE | REJECT | CALL_TOOL` 중 하나 반환
 4. `finance_risk_guard_model`: 보장 수익, live 권한 없는 주문, 근거 없는 매매 차단
-5. shadow gate: 주문 실행 없이 `finance_paper_shadow_decision` 또는 `raw_model_failure` record 생성
+5. shadow/order gate: `finance_paper_shadow_decision` 또는 `raw_model_failure` record 생성 후, 검증된 BUY/SELL paper intent나 recoverable CALL_TOOL loop에 한해 agentic-capital이 KIS paper 주문을 제출
 
 `agentic-capital` runtime 구현 위치:
 
@@ -114,6 +115,13 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `src/agentic_capital/core/tools/data_query.py`: finance decision payload용 read-only tool result를 JSON으로 구조화한다. 일반 ReAct agent tool은 role별로 노출하며, CEO/Analyst에는 주문 실행/취소/fill/reallocation tool을 노출하지 않는다.
 - `src/agentic_capital/simulation/recorder.py`: `finance_paper_shadow_decision`, `raw_model_failure`, `raw_model_failures`, `sidecar_latency_ms`, `evidence_ids`, `risk_flags`를 명시적으로 기록한다.
 - `src/agentic_capital/simulation/engine.py`: zero-decision guard 실행 전에 finance `no_context`/raw failure가 기록됐는지 로그로 드러낸다.
+
+paper order bridge:
+
+- finance sidecar는 주문을 직접 실행하지 않는다. `finance_decision_model`은 `paper_order_intent`와 `would_submit_order=true` 같은 intent telemetry만 반환한다.
+- agentic-capital은 Trader finance cycle 안에서만 `paper_order_intent`를 읽고, market open, risk limit, available cash, position cap, paper-only safety를 다시 검증한 뒤 `trading.submit_order`를 호출한다.
+- recoverable `CALL_TOOL` loop는 `raw_model_failure.failure_type=call_tool_loop_with_sufficient_tool_evidence`로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
+- paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
 
 agent role tool boundary:
 

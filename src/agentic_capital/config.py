@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     local_finance_smoke_enabled: bool = True
     local_finance_smoke_timeout_seconds: float = 30.0
     local_finance_pipeline_enabled: bool = True
+    local_finance_paper_order_execution_enabled: bool = True
+    local_finance_paper_probe_on_model_loop: bool = True
     local_finance_default_symbol: str = "005930"
     local_finance_risk_per_trade_pct: float = 0.05
     local_finance_rag_query_base_url: str = ""
