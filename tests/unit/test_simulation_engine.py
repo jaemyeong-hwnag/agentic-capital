@@ -596,6 +596,40 @@ class TestSimulationEngine:
         engine._recorder.record_position_snapshot.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_reconcile_records_zero_snapshot_for_closed_broker_position(self):
+        """Reconciliation records a zero-quantity snapshot when broker is flat."""
+        engine = SimulationEngine()
+        llm = _make_llm()
+        engine._llm = llm
+        trader = AnalystAgent(profile=_make_profile("Trader-X"), personality=create_random_personality(99), llm=llm)
+        engine._agents = [trader]
+
+        engine._trading = MagicMock()
+        engine._trading.get_positions = AsyncMock(return_value=[])
+        engine._trading.get_balance = AsyncMock(return_value=MagicMock(total=10_000_000))
+
+        engine._recorder = MagicMock()
+        engine._recorder.get_last_positions = AsyncMock(return_value=[
+            {"symbol": "K200_CALL_ATM", "quantity": 1.0, "avg_price": 40.2846, "market": "kr_options"}
+        ])
+        engine._recorder.get_position_owner = AsyncMock(return_value=trader.agent_id)
+        engine._recorder.record_position_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+
+        await engine._reconcile_with_broker()
+
+        engine._recorder.record_position_snapshot.assert_awaited_once_with(
+            agent_id=trader.agent_id,
+            symbol="K200_CALL_ATM",
+            quantity=0.0,
+            avg_price=40.2846,
+            unrealized_pnl=0.0,
+            unrealized_pnl_pct=0.0,
+            market="kr_options",
+        )
+        engine._recorder.commit.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_reconcile_assigns_last_trader_as_owner(self):
         """Position ownership is assigned to the agent who last traded that symbol."""
         engine = SimulationEngine()

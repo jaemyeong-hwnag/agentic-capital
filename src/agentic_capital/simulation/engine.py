@@ -661,6 +661,29 @@ class SimulationEngine:
             active_ids = {a.agent_id for a in self._agents}
             fallback_id = self._agents[0].agent_id if self._agents else None
 
+            for (market, symbol), db_pos in db_by_position.items():
+                if (market, symbol) in real_by_position:
+                    continue
+                owner_id = await self._recorder.get_position_owner(symbol, active_ids)
+                if owner_id is None:
+                    owner_id = fallback_id
+                if owner_id is None:
+                    logger.warning(
+                        "closed_position_snapshot_skipped_no_owner",
+                        symbol=symbol,
+                        market=market,
+                    )
+                    continue
+                await self._recorder.record_position_snapshot(
+                    agent_id=owner_id,
+                    symbol=symbol,
+                    quantity=0.0,
+                    avg_price=float(db_pos.get("avg_price", 0.0)),
+                    unrealized_pnl=0.0,
+                    unrealized_pnl_pct=0.0,
+                    market=market,
+                )
+
             for pos in real_positions:
                 owner_id = await self._recorder.get_position_owner(pos.symbol, active_ids)
                 if owner_id is None:
