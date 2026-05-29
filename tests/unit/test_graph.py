@@ -611,7 +611,14 @@ class TestRunAgentCycle:
         }]
 
     @pytest.mark.asyncio
-    async def test_local_finance_recoverable_loop_submits_paper_probe_order(self):
+    @pytest.mark.parametrize(
+        ("failure_type", "raw_action"),
+        [
+            ("call_tool_loop_with_sufficient_tool_evidence", "CALL_TOOL"),
+            ("trade_missing_notional", "BUY"),
+        ],
+    )
+    async def test_local_finance_recoverable_raw_failure_submits_paper_probe_order(self, failure_type, raw_action):
         trading = _make_trading()
         trading.submit_order = AsyncMock(return_value=OrderResult(
             order_id="paper-1",
@@ -637,13 +644,13 @@ class TestRunAgentCycle:
             "record_type": "raw_model_failure",
             "record": {
                 "record_type": "raw_model_failure",
-                "failure_type": "call_tool_loop_with_sufficient_tool_evidence",
-                "action": "CALL_TOOL",
+                "failure_type": failure_type,
+                "action": raw_action,
                 "symbol": "005930",
                 "market": "kr_stock",
                 "evidence_ids": ["ev-1"],
             },
-            "decision": {"action": "CALL_TOOL", "reason": "missing_signal"},
+            "decision": {"action": raw_action, "reason": "missing_signal"},
             "tool_results": {
                 "get_balance": {"available": 1_000_000},
                 "get_positions": [],

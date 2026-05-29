@@ -115,6 +115,7 @@ _MARKET_STATUS_TOKENS = (
 
 _RECOVERABLE_FINANCE_RAW_FAILURES = frozenset({
     "call_tool_loop_with_sufficient_tool_evidence",
+    "trade_missing_notional",
 })
 
 

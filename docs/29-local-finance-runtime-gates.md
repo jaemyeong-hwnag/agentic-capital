@@ -120,7 +120,7 @@ paper order bridge:
 
 - finance sidecar는 주문을 직접 실행하지 않는다. `finance_decision_model`은 `paper_order_intent`와 `would_submit_order=true` 같은 intent telemetry만 반환한다.
 - agentic-capital은 Trader finance cycle 안에서만 `paper_order_intent`를 읽고, market open, risk limit, available cash, position cap, paper-only safety를 다시 검증한 뒤 `trading.submit_order`를 호출한다.
-- recoverable `CALL_TOOL` loop는 `raw_model_failure.failure_type=call_tool_loop_with_sufficient_tool_evidence`로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
+- recoverable `CALL_TOOL` loop나 complete evidence가 있는 `trade_missing_notional`은 raw failure로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
 - paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
 
 agent role tool boundary:
