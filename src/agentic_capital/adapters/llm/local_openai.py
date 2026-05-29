@@ -121,13 +121,11 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
         return parsed
 
     for index, raw in enumerate(raw_tool_calls):
-        function = raw.get("function", {}) if isinstance(raw, dict) else {}
-        name = function.get("name") or raw.get("name") or raw.get("tool") if isinstance(raw, dict) else ""
-        arguments = (
-            function.get("arguments") or raw.get("arguments") or raw.get("args")
-            if isinstance(raw, dict)
-            else {}
-        )
+        if not isinstance(raw, dict):
+            continue
+        function = raw.get("function", {}) if isinstance(raw.get("function"), dict) else {}
+        name = function.get("name") or raw.get("name") or raw.get("tool") or ""
+        arguments = function.get("arguments") or raw.get("arguments") or raw.get("args")
         if isinstance(arguments, str):
             try:
                 args = json.loads(arguments) if arguments else {}

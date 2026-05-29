@@ -209,6 +209,39 @@ def test_local_chat_model_parses_textual_tool_call(monkeypatch):
     assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
 
 
+def test_local_chat_model_preserves_toon_position_text(monkeypatch):
+    class _ToonPositionClient(_FakeSyncClient):
+        def post(self, url, *, headers, json):
+            return _FakeResponse({
+                "choices": [{
+                    "message": {
+                        "content": "@pos[0](005930,1,0.65,0.65,0.00,0.00,0.00,KRW)",
+                    },
+                }],
+            })
+
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _ToonPositionClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:19000/v1",
+        model="agentic_capital_react_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_positions",
+                "description": "paper positions",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="포지션 요약")])
+
+    assert message.content == "@pos[0](005930,1,0.65,0.65,0.00,0.00,0.00,KRW)"
+    assert message.tool_calls == []
+
+
 def test_local_chat_model_repairs_properties_wrapped_tool_args(monkeypatch):
     class _PropertiesWrappedClient(_FakeSyncClient):
         def post(self, url, *, headers, json):
