@@ -98,6 +98,30 @@ def test_trade_uses_quote_price_over_model_payload_price_for_notional() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_uses_paper_order_intent_quantity_for_notional() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "paper_order_intent": {
+            "symbol": "005930",
+            "market": "kr_stock",
+            "side": "buy",
+            "quantity": 1,
+            "paper_trade_only": True,
+        },
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+
+    validation = validate_finance_shadow_payload(payload, tool_results=_complete_tool_results())
+    record = build_finance_shadow_record(payload, tool_results=_complete_tool_results())
+
+    assert validation["would_submit_order"] is True
+    assert validation["notional"] == 70_000
+    assert record["would_submit_order"] is True
+    assert record["notional"] == 70_000
+
+
 def test_trade_with_mismatched_quote_symbol_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",

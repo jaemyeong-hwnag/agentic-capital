@@ -279,7 +279,13 @@ def _trade_notional(payload: dict[str, Any], tool_results: dict[str, Any]) -> fl
 
 
 def _trade_quantity(payload: dict[str, Any]) -> float:
-    return _float(payload.get("quantity") or payload.get("qty") or _nested(payload, "order", "quantity"))
+    return _float(
+        payload.get("quantity")
+        or payload.get("qty")
+        or _nested(payload, "order", "quantity")
+        or _nested(payload, "paper_order_intent", "quantity")
+        or _nested(payload, "order_intent", "quantity")
+    )
 
 
 def _trade_price(payload: dict[str, Any], tool_results: dict[str, Any]) -> float:
