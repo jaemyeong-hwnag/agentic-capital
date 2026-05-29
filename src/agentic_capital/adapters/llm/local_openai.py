@@ -336,6 +336,7 @@ class LocalOpenAICompatibleChatModel(BaseChatModel):
     api_key: str = ""
     timeout_seconds: float = 30.0
     temperature: float = 0.2
+    max_tokens: int = 512
     send_native_tools: bool = False
     bound_tools: list[Any] = Field(default_factory=list)
     tool_choice: str | None = None
@@ -370,6 +371,8 @@ class LocalOpenAICompatibleChatModel(BaseChatModel):
             "messages": openai_messages,
             "temperature": self.temperature,
         }
+        if self.max_tokens > 0:
+            body["max_tokens"] = self.max_tokens
         if stop:
             body["stop"] = stop
         if self.bound_tools and self.send_native_tools:

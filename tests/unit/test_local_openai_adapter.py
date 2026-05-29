@@ -141,6 +141,7 @@ def test_local_chat_model_can_opt_into_native_tool_payload(monkeypatch):
         base_url="http://127.0.0.1:8080/v1",
         model="finance_tool_planner_model",
         timeout_seconds=5,
+        max_tokens=256,
         send_native_tools=True,
     ).bind_tools([
         {
@@ -157,6 +158,21 @@ def test_local_chat_model_can_opt_into_native_tool_payload(monkeypatch):
 
     assert _FakeSyncClient.last_request["json"]["tool_choice"] == "auto"
     assert _FakeSyncClient.last_request["json"]["tools"][0]["function"]["name"] == "get_balance"
+    assert _FakeSyncClient.last_request["json"]["max_tokens"] == 256
+
+
+def test_local_chat_model_can_disable_max_tokens(monkeypatch):
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _FakeSyncClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:8080/v1",
+        model="agentic_capital_react_model",
+        timeout_seconds=5,
+        max_tokens=0,
+    )
+
+    model.invoke([HumanMessage(content="compact strategy note")])
+
+    assert "max_tokens" not in _FakeSyncClient.last_request["json"]
 
 
 def test_local_chat_model_parses_textual_tool_call(monkeypatch):

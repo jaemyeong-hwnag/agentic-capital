@@ -23,6 +23,7 @@ def test_router_builds_local_langchain_model():
          patch.object(router.settings, "local_llm_api_key", ""), \
          patch.object(router.settings, "local_llm_timeout_seconds", 10.0), \
          patch.object(router.settings, "local_agent_llm_timeout_seconds", 90.0), \
+         patch.object(router.settings, "local_agent_llm_max_tokens", 384), \
          patch.object(router.settings, "local_llm_temperature", 0.2), \
          patch.object(router.settings, "local_llm_send_native_tools", False):
         model = router.build_langchain_chat_model()
@@ -30,6 +31,7 @@ def test_router_builds_local_langchain_model():
     assert model.model == "agentic_capital_react_model"
     assert model.base_url == "http://127.0.0.1:19000/v1"
     assert model.timeout_seconds == 90.0
+    assert model.max_tokens == 384
     assert model.send_native_tools is False
 
 

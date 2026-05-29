@@ -52,6 +52,8 @@ _GENERIC_ASSISTANT_PHRASES = (
     "how can i help",
     "it seems there was an attempt to invoke",
     "there was an attempt to invoke",
+    "추가 도움이 필요",
+    "도움이 필요하시면",
 )
 
 _MARKET_STATUS_ANSWER_PHRASES = (
@@ -60,6 +62,10 @@ _MARKET_STATUS_ANSWER_PHRASES = (
     "you've provided a market status update",
     "you have provided a market status update",
     "invalid placeholder symbol",
+    "가상_symbol",
+    "가상 symbol",
+    "거래되지 않는 symbol",
+    "현재 세션으로는",
 )
 
 _NON_KO_EN_MARKERS = (
@@ -1113,8 +1119,10 @@ async def run_agent_cycle(
                 "ST": round(agent.emotion.stress, 2),
                 "CF": round(agent.emotion.confidence, 2),
             }
+            llm_metadata = llm_run_metadata()
             economics_snapshot = {
-                **llm_run_metadata(),
+                **llm_metadata,
+                "llm": llm_metadata,
                 "agent_request": {
                     "prompt_summary": _compact_text(system_prompt, limit=700),
                     "cycle_trigger": cycle_trigger,

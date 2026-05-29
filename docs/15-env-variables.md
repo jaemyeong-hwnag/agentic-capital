@@ -83,6 +83,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
 | `LOCAL_AGENT_LLM_BASE_URL` | local+finance 모드 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 서버 `/v1` base URL. `LOCAL_LLM_MODEL=finance_*`이면 반드시 `LOCAL_LLM_BASE_URL`과 분리해야 하며, 없으면 시작 실패한다 |
 | `LOCAL_AGENT_LLM_MODEL` | local+finance 모드 조건부 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 모델. 기본값 `agentic_capital_react_model`. `LOCAL_LLM_MODEL=finance_*`인데 이 값이 비어 있으면 finance decision model을 일반 agent LLM으로 오용하지 않도록 시작 실패한다. Trader finance 전용 flow는 `LOCAL_LLM_MODEL`의 finance sidecar 모델들을 단계별로 호출한다 |
+| `LOCAL_AGENT_LLM_MAX_TOKENS` | 선택 | CEO/Analyst local agent 응답 상한. 기본값 `512`; `0`이면 요청 payload에서 생략한다. 로컬 모델의 장문 생성으로 cycle timeout이 반복되는 것을 줄인다 |
 | `LOCAL_EMBEDDING_MODEL` | local 모드 필수 | 기본값 `finance_embedding_model` |
 | `LOCAL_LLM_API_KEY` | 선택 | 로컬 gateway 인증이 있을 때만 사용. 공백이면 Authorization header 미전송 |
 | `LOCAL_LLM_TIMEOUT_SECONDS` | 선택 | 로컬 LLM/RAG 요청 timeout |

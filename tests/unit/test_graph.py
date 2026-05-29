@@ -334,6 +334,10 @@ class TestAgentToolFiltering:
             "ceo",
             "工具调用错误: get_quote 参数可能不正确。",
         )
+        assert "market_status_as_final_answer" in _agent_response_quality_issues(
+            "ceo",
+            "OBS|가상_symbol|현재 세션으로는 거래되지 않는 symbol 입니다. TRADER_TASK|대기.",
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
@@ -681,6 +685,7 @@ class TestRunAgentCycle:
         assert "OBS|cycle=3" in kwargs["llm_reasoning"]
         assert "TRADER_TASK|" in kwargs["llm_reasoning"]
         economics = kwargs["economics_snapshot"]
+        assert economics["llm"]["llm_provider"] == economics["llm_provider"]
         assert economics["agent_response"]["fallback_applied"] is True
         assert economics["agent_response"]["first_failing_stage"] == "local_agent_runtime_timeout"
         assert economics["agent_response"]["next_action"] == "local_runtime_fallback_continue"
