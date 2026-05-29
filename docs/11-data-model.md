@@ -46,7 +46,11 @@
 | initial_capital | DECIMAL | 초기 자본금 |
 | started_at | TIMESTAMPTZ | 시작 시점 |
 | ended_at | TIMESTAMPTZ | 종료 시점 (nullable) |
-| status | VARCHAR | running, completed, aborted |
+| status | VARCHAR | running, completed, stopped, aborted |
+
+새 모의투자 run을 recorder가 시작할 때 이전 paper process가 비정상 종료되어
+`running`으로 남은 run은 `stopped`와 `ended_at`으로 정리한다. 실제 주문/포지션을
+수동 복구하지 않고 DB run 상태만 정리해서 모니터링이 단일 활성 run을 보도록 한다.
 
 ---
 

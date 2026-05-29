@@ -62,6 +62,24 @@ class TestSimulationRecorder:
         run = recorder._session.add.call_args.args[0]
         assert run.llm_model == "finance_decision_model"
         assert run.embedding_model == "finance_embedding_model"
+        recorder._session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_simulation_stops_stale_running_runs(self):
+        recorder = self._make_recorder()
+        result = MagicMock()
+        result.rowcount = 2
+        recorder._session.execute.return_value = result
+
+        await recorder.start_simulation(
+            seed=42,
+            initial_capital=10_000_000,
+            config={"test": True},
+        )
+
+        stmt = recorder._session.execute.await_args.args[0]
+        assert "simulation_runs" in str(stmt)
+        assert "status=:status" in str(stmt)
 
     @pytest.mark.asyncio
     async def test_record_agent(self):

@@ -112,6 +112,7 @@ class SimulationRecorder:
         embedding_model: str = "text-embedding-004",
     ) -> uuid.UUID:
         """Create a simulation run record."""
+        await self._stop_stale_running_simulations()
         sim_id = uuid.uuid4()
         run = SimulationRunModel(
             id=sim_id,
@@ -127,6 +128,20 @@ class SimulationRecorder:
         self._simulation_id = sim_id
         logger.info("simulation_recorded", simulation_id=str(sim_id))
         return sim_id
+
+    async def _stop_stale_running_simulations(self) -> None:
+        """Close DB runs left running by a vanished paper process."""
+        from sqlalchemy import update
+
+        stmt = (
+            update(SimulationRunModel)
+            .where(SimulationRunModel.status == "running")
+            .values(ended_at=datetime.now(), status="stopped")
+        )
+        result = await self._session.execute(stmt)
+        rowcount = getattr(result, "rowcount", 0) or 0
+        if rowcount:
+            logger.warning("stale_running_simulations_stopped", count=rowcount)
 
     async def record_agent(
         self,
