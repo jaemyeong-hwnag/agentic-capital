@@ -681,6 +681,7 @@ class TestRunAgentCycle:
              patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
              patch("agentic_capital.graph.workflow.settings.kis_is_paper", True), \
              patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False), \
+             patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True), \
              patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.25), \
              patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock), \
              patch(
@@ -759,6 +760,7 @@ class TestRunAgentCycle:
              patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
              patch("agentic_capital.graph.workflow.settings.kis_is_paper", True), \
              patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False), \
+             patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True), \
              patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.05), \
              patch("agentic_capital.graph.workflow._run_psychology_observation", new_callable=AsyncMock), \
              patch(
