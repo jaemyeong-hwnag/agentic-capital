@@ -322,6 +322,18 @@ class TestAgentToolFiltering:
             "analyst",
             "The previous tool call used an invalid placeholder symbol for KRX:POST.",
         )
+        assert "raw_tool_call_json_final_answer" in _agent_response_quality_issues(
+            "ceo",
+            '_TOOL_CALLS=[{"name":"get_quote","args":{"symbol":"005930","fields":["px"]}}]',
+        )
+        assert "raw_tool_call_json_final_answer" in _agent_response_quality_issues(
+            "ceo",
+            '{"name":"get_quote","args":{"symbol":"005930"}}',
+        )
+        assert "language_drift_non_ko_en" in _agent_response_quality_issues(
+            "ceo",
+            "工具调用错误: get_quote 参数可能不正确。",
+        )
 
     def test_non_trader_cycle_trigger_forces_operational_note(self):
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())

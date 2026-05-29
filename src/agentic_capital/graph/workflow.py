@@ -70,6 +70,14 @@ _NON_KO_EN_MARKERS = (
     "actualizamos",
     "con esta",
     "podemos",
+    "工具",
+    "调用",
+    "错误",
+    "参数",
+    "正确",
+    "如果",
+    "需要",
+    "在这种情况下",
 )
 
 _MARKET_STATUS_TOKENS = (
@@ -367,7 +375,14 @@ def _agent_response_quality_issues(role: str, reasoning: str) -> list[str]:
 
     normalized = " ".join(reasoning.split()).lower()
     issues: list[str] = []
-    if normalized.startswith('{"tool_calls"') or '"tool_calls"' in normalized:
+    raw_tool_call_final = (
+        normalized.startswith('{"tool_calls"')
+        or '"tool_calls"' in normalized
+        or normalized.startswith("_tool_calls=")
+        or "_tool_calls=[" in normalized
+        or bool(re.search(r'[{[]\s*"name"\s*:\s*"get_[a-z_]+"', normalized))
+    )
+    if raw_tool_call_final:
         issues.append("raw_tool_call_json_final_answer")
     if 'trader_task|{"name"' in normalized or 'trader_task|{"tool_calls"' in normalized:
         issues.append("raw_tool_call_json_in_task")
