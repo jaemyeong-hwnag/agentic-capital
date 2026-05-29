@@ -257,15 +257,32 @@ class SimulationEngine:
         if self._recorder and self._trading:
             try:
                 balance = await self._trading.get_balance()
+                positions = await self._trading.get_positions()
+                effective_total = min(float(balance.total), self._capital_limit)
+                allocated_capital = min(
+                    effective_total,
+                    sum(
+                        max(0.0, float(getattr(pos, "quantity", 0.0)))
+                        * max(0.0, float(getattr(pos, "current_price", getattr(pos, "avg_price", 0.0)) or 0.0))
+                        for pos in positions
+                    ),
+                )
+                available_cash = max(0.0, effective_total - allocated_capital)
                 await self._recorder.record_company_snapshot(
-                    total_capital=balance.total,
-                    available_cash=balance.available,
+                    total_capital=effective_total,
+                    available_cash=available_cash,
                     agents_count=len(self._agents),
                     org_snapshot={
                         "agents": [
                             {"id": str(a.agent_id), "name": a.name, "role": type(a).__name__}
                             for a in self._agents
                         ],
+                        "broker_balance": {
+                            "total": balance.total,
+                            "available": balance.available,
+                            "currency": balance.currency,
+                        },
+                        "paper_allocated_capital": allocated_capital,
                     },
                 )
                 await self._recorder.commit()
@@ -583,17 +600,24 @@ class SimulationEngine:
             db_positions = await self._recorder.get_last_positions()
 
             # Build lookup dicts for comparison
-            real_by_symbol = {p.symbol: p for p in real_positions}
-            db_by_symbol = {p["symbol"]: p for p in db_positions}
+            real_by_position = {
+                (str(getattr(p, "market", "kr_stock")), p.symbol): p
+                for p in real_positions
+            }
+            db_by_position = {
+                (str(p.get("market", "kr_stock")), p["symbol"]): p
+                for p in db_positions
+            }
 
             discrepancies: list[dict] = []
 
             # Check for positions in real account missing or different from DB
-            for symbol, real_pos in real_by_symbol.items():
-                db_pos = db_by_symbol.get(symbol)
+            for (market, symbol), real_pos in real_by_position.items():
+                db_pos = db_by_position.get((market, symbol))
                 if db_pos is None:
                     discrepancies.append({
                         "symbol": symbol,
+                        "market": market,
                         "issue": "missing_in_db",
                         "real_qty": real_pos.quantity,
                         "db_qty": 0,
@@ -601,16 +625,18 @@ class SimulationEngine:
                 elif abs(float(db_pos.get("quantity", 0)) - real_pos.quantity) > 0.001:
                     discrepancies.append({
                         "symbol": symbol,
+                        "market": market,
                         "issue": "qty_mismatch",
                         "real_qty": real_pos.quantity,
                         "db_qty": db_pos.get("quantity", 0),
                     })
 
             # Check for positions in DB that no longer exist in real account
-            for symbol, db_pos in db_by_symbol.items():
-                if symbol not in real_by_symbol:
+            for (market, symbol), db_pos in db_by_position.items():
+                if (market, symbol) not in real_by_position:
                     discrepancies.append({
                         "symbol": symbol,
+                        "market": market,
                         "issue": "closed_in_broker",
                         "real_qty": 0,
                         "db_qty": db_pos.get("quantity", 0),
@@ -623,7 +649,7 @@ class SimulationEngine:
                     discrepancies=discrepancies,
                 )
             else:
-                logger.info("position_reconciliation_ok", positions=len(real_by_symbol))
+                logger.info("position_reconciliation_ok", positions=len(real_by_position))
 
             # Resolve position owner per symbol:
             # - use the agent who last traded that symbol (if still active)

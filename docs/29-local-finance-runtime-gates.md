@@ -128,6 +128,10 @@ paper order bridge:
 - paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
 - 해외 현물 paper order는 `PAPER-OVS-*` 주문번호와 `paper_virtual=true`, `broker=local_paper_overseas` metadata를 남긴다. KIS 실전 해외 broker endpoint는 `KIS_IS_PAPER=false`일 때만 사용된다.
 - 매 cycle 종료 후 `agentic-capital`은 broker/KIS 포지션을 다시 읽어 `positions` snapshot을 동기화한다.
+  Reconciliation 비교 기준은 현재 `simulation_id`의 최신 `(market, symbol)` snapshot으로 제한해,
+  이전 run의 KRX/해외 paper position이 현재 run의 broker discrepancy로 섞이지 않게 한다.
+  `company_snapshots`는 broker 원장 잔고를 `org_snapshot.broker_balance`에 보존하되, 로컬 paper
+  운영자본 한도와 현재 paper positions 기준으로 `allocated_capital/cash`를 기록한다.
   따라서 KIS paper 주문 제출 이후 broker position count와 DB recorder가 장시간 갈라지면
   `agentic-capital`의 reconciliation/recorder 문제로 분류한다. 이 동기화는 read-only broker 조회와
   DB snapshot 기록만 수행하며, 수동 주문/취소/복구를 하지 않는다.

@@ -97,6 +97,7 @@ class TestSimulationEngine:
         engine._trading.get_balance = AsyncMock(
             return_value=MagicMock(total=10_000_000, available=9_000_000)
         )
+        engine._trading.get_positions = AsyncMock(return_value=[])
         engine._recorder = MagicMock()
         engine._recorder.record_company_snapshot = AsyncMock()
         engine._recorder.commit = AsyncMock()
@@ -106,6 +107,33 @@ class TestSimulationEngine:
 
         engine._recorder.record_company_snapshot.assert_awaited_once()
         engine._reconcile_with_broker.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_records_effective_allocated_capital_from_positions(self):
+        """Company snapshots use the operating cap and current paper positions."""
+        engine = SimulationEngine()
+        engine._agents = []
+        engine._capital_limit = 5_000_000
+        position = MagicMock()
+        position.quantity = 10
+        position.current_price = 100_000
+        position.avg_price = 90_000
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=49_000_000, available=49_000_000, currency="KRW")
+        )
+        engine._trading.get_positions = AsyncMock(return_value=[position])
+        engine._recorder = MagicMock()
+        engine._recorder.record_company_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+        engine._reconcile_with_broker = AsyncMock()
+
+        await engine._run_cycle()
+
+        call = engine._recorder.record_company_snapshot.await_args.kwargs
+        assert call["total_capital"] == 5_000_000
+        assert call["available_cash"] == 4_000_000
+        assert call["org_snapshot"]["paper_allocated_capital"] == 1_000_000
 
     def test_guard_context_classifies_finance_first_failing_stage(self):
         engine = SimulationEngine()
@@ -299,10 +327,12 @@ class TestSimulationEngine:
         engine._trading.get_balance = AsyncMock(
             return_value=MagicMock(total=10_000_000, available=10_000_000)
         )
+        engine._trading.get_positions = AsyncMock(return_value=[])
 
         engine._recorder = MagicMock()
         engine._recorder.record_company_snapshot = AsyncMock()
         engine._recorder.commit = AsyncMock()
+        engine._reconcile_with_broker = AsyncMock()
 
         with patch("agentic_capital.simulation.engine.run_agent_cycle", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = {"decisions": [], "emotion": {}, "next_cycle_seconds": 0}

@@ -230,6 +230,23 @@ class TestSimulationRecorder:
         assert recorder._session.add.call_count == 1
 
     @pytest.mark.asyncio
+    async def test_get_last_positions_is_scoped_to_current_simulation_and_market(self):
+        recorder = self._make_recorder()
+        recorder._simulation_id = uuid.uuid4()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        recorder._session.execute.return_value = result
+
+        positions = await recorder.get_last_positions()
+
+        assert positions == []
+        stmt = recorder._session.execute.await_args.args[0]
+        stmt_text = str(stmt)
+        assert "positions.simulation_id" in stmt_text
+        assert "positions.market" in stmt_text
+        assert "GROUP BY positions.symbol, positions.market" in stmt_text
+
+    @pytest.mark.asyncio
     async def test_record_role(self):
         recorder = self._make_recorder()
         recorder._simulation_id = uuid.uuid4()

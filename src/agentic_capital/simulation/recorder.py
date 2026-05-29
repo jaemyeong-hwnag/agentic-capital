@@ -791,7 +791,7 @@ class SimulationRecorder:
         return agent_id if agent_id in active_agent_ids else None
 
     async def get_last_positions(self) -> list[dict]:
-        """Fetch the most recent position snapshot per symbol from DB.
+        """Fetch the current simulation's latest position snapshot per symbol/market.
 
         Returns list of dicts with symbol/quantity/avg_price for comparison
         with real broker account during reconciliation.
@@ -800,18 +800,23 @@ class SimulationRecorder:
 
         from agentic_capital.infra.models.trade import PositionModel
 
-        # Get latest updated_at per symbol across all simulations
+        # Get latest updated_at per symbol/market for this simulation only.
+        # Reconciliation compares against the current broker/session state, so
+        # positions from prior simulation runs must not leak into the snapshot.
         subq = (
             select(
                 PositionModel.symbol,
+                PositionModel.market,
                 func.max(PositionModel.updated_at).label("max_ts"),
             )
-            .group_by(PositionModel.symbol)
+            .where(PositionModel.simulation_id == self._simulation_id)
+            .group_by(PositionModel.symbol, PositionModel.market)
             .subquery()
         )
         stmt = select(PositionModel).join(
             subq,
             (PositionModel.symbol == subq.c.symbol)
+            & (PositionModel.market == subq.c.market)
             & (PositionModel.updated_at == subq.c.max_ts),
         )
         result = await self._session.execute(stmt)
