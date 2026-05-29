@@ -1,3 +1,3 @@
 """Agentic Capital — AI-Driven Autonomous Fund Simulation."""
 
-__version__ = "0.27.2"
+__version__ = "0.27.3"
