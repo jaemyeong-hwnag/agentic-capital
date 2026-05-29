@@ -686,6 +686,68 @@ def _finance_loop_probe_order_plan(
     }
 
 
+def _finance_wait_probe_order_plan(
+    *,
+    record: dict[str, Any],
+    tool_results: dict[str, Any],
+    primary_symbol: str,
+    open_markets: list[str] | None,
+    capital_limit: float | None,
+    evidence_ids: list[Any],
+    risk_flags: list[Any],
+) -> dict[str, Any] | None:
+    """Recover paper-only WAIT loops with a tiny scout order when all gates are clear."""
+    if not settings.local_finance_paper_probe_on_model_loop:
+        return None
+    if str(record.get("record_type") or "") != "finance_paper_shadow_decision":
+        return None
+    if str(record.get("action") or "").upper() != "WAIT":
+        return None
+    if record.get("paper_trade_only") is not True:
+        return None
+    if record.get("would_submit_order") is True:
+        return None
+    if record.get("within_risk_limit") is False:
+        return None
+    if risk_flags:
+        return None
+    if not evidence_ids:
+        return None
+    if not settings.local_finance_paper_order_execution_enabled:
+        return None
+    if not settings.kis_is_paper or settings.futures_live_orders_enabled:
+        return None
+    if not _market_session_open(tool_results, open_markets):
+        return None
+
+    symbol = str(record.get("symbol") or primary_symbol).strip()
+    market = str(record.get("market") or "kr_stock").lower() or "kr_stock"
+    price = _tool_quote_price(tool_results)
+    if not symbol or market != "kr_stock" or price <= 0:
+        return None
+    if _owned_quantity(tool_results, symbol, market) > 0:
+        return None
+    max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
+    risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
+    quantity = _paper_quantity_from_budget(
+        price=price,
+        max_order_value=max_order_value,
+        risk_budget=risk_budget,
+    )
+    if quantity <= 0:
+        return None
+    return {
+        "action": "BUY",
+        "symbol": symbol,
+        "market": market,
+        "quantity": quantity,
+        "price": None,
+        "estimated_price": price,
+        "reason": "paper scout recovery after complete WAIT/no-order finance decision",
+        "recovery": True,
+    }
+
+
 async def _execute_finance_paper_order(
     *,
     agent: BaseAgent,
@@ -1097,6 +1159,16 @@ async def _run_local_finance_agent_cycle(
             primary_symbol=primary_symbol,
             open_markets=open_markets,
             capital_limit=capital_limit,
+        )
+    if paper_order_plan is None:
+        paper_order_plan = _finance_wait_probe_order_plan(
+            record=record,
+            tool_results=tool_results,
+            primary_symbol=primary_symbol,
+            open_markets=open_markets,
+            capital_limit=capital_limit,
+            evidence_ids=evidence_ids,
+            risk_flags=risk_flags,
         )
     if paper_order_plan is not None:
         if trading is None:
