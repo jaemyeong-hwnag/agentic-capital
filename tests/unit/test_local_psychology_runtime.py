@@ -206,6 +206,85 @@ async def test_run_local_psychology_context_completes_partial_json_schema() -> N
 
 
 @pytest.mark.asyncio
+async def test_run_local_psychology_context_repairs_boundary_violation_to_context_only() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = '{"ok":true}'
+    response.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": (
+                    '{"evidence_ids":["runtime_schema_contract.md"],"confidence":0.2,'
+                    '"uncertainty":["model attempted an order authority field"],'
+                    '"risk_tags":["boundary_violation"],'
+                    '"agent_state_patch":{"order_permission":true},'
+                    '"allowed_downstream_use":"context_only"}'
+                ),
+            },
+        }],
+    }
+    response.raise_for_status.return_value = None
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_api_key", ""), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        result = await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent": "Analyst-Beta"},
+            input_text="pre-cycle observation",
+        )
+
+    assert result["ok"] is True
+    assert result["repair_applied"] == "validation_failure_to_context_only"
+    assert result["context"]["agent_state_patch"] == {}
+    assert result["context"]["schema_status"] == "schema_repaired_context_only"
+    assert "psychology_validation_repaired" in result["context"]["risk_tags"]
+    assert "order_permission" not in result["soft_context"]
+
+
+@pytest.mark.asyncio
+async def test_run_local_psychology_context_repairs_unsafe_raw_preview_to_hash_only() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = '{"ok":true}'
+    response.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": (
+                    '{"signals":["local runtime diagnosis","execute order boundary"],'
+                    '"agent_state_patch":{},'
+                    '"evidence_ids":["runtime_schema_contract.md"],"confidence":0.0,'
+                    '"uncertainty":["contextual_dependency_under_reviewed"],'
+                    '"risk_tags":["pre_cycle_context"],'
+                    '"allowed_downstream_use":"context_only"}'
+                ),
+            },
+        }],
+    }
+    response.raise_for_status.return_value = None
+    client = _AsyncClientStub(response)
+
+    with patch.object(local_psychology_runtime.settings, "local_psychology_base_url", "http://127.0.0.1:19400/v1"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_model", "psychology_model_suite"), \
+         patch.object(local_psychology_runtime.settings, "local_psychology_api_key", ""), \
+         patch("agentic_capital.adapters.llm.local_psychology_runtime.httpx.AsyncClient", return_value=client):
+        result = await local_psychology_runtime.run_local_psychology_context(
+            request_id="cycle-1",
+            agent_context={"agent": "CEO-Alpha"},
+            input_text="pre-cycle observation",
+        )
+
+    assert result["ok"] is True
+    assert result["repair_applied"] == "validation_failure_to_context_only"
+    assert result["context"]["schema_status"] == "schema_repaired_context_only"
+    assert any(item.startswith("raw_output_sha256:") for item in result["context"]["uncertainty"])
+    assert "diagnosis" not in " ".join(result["context"]["uncertainty"]).lower()
+    assert "execute order" not in " ".join(result["context"]["uncertainty"]).lower()
+
+
+@pytest.mark.asyncio
 async def test_run_local_psychology_context_sends_compact_input_text() -> None:
     response = MagicMock()
     response.status_code = 200
@@ -320,6 +399,30 @@ def test_psychology_payload_requires_stable_soft_signal_schema() -> None:
 def test_psychology_payload_rejects_runtime_boundary_violations(payload, error) -> None:
     with pytest.raises(local_psychology_runtime.LocalPsychologyRuntimeError, match=error):
         local_psychology_runtime.validate_psychology_context_payload(payload)
+
+
+def test_psychology_payload_allows_negated_order_safety_language() -> None:
+    result = local_psychology_runtime.validate_psychology_context_payload({
+        "evidence_ids": ["runtime_schema_contract.md"],
+        "confidence": 0.0,
+        "uncertainty": ["model must not execute capital order without session transition signal"],
+        "risk_tags": ["pre_market_missing_context"],
+        "allowed_downstream_use": "context_only",
+    })
+
+    assert result["allowed_downstream_use"] == "context_only"
+    assert result["evidence_count"] == 1
+
+
+def test_psychology_payload_still_rejects_direct_order_instruction() -> None:
+    with pytest.raises(local_psychology_runtime.LocalPsychologyRuntimeError, match="order_instruction_leak"):
+        local_psychology_runtime.validate_psychology_context_payload({
+            "evidence_ids": ["runtime_schema_contract.md"],
+            "confidence": 0.0,
+            "uncertainty": ["execute order now"],
+            "risk_tags": ["unsafe_instruction"],
+            "allowed_downstream_use": "context_only",
+        })
 
 
 def test_psychology_smoke_passes_safe_context_payload() -> None:

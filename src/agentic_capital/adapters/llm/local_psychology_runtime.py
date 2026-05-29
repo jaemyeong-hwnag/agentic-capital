@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,21 @@ TRADE_ACTIONS = {"BUY", "SELL", "ORDER", "SUBMIT_ORDER", "PLACE_ORDER"}
 DISALLOWED_DOWNSTREAM = {"trade_decision", "order_execution", "alpha_signal"}
 ALLOWED_DOWNSTREAM = {"context_only", "record_only", "risk_context_not_alpha", "agent_state_context"}
 CLINICAL_TERMS = ("diagnosis", "treatment", "therapy", "prescription", "진단", "치료", "처방")
+ORDER_INSTRUCTION_TERMS = ("submit_order", "place order", "execute order", "주문 실행")
+NEGATED_ORDER_SAFETY_TERMS = (
+    "must not",
+    "never",
+    "no ",
+    "not ",
+    "without ",
+    "forbidden",
+    "disallow",
+    "prevent",
+    "avoid",
+    "금지",
+    "하지 말",
+    "없",
+)
 ORDER_MUTATION_KEYS = {
     "quantity",
     "qty",
@@ -166,6 +182,13 @@ def _normalize_text(value: Any) -> str:
     return value.strip().upper() if isinstance(value, str) else ""
 
 
+def _is_negated_order_safety_statement(value: str) -> bool:
+    lowered = value.lower()
+    if not any(term in lowered for term in ORDER_INSTRUCTION_TERMS):
+        return False
+    return any(term in lowered for term in NEGATED_ORDER_SAFETY_TERMS)
+
+
 def _rag_evidence_ids(response_payload: dict[str, Any]) -> list[str]:
     rag = response_payload.get("rag")
     if not isinstance(rag, dict):
@@ -184,6 +207,12 @@ def _rag_evidence_ids(response_payload: dict[str, Any]) -> list[str]:
     return evidence_ids
 
 
+def _raw_output_fingerprint(content: str) -> list[str]:
+    encoded = content.encode("utf-8", errors="replace")
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    return [f"raw_output_sha256:{digest}", f"raw_output_chars:{len(content)}"]
+
+
 def _schema_repair_payload(content: str, response_payload: dict[str, Any]) -> dict[str, Any]:
     evidence_ids = _rag_evidence_ids(response_payload)
     return {
@@ -194,12 +223,39 @@ def _schema_repair_payload(content: str, response_payload: dict[str, Any]) -> di
         "uncertainty": [
             "raw_model_output_invalid_json",
             "deterministic_context_only_repair_applied",
-            f"raw_preview: {content[:180]}",
+            *_raw_output_fingerprint(content),
         ],
         "risk_tags": ["schema_repaired_context_only"],
         "allowed_downstream_use": "context_only",
         "schema_status": "schema_repaired_context_only",
         "repair_applied": "invalid_json_to_context_only",
+    }
+
+
+def _validation_repair_payload(
+    parsed: dict[str, Any],
+    *,
+    content: str,
+    response_payload: dict[str, Any],
+    error: LocalPsychologyRuntimeError,
+) -> dict[str, Any]:
+    evidence_ids = _coerce_string_list(parsed.get("evidence_ids"))
+    if not evidence_ids:
+        evidence_ids = _rag_evidence_ids(response_payload)
+    return {
+        "signals": [],
+        "agent_state_patch": {},
+        "evidence_ids": evidence_ids,
+        "confidence": 0.0,
+        "uncertainty": [
+            "raw_model_output_failed_context_only_validator",
+            str(error),
+            *_raw_output_fingerprint(content),
+        ],
+        "risk_tags": ["schema_repaired_context_only", "psychology_validation_repaired"],
+        "allowed_downstream_use": "context_only",
+        "schema_status": "schema_repaired_context_only",
+        "repair_applied": "validation_failure_to_context_only",
     }
 
 
@@ -262,8 +318,8 @@ def _complete_schema_payload(
         completed["uncertainty"].append(f"schema_completed: {','.join(completion_notes)}")
         if "schema_completed" not in completed["risk_tags"]:
             completed["risk_tags"].append("schema_completed")
-        if content and "raw_preview" not in " ".join(completed["uncertainty"]):
-            completed["uncertainty"].append(f"raw_preview: {content[:180]}")
+        if content and "raw_output_sha256:" not in " ".join(completed["uncertainty"]):
+            completed["uncertainty"].extend(_raw_output_fingerprint(content))
 
     return completed
 
@@ -284,7 +340,7 @@ def _reject_trade_action_leak(payload: dict[str, Any]) -> None:
         if not isinstance(value, str):
             continue
         lowered = value.lower()
-        if any(term in lowered for term in ("submit_order", "place order", "execute order", "주문 실행")):
+        if any(term in lowered for term in ORDER_INSTRUCTION_TERMS) and not _is_negated_order_safety_statement(value):
             raise LocalPsychologyRuntimeError("local_psychology_order_instruction_leak")
 
 
@@ -453,7 +509,12 @@ async def run_local_psychology_context(
         else:
             parsed = _complete_schema_payload(parsed, content=content, response_payload=response_payload)
         repair_applied = parsed.get("repair_applied")
-        context = normalize_psychology_context(parsed)
+        try:
+            context = normalize_psychology_context(parsed)
+        except LocalPsychologyRuntimeError as exc:
+            parsed = _validation_repair_payload(parsed, content=content, response_payload=response_payload, error=exc)
+            repair_applied = parsed.get("repair_applied")
+            context = normalize_psychology_context(parsed)
         return {
             "ok": True,
             "request_id": request_id,
