@@ -122,6 +122,7 @@ agent role tool boundary:
 - CEO/Analyst가 주문 의도나 리밸런싱 아이디어를 낼 때는 직접 실행하지 않고 `send_message`로 Trader에게 지시 또는 분석을 전달한다.
 - CEO/Analyst local agent runtime이 timeout/connection error를 내면 `first_failing_stage=local_agent_runtime_timeout|local_agent_runtime_connection|local_agent_runtime`으로 기록하고, 빈 응답 대신 deterministic `OBS|... TRADER_TASK|... NEXT|...` 운영 노트를 남긴다.
 - CEO/Analyst local agent request에는 `LOCAL_AGENT_LLM_MAX_TOKENS`를 적용해 장문 생성이 paper loop timeout으로 번지는 것을 제한한다. 기본값은 `512`이며 `0`이면 OpenAI-compatible payload에서 생략한다.
+- local agent가 OpenAI native `tool_calls`가 아닌 텍스트 JSON으로 tool call을 출력해도 `{"tool_calls":[...]}`, 단일 `{"name":"..."}` object, `_TOOL_CALLS=[...]` assignment를 런타임 tool call로 복구한다. CEO/Analyst에게 허용된 도구만 실행되며 주문/취소류 도구는 role filter에서 계속 차단된다.
 - CEO/Analyst가 일반 비서 응답, raw `tool_calls` JSON, `TRADER_TASK` 안의 raw tool-call JSON, market-status 설명문, placeholder symbol/tool 호출 설명문, market-session token을 quote/symbol처럼 쓰는 응답을 내면 `first_failing_stage=local_agent_response_quality`와 `quality_issues`를 기록하고 deterministic 운영 노트로 repair한다. 이 repair는 주문 권한이 아니며 Trader finance flow만 매매 판단을 계속 담당한다.
 - HR/message tool은 `target_name`, `reason`, `to_agent`, `content` 같은 placeholder 값을 runtime 결정으로 기록하지 않고 `ERR:placeholder_*`로 거절한다.
 

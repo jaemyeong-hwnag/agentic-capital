@@ -122,8 +122,12 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[dict[str, Any]]:
 
     for index, raw in enumerate(raw_tool_calls):
         function = raw.get("function", {}) if isinstance(raw, dict) else {}
-        name = function.get("name") or raw.get("name") if isinstance(raw, dict) else ""
-        arguments = function.get("arguments") or raw.get("arguments") or raw.get("args") if isinstance(raw, dict) else {}
+        name = function.get("name") or raw.get("name") or raw.get("tool") if isinstance(raw, dict) else ""
+        arguments = (
+            function.get("arguments") or raw.get("arguments") or raw.get("args")
+            if isinstance(raw, dict)
+            else {}
+        )
         if isinstance(arguments, str):
             try:
                 args = json.loads(arguments) if arguments else {}
@@ -168,34 +172,57 @@ def _normalize_tool_args(args: dict[str, Any]) -> dict[str, Any]:
     return args
 
 
-def _extract_json_object(text: str) -> dict[str, Any] | None:
+def _strip_code_fence(text: str) -> str:
     stripped = text.strip()
     if stripped.startswith("```"):
         lines = [line for line in stripped.splitlines() if not line.strip().startswith("```")]
         stripped = "\n".join(lines).strip()
+    return stripped
+
+
+def _extract_json_value(text: str) -> Any | None:
+    stripped = _strip_code_fence(text)
+    if stripped.lower().startswith("_tool_calls="):
+        stripped = stripped.split("=", 1)[1].strip()
     if not stripped:
         return None
     try:
-        parsed = json.loads(stripped)
+        return json.loads(stripped)
     except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
+        object_start = stripped.find("{")
+        array_start = stripped.find("[")
+        starts = [idx for idx in (object_start, array_start) if idx >= 0]
+        if not starts:
+            return None
+        start = min(starts)
+        end = max(stripped.rfind("}"), stripped.rfind("]"))
         if start < 0 or end <= start:
             return None
         try:
-            parsed = json.loads(stripped[start:end + 1])
+            return json.loads(stripped[start:end + 1])
         except json.JSONDecodeError:
             return None
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    parsed = _extract_json_value(text)
     return parsed if isinstance(parsed, dict) else None
 
 
 def _parse_tool_calls_from_content(content: str) -> list[dict[str, Any]]:
-    parsed = _extract_json_object(content)
+    parsed = _extract_json_value(content)
     if not parsed:
         return []
-    raw_tool_calls = parsed.get("tool_calls")
-    if raw_tool_calls is None and parsed.get("tool_call"):
-        raw_tool_calls = [parsed["tool_call"]]
+    if isinstance(parsed, list):
+        raw_tool_calls = parsed
+    elif isinstance(parsed, dict):
+        raw_tool_calls = parsed.get("tool_calls")
+        if raw_tool_calls is None and parsed.get("tool_call"):
+            raw_tool_calls = [parsed["tool_call"]]
+        if raw_tool_calls is None and any(parsed.get(key) for key in ("name", "tool", "function")):
+            raw_tool_calls = [parsed]
+    else:
+        raw_tool_calls = None
     return _parse_tool_calls(raw_tool_calls)
 
 
@@ -255,7 +282,7 @@ def _tool_prompt(tools: list[Any]) -> str:
     return (
         "도구 호출이 필요하면 일반 답변 대신 JSON object만 출력하세요. "
         "형식: {\"tool_calls\":[{\"name\":\"tool_name\",\"args\":{},\"id\":\"call_1\"}]}. "
-        "필요한 도구가 없거나 최종 답변이면 일반 텍스트로 답하세요. "
+        "필요한 도구가 없거나 최종 답변이면 일반 텍스트로 답하고, 최종 TRADER_TASK에는 JSON tool call을 넣지 마세요. "
         f"사용 가능한 도구: {json.dumps(compact, ensure_ascii=False)}"
     )
 

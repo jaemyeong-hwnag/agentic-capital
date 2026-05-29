@@ -271,6 +271,8 @@ def _build_system_prompt(agent: BaseAgent) -> str:
             "Respond in compact Korean or English only; never use Spanish, Hindi, or other languages. "
             "Do not produce generic assistant help text. Produce an investment-company operating note. "
             "Treat KRX/NASDAQ/NYSE market-session tokens such as KRX:POST or NASDAQ:CLOSED as market status, not symbols. "
+            "If you call tools, call them through the runtime only; do not paste raw JSON tool calls into the final answer. "
+            "TRADER_TASK must be a prose instruction, never a JSON object or tool schema. "
             "Use this compact shape when possible: OBS|... TRADER_TASK|... NEXT|..."
             "</role_boundary>"
         )
@@ -439,6 +441,7 @@ def _agent_cycle_trigger(
         f"Watchlist:{symbol_text}. Open markets/status:{markets_text}. "
         "Do not ask the user for help. Do not summarize market status as a final answer. "
         "Treat KRX:POST, NASDAQ:CLOSED, NYSE:CLOSED and similar values as session labels, not quote symbols. "
+        "If using a tool, emit a runtime tool call; do not include JSON tool calls in TRADER_TASK or the final answer. "
         "Final answer must be compact Korean or English in this shape: OBS|... TRADER_TASK|... NEXT|..."
     )
 

@@ -247,3 +247,83 @@ def test_local_chat_model_repairs_properties_wrapped_tool_args(monkeypatch):
 
     assert message.tool_calls[0]["name"] == "get_quote"
     assert message.tool_calls[0]["args"] == {"symbol": "005930"}
+
+
+def test_local_chat_model_parses_naked_textual_tool_call_object(monkeypatch):
+    class _NakedToolObjectClient(_FakeSyncClient):
+        def post(self, url, *, headers, json):
+            return _FakeResponse({
+                "choices": [{
+                    "message": {
+                        "content": '{"name":"get_market_status","args":{"market":"kr_stock"}}',
+                    },
+                }],
+            })
+
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _NakedToolObjectClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:19000/v1",
+        model="agentic_capital_react_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "get_market_status",
+                "description": "market session status",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"market": {"type": "string"}},
+                },
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="시장 상태 확인")])
+
+    assert message.content == ""
+    assert message.tool_calls[0]["name"] == "get_market_status"
+    assert message.tool_calls[0]["args"] == {"market": "kr_stock"}
+
+
+def test_local_chat_model_parses_tool_calls_assignment(monkeypatch):
+    class _ToolCallsAssignmentClient(_FakeSyncClient):
+        def post(self, url, *, headers, json):
+            return _FakeResponse({
+                "choices": [{
+                    "message": {
+                        "content": '_TOOL_CALLS=[{"name":"send_message","args":{"to_agent":"Trader-Gamma","content":"review 005930 risk"}}]',
+                    },
+                }],
+            })
+
+    monkeypatch.setattr("agentic_capital.adapters.llm.local_openai.httpx.Client", _ToolCallsAssignmentClient)
+    model = LocalOpenAICompatibleChatModel(
+        base_url="http://127.0.0.1:19000/v1",
+        model="agentic_capital_react_model",
+        timeout_seconds=5,
+    ).bind_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "send_message",
+                "description": "send message to another agent",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to_agent": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                },
+            },
+        },
+    ])
+
+    message = model.invoke([HumanMessage(content="트레이더에게 지시")])
+
+    assert message.content == ""
+    assert message.tool_calls[0]["name"] == "send_message"
+    assert message.tool_calls[0]["args"] == {
+        "to_agent": "Trader-Gamma",
+        "content": "review 005930 risk",
+    }
