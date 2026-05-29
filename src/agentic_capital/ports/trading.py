@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import StrEnum
+import re
 
 from pydantic import BaseModel
 
@@ -40,6 +41,7 @@ class Order(BaseModel):
     exchange: str | None = None         # Exchange code for overseas: "NASD", "NYSE", "AMEX", "SEHK", etc.
     position_effect: str | None = None  # Futures only: "open" (신규) | "close" (청산)
     multiplier: float | None = None     # Futures: KRW per point (e.g. 250000 for KOSPI200, 50000 for mini). None = unknown.
+    option_type: str | None = None      # Options only: "call" allowed by policy; puts are rejected.
 
 
 class OrderResult(BaseModel):
@@ -124,3 +126,40 @@ class TradingPort(ABC):
     ) -> list[OrderResult]:
         """Get order fill history. Optional — adapters may override."""
         raise NotImplementedError(f"{self.__class__.__name__} does not support get_fills")
+
+
+def infer_option_type(
+    symbol: str,
+    option_type: str | None = None,
+    exchange: str | None = None,
+) -> str | None:
+    """Infer option type from explicit metadata or AI-friendly paper symbols.
+
+    The project allows only call options. Because KIS compact option symbols are
+    broker-specific and not always self-describing in local tests, the safest
+    contract is explicit metadata (`option_type="call"` or `exchange="CALL"`).
+    Paper-loop symbols may also include clear CALL/PUT markers.
+    """
+    explicit = str(option_type or "").strip().lower()
+    if explicit in {"call", "c", "콜", "콜옵션"}:
+        return "call"
+    if explicit in {"put", "p", "풋", "풋옵션"}:
+        return "put"
+
+    exchange_marker = str(exchange or "").strip().lower()
+    if exchange_marker in {"call", "call_option", "kr_call", "krx_call"}:
+        return "call"
+    if exchange_marker in {"put", "put_option", "kr_put", "krx_put"}:
+        return "put"
+
+    sym = str(symbol or "").strip().upper()
+    if re.search(r"(^|[_:\-])PUT($|[_:\-])", sym) or re.fullmatch(r"(K200|KOSPI200)?P[0-9A-Z._-]+", sym):
+        return "put"
+    if re.search(r"(^|[_:\-])CALL($|[_:\-])", sym) or re.fullmatch(r"(K200|KOSPI200)?C[0-9A-Z._-]+", sym):
+        return "call"
+    return None
+
+
+def is_call_option_order(order: Order) -> bool:
+    """Return True only for orders explicitly known to be call options."""
+    return infer_option_type(order.symbol, order.option_type, order.exchange) == "call"

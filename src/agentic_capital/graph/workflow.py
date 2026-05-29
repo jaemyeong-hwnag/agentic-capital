@@ -19,6 +19,7 @@ from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_
 from agentic_capital.config import settings
 from agentic_capital.core.tools.data_query import build_agent_tools, collect_finance_decision_tool_results
 from agentic_capital.graph.nodes import record_cycle
+from agentic_capital.ports.trading import infer_option_type
 
 if TYPE_CHECKING:
     from agentic_capital.core.agents.base import BaseAgent
@@ -510,6 +511,18 @@ def _market_session_open(tool_results: dict[str, Any], open_markets: list[str] |
     return any(str(market).upper() == "KRX" for market in (open_markets or []))
 
 
+def _paper_market_session_open(
+    tool_results: dict[str, Any],
+    open_markets: list[str] | None,
+    market: str,
+) -> bool:
+    if _market_session_open(tool_results, open_markets):
+        return True
+    if market == _PAPER_CALL_OPTION_MARKET and settings.kis_is_paper:
+        return any(str(item).upper() == "NIGHT" for item in (open_markets or []))
+    return False
+
+
 def _tool_quote_price(tool_results: dict[str, Any]) -> float:
     quote = tool_results.get("get_quote")
     if not isinstance(quote, dict):
@@ -545,6 +558,36 @@ def _owned_quantity(tool_results: dict[str, Any], symbol: str, market: str) -> f
 
 
 _PAPER_SPOT_MARKETS = {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
+_PAPER_CALL_OPTION_MARKET = "kr_options"
+_PAPER_ORDER_MARKETS = _PAPER_SPOT_MARKETS | {_PAPER_CALL_OPTION_MARKET}
+
+
+def _is_call_option_market_order(
+    *,
+    symbol: str,
+    market: str,
+    option_type: Any = None,
+    exchange: Any = None,
+) -> bool:
+    if market != _PAPER_CALL_OPTION_MARKET:
+        return False
+    return infer_option_type(symbol, str(option_type) if option_type is not None else None,
+                             str(exchange) if exchange is not None else None) == "call"
+
+
+def _paper_option_fields(symbol: str, market: str, source: dict[str, Any]) -> dict[str, Any]:
+    if not _is_call_option_market_order(
+        symbol=symbol,
+        market=market,
+        option_type=source.get("option_type"),
+        exchange=source.get("exchange"),
+    ):
+        return {}
+    return {
+        "option_type": "call",
+        "exchange": source.get("exchange") or "CALL",
+        "multiplier": source.get("multiplier") or 250_000.0,
+    }
 
 
 def _max_paper_order_value(
@@ -597,12 +640,16 @@ def _finance_paper_order_plan(
         return None
     if not settings.kis_is_paper or settings.futures_live_orders_enabled:
         return None
-    if not _market_session_open(tool_results, open_markets):
-        return None
     action = str(decision.get("action") or record.get("action") or "").upper()
     symbol = str(decision.get("symbol") or record.get("symbol") or primary_symbol).strip()
     market = str(decision.get("market") or record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
-    if action not in {"BUY", "SELL"} or not symbol or market not in _PAPER_SPOT_MARKETS:
+    source = {**record, **decision}
+    option_fields = _paper_option_fields(symbol, market, source)
+    if not _paper_market_session_open(tool_results, open_markets, market):
+        return None
+    if action not in {"BUY", "SELL"} or not symbol or market not in _PAPER_ORDER_MARKETS:
+        return None
+    if market == _PAPER_CALL_OPTION_MARKET and not option_fields:
         return None
     if record.get("paper_trade_only") is not True:
         return None
@@ -617,6 +664,8 @@ def _finance_paper_order_plan(
         quantity = int(float(requested_quantity or 0))
     except (TypeError, ValueError):
         quantity = 0
+    if market == _PAPER_CALL_OPTION_MARKET and quantity <= 0:
+        quantity = 1
     if quantity <= 0 and action == "BUY" and price > 0:
         max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
         risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
@@ -630,17 +679,20 @@ def _finance_paper_order_plan(
         quantity = min(quantity, owned)
     if quantity <= 0:
         return None
-    return {
+    plan = {
         "action": action,
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": price if market != "kr_stock" else None,
+        "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
         "estimated_price": price,
         "exchange": decision.get("exchange") or record.get("exchange"),
+        "position_effect": "close" if action == "SELL" else "open",
         "reason": str(decision.get("reason") or decision.get("rationale") or record.get("no_trade_reason") or ""),
         "recovery": False,
     }
+    plan.update(option_fields)
+    return plan
 
 
 def _finance_loop_probe_order_plan(
@@ -651,37 +703,74 @@ def _finance_loop_probe_order_plan(
     primary_market: str,
     open_markets: list[str] | None,
     capital_limit: float | None,
+    evidence_ids: list[Any] | None = None,
+    risk_flags: list[Any] | None = None,
 ) -> dict[str, Any] | None:
     """Recover repeated local finance CALL_TOOL loops with a tiny paper scout order."""
     if not settings.local_finance_paper_probe_on_model_loop:
         return None
-    if str(record.get("failure_type") or "") not in _RECOVERABLE_FINANCE_RAW_FAILURES:
+    record_type = str(record.get("record_type") or "")
+    action = str(record.get("action") or "").upper()
+    has_shadow_call_tool_evidence = (
+        record_type == "finance_paper_shadow_decision"
+        and action == "CALL_TOOL"
+        and record.get("paper_trade_only") is True
+        and bool(evidence_ids or record.get("evidence_ids"))
+        and not (risk_flags or record.get("risk_flags") or [])
+    )
+    if (
+        str(record.get("failure_type") or "") not in _RECOVERABLE_FINANCE_RAW_FAILURES
+        and not has_shadow_call_tool_evidence
+    ):
         return None
     if not settings.local_finance_paper_order_execution_enabled:
         return None
     if not settings.kis_is_paper or settings.futures_live_orders_enabled:
         return None
-    if not _market_session_open(tool_results, open_markets):
-        return None
 
     symbol = str(record.get("symbol") or primary_symbol).strip()
     market = str(record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
+    if not _paper_market_session_open(tool_results, open_markets, market):
+        return None
     price = _tool_quote_price(tool_results)
-    if not symbol or market not in _PAPER_SPOT_MARKETS or price <= 0:
+    option_fields = _paper_option_fields(symbol, market, record)
+    if not symbol or market not in _PAPER_ORDER_MARKETS:
+        return None
+    if market == _PAPER_CALL_OPTION_MARKET and not option_fields:
+        return None
+    if market != _PAPER_CALL_OPTION_MARKET and price <= 0:
         return None
     owned = int(_owned_quantity(tool_results, symbol, market))
     if owned > 0:
-        return {
+        plan = {
             "action": "SELL",
             "symbol": symbol,
             "market": market,
             "quantity": 1,
-            "price": price if market != "kr_stock" else None,
+            "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
+            "position_effect": "close",
             "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
             "recovery": True,
         }
+        plan.update(option_fields)
+        return plan
+    if market == _PAPER_CALL_OPTION_MARKET:
+        plan = {
+            "action": "BUY",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": None,
+            "estimated_price": price,
+            "exchange": record.get("exchange") or "CALL",
+            "position_effect": "open",
+            "reason": "paper scout recovery for call-option-only kr_options flow",
+            "recovery": True,
+        }
+        plan.update(option_fields)
+        return plan
     max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
     risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
     quantity = _paper_quantity_from_budget(
@@ -699,6 +788,7 @@ def _finance_loop_probe_order_plan(
         "price": price if market != "kr_stock" else None,
         "estimated_price": price,
         "exchange": record.get("exchange"),
+        "position_effect": "open",
         "reason": "paper scout recovery after finance_decision_model CALL_TOOL loop with complete tool evidence",
         "recovery": True,
     }
@@ -736,27 +826,50 @@ def _finance_wait_probe_order_plan(
         return None
     if not settings.kis_is_paper or settings.futures_live_orders_enabled:
         return None
-    if not _market_session_open(tool_results, open_markets):
-        return None
 
     symbol = str(record.get("symbol") or primary_symbol).strip()
     market = str(record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
+    if not _paper_market_session_open(tool_results, open_markets, market):
+        return None
     price = _tool_quote_price(tool_results)
-    if not symbol or market not in _PAPER_SPOT_MARKETS or price <= 0:
+    option_fields = _paper_option_fields(symbol, market, record)
+    if not symbol or market not in _PAPER_ORDER_MARKETS:
+        return None
+    if market == _PAPER_CALL_OPTION_MARKET and not option_fields:
+        return None
+    if market != _PAPER_CALL_OPTION_MARKET and price <= 0:
         return None
     owned = int(_owned_quantity(tool_results, symbol, market))
     if owned > 0:
-        return {
+        plan = {
             "action": "SELL",
             "symbol": symbol,
             "market": market,
             "quantity": 1,
-            "price": price if market != "kr_stock" else None,
+            "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
+            "position_effect": "close",
             "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
             "recovery": True,
         }
+        plan.update(option_fields)
+        return plan
+    if market == _PAPER_CALL_OPTION_MARKET:
+        plan = {
+            "action": "BUY",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": None,
+            "estimated_price": price,
+            "exchange": record.get("exchange") or "CALL",
+            "position_effect": "open",
+            "reason": "paper scout recovery after complete WAIT/no-order finance decision for call option",
+            "recovery": True,
+        }
+        plan.update(option_fields)
+        return plan
     max_order_value = _max_paper_order_value(tool_results=tool_results, capital_limit=capital_limit)
     risk_budget = max_order_value * max(float(settings.local_finance_risk_per_trade_pct), 0.0)
     quantity = _paper_quantity_from_budget(
@@ -774,6 +887,7 @@ def _finance_wait_probe_order_plan(
         "price": price if market != "kr_stock" else None,
         "estimated_price": price,
         "exchange": record.get("exchange"),
+        "position_effect": "open",
         "reason": "paper scout recovery after complete WAIT/no-order finance decision",
         "recovery": True,
     }
@@ -802,6 +916,9 @@ async def _execute_finance_paper_order(
         price=plan.get("price"),
         market=Market(plan["market"]),
         exchange=plan.get("exchange"),
+        position_effect=plan.get("position_effect"),
+        multiplier=plan.get("multiplier"),
+        option_type=plan.get("option_type"),
     )
     result = await trading.submit_order(order)
     effective_price = float(result.filled_price or plan.get("estimated_price") or 0)
@@ -821,6 +938,8 @@ async def _execute_finance_paper_order(
         "status": result.status,
         "market": result.market.value,
         "exchange": plan.get("exchange") or result.metadata.get("exchange"),
+        "position_effect": plan.get("position_effect"),
+        "option_type": plan.get("option_type") or result.metadata.get("option_type"),
         "paper_trade_only": True,
         "recovery": bool(plan.get("recovery")),
         "source_record_type": record.get("record_type"),
@@ -866,6 +985,8 @@ async def _execute_finance_paper_order(
         "symbol": plan["symbol"],
         "quantity": plan["quantity"],
         "market": plan["market"],
+        "position_effect": plan.get("position_effect"),
+        "option_type": plan.get("option_type"),
         "status": result.status,
         "order_id": result.order_id,
         "paper_trade_only": True,
@@ -1222,6 +1343,8 @@ async def _run_local_finance_agent_cycle(
             primary_market=primary_market,
             open_markets=open_markets,
             capital_limit=capital_limit,
+            evidence_ids=evidence_ids,
+            risk_flags=risk_flags,
         )
     if paper_order_plan is None:
         paper_order_plan = _finance_wait_probe_order_plan(

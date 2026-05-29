@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from agentic_capital.graph.workflow import (
     _finance_cycle_symbol_market,
+    _finance_loop_probe_order_plan,
     _finance_paper_order_plan,
     _finance_wait_probe_order_plan,
 )
@@ -76,6 +77,99 @@ def test_finance_paper_order_plan_allows_overseas_sell_when_position_owned():
     assert plan is not None
     assert plan["action"] == "SELL"
     assert plan["quantity"] == 2
+
+
+def test_finance_paper_order_plan_allows_call_option_buy_without_quote_price():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+    ):
+        plan = _finance_paper_order_plan(
+            record={
+                "paper_trade_only": True,
+                "within_risk_limit": True,
+                "would_submit_order": True,
+                "market": "kr_options",
+                "symbol": "K200_CALL_ATM",
+                "option_type": "call",
+            },
+            decision={"action": "BUY", "symbol": "K200_CALL_ATM", "market": "kr_options"},
+            tool_results={**_tool_results(), "get_quote": {"price": 0.0}},
+            primary_symbol="K200_CALL_ATM",
+            primary_market="kr_options",
+            open_markets=["NIGHT"],
+            capital_limit=10_000.0,
+        )
+
+    assert plan is not None
+    assert plan["market"] == "kr_options"
+    assert plan["option_type"] == "call"
+    assert plan["position_effect"] == "open"
+    assert plan["quantity"] == 1
+    assert plan["price"] is None
+
+
+def test_finance_paper_order_plan_rejects_put_option():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+    ):
+        plan = _finance_paper_order_plan(
+            record={
+                "paper_trade_only": True,
+                "within_risk_limit": True,
+                "would_submit_order": True,
+                "market": "kr_options",
+                "symbol": "K200_PUT_ATM",
+                "option_type": "put",
+            },
+            decision={"action": "BUY", "symbol": "K200_PUT_ATM", "market": "kr_options"},
+            tool_results={**_tool_results(), "get_quote": {"price": 0.0}},
+            primary_symbol="K200_PUT_ATM",
+            primary_market="kr_options",
+            open_markets=["NIGHT"],
+            capital_limit=10_000.0,
+        )
+
+    assert plan is None
+
+
+def test_finance_loop_probe_recovers_call_tool_shadow_call_option():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+    ):
+        plan = _finance_loop_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "CALL_TOOL",
+                "paper_trade_only": True,
+                "market": "kr_options",
+                "symbol": "K200_CALL_ATM",
+                "option_type": "call",
+            },
+            tool_results={
+                **_tool_results(),
+                "get_market_session": {"state": "closed", "market": "kr_options"},
+                "get_quote": {"price": 0.0},
+            },
+            primary_symbol="K200_CALL_ATM",
+            primary_market="kr_options",
+            open_markets=["NIGHT"],
+            capital_limit=10_000.0,
+            evidence_ids=["source_reference.md"],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["market"] == "kr_options"
+    assert plan["option_type"] == "call"
+    assert plan["position_effect"] == "open"
 
 
 def test_finance_wait_probe_uses_primary_market_when_record_omits_market():

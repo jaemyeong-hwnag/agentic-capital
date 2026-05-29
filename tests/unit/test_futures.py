@@ -1896,6 +1896,41 @@ class TestFuturesVirtualAdapter:
         assert "invalid_symbol" in result.metadata.get("error", "")
 
     @pytest.mark.asyncio
+    async def test_call_option_fills_virtually_with_paper_call_order_id(self):
+        adapter, price = self._make_adapter(380.0, capital=5_000_000.0)
+        order = Order(
+            symbol="K200_CALL_ATM", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_OPTIONS, position_effect="open", option_type="call",
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(order)
+            positions = await adapter.get_positions()
+            balance = await adapter.get_balance()
+        assert result.status == "filled"
+        assert result.order_id.startswith("PAPER-CALL-")
+        assert result.market == Market.KR_OPTIONS
+        assert result.filled_price == pytest.approx(11.4)
+        assert result.metadata["underlying_price"] == 380.0
+        assert balance.available > 4_900_000.0
+        option_positions = [p for p in positions if p.market == Market.KR_OPTIONS]
+        assert len(option_positions) == 1
+        assert option_positions[0].symbol == "K200_CALL_ATM"
+        assert option_positions[0].avg_price == pytest.approx(11.4)
+        assert option_positions[0].margin_required == pytest.approx(85_500.0)
+
+    @pytest.mark.asyncio
+    async def test_put_option_rejected_by_virtual_adapter(self):
+        adapter, price = self._make_adapter(380.0)
+        order = Order(
+            symbol="K200_PUT_ATM", side=OrderSide.BUY, quantity=1.0,
+            market=Market.KR_OPTIONS, position_effect="open", option_type="put",
+        )
+        with self._patch_price(price):
+            result = await adapter.submit_order(order)
+        assert result.status == "rejected"
+        assert result.metadata["error"] == "only_call_options_allowed"
+
+    @pytest.mark.asyncio
     async def test_active_contracts_add_virtual_kis_mini(self):
         adapter, _ = self._make_adapter(1171.3)
         adapter._inner.get_active_futures_contracts = AsyncMock(return_value=[

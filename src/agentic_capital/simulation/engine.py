@@ -74,11 +74,15 @@ class SimulationEngine:
         setup_tracing()
         from agentic_capital.adapters.kis_session import KISSession
         from agentic_capital.adapters.llm.router import build_llm_adapter
+        from agentic_capital.adapters.trading.futures_virtual import FuturesVirtualAdapter
         from agentic_capital.adapters.trading.kis import KISTradingAdapter
 
         self._llm = build_llm_adapter()
         kis_session = KISSession()
-        self._trading = KISTradingAdapter(session=kis_session)
+        trading = KISTradingAdapter(session=kis_session)
+        if settings.kis_is_paper and settings.futures_virtual_paper_fallback:
+            trading = FuturesVirtualAdapter(trading, initial_capital=self._capital_limit)
+        self._trading = trading
         from agentic_capital.adapters.market_data.yfinance_adapter import YFinanceMarketDataAdapter
         self._market_data = YFinanceMarketDataAdapter()
         logger.info("adapters_initialized")

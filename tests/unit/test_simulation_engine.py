@@ -65,6 +65,26 @@ class TestSimulationEngine:
             engine._validate_startup_gate()
         mock_validate.assert_called_once()
 
+    def test_init_adapters_wraps_kis_with_virtual_futures_in_paper_mode(self):
+        engine = SimulationEngine()
+        engine._capital_limit = 12_345_678
+        kis_adapter = MagicMock(name="kis_adapter")
+        virtual_adapter = MagicMock(name="virtual_adapter")
+
+        with patch.object(engine, "_validate_startup_gate"), \
+             patch("agentic_capital.simulation.engine.setup_tracing"), \
+             patch("agentic_capital.adapters.llm.router.build_llm_adapter", return_value=MagicMock()), \
+             patch("agentic_capital.adapters.kis_session.KISSession", return_value=MagicMock()), \
+             patch("agentic_capital.adapters.trading.kis.KISTradingAdapter", return_value=kis_adapter), \
+             patch("agentic_capital.adapters.trading.futures_virtual.FuturesVirtualAdapter", return_value=virtual_adapter) as mock_virtual, \
+             patch("agentic_capital.adapters.market_data.yfinance_adapter.YFinanceMarketDataAdapter", return_value=MagicMock()), \
+             patch("agentic_capital.simulation.engine.settings.kis_is_paper", True), \
+             patch("agentic_capital.simulation.engine.settings.futures_virtual_paper_fallback", True):
+            engine._init_adapters()
+
+        assert engine._trading is virtual_adapter
+        mock_virtual.assert_called_once_with(kis_adapter, initial_capital=12_345_678)
+
     def test_cycle_guard_clamps_zero_delay(self):
         engine = SimulationEngine()
         result = engine._apply_cycle_guards(requested_delay=0, total_decisions=1)

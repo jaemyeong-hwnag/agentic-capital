@@ -22,6 +22,7 @@ from agentic_capital.ports.trading import (
     OrderResult,
     OrderSide,
     TradingPort,
+    is_call_option_order,
 )
 
 logger = structlog.get_logger()
@@ -29,6 +30,7 @@ logger = structlog.get_logger()
 _FUTURES_MARKETS = {Market.KR_FUTURES, Market.KR_OPTIONS}
 _KOSPI200_STANDARD_MULT = 250_000
 _KOSPI200_MINI_MULT = 50_000
+_CALL_OPTION_PAPER_PREMIUM_RATE = 0.03
 
 
 def _multiplier_for(symbol: str) -> float:
@@ -52,6 +54,11 @@ async def _fetch_kospi200_price() -> float:
     return d.get("price", 0.0) if d else 0.0
 
 
+def _paper_call_option_premium(underlying_price: float) -> float:
+    """Local paper call-option premium in index points, derived from KOSPI200."""
+    return max(float(underlying_price) * _CALL_OPTION_PAPER_PREMIUM_RATE, 0.1)
+
+
 class _VirtualFuturesPosition:
     """In-memory futures position for virtual simulation."""
 
@@ -63,6 +70,7 @@ class _VirtualFuturesPosition:
         self.avg_price = avg_price
         self.multiplier = multiplier
         self.current_price = avg_price
+        self.market = Market.KR_FUTURES
 
     def update_price(self, price: float) -> None:
         self.current_price = price
@@ -89,7 +97,7 @@ class _VirtualFuturesPosition:
                 (self.current_price - self.avg_price) / self.avg_price * 100
                 if self.avg_price > 0 else 0.0
             ),
-            market=Market.KR_FUTURES,
+            market=self.market,
             currency="KRW",
             multiplier=self.multiplier,
             margin_required=self.margin_required,
@@ -118,9 +126,9 @@ class FuturesVirtualAdapter(TradingPort):
     # ── Balance ───────────────────────────────────────────────────────────────
 
     async def get_balance(self) -> Balance:
-        price = await _fetch_kospi200_price()
+        underlying_price = await _fetch_kospi200_price()
         for pos in self._positions.values():
-            pos.update_price(price)
+            pos.update_price(self._mark_price_for_position(pos, underlying_price))
 
         unrealized = sum(p.unrealized_pnl for p in self._positions.values())
         margin_used = sum(p.margin_required for p in self._positions.values())
@@ -135,9 +143,9 @@ class FuturesVirtualAdapter(TradingPort):
     # ── Positions ─────────────────────────────────────────────────────────────
 
     async def get_positions(self) -> list:
-        price = await _fetch_kospi200_price()
+        underlying_price = await _fetch_kospi200_price()
         for pos in self._positions.values():
-            pos.update_price(price)
+            pos.update_price(self._mark_price_for_position(pos, underlying_price))
 
         # Virtual futures + real stock positions from inner
         try:
@@ -164,12 +172,58 @@ class FuturesVirtualAdapter(TradingPort):
             or re.fullmatch(r"A(01|30)\d{3,}", symbol)
         )
 
+    @staticmethod
+    def _is_valid_call_option_symbol(symbol: str) -> bool:
+        """Validate explicit local-paper KOSPI200 call option symbols."""
+        import re
+        symbol_u = str(symbol or "").upper()
+        return bool(
+            re.fullmatch(r"K200_CALL(_[A-Z0-9]+)*", symbol_u)
+            or re.fullmatch(r"KOSPI200_CALL(_[A-Z0-9]+)*", symbol_u)
+            or re.fullmatch(r"(K200|KOSPI200)?C[0-9A-Z._-]+", symbol_u)
+        )
+
+    @staticmethod
+    def _mark_price_for_position(pos: _VirtualFuturesPosition, underlying_price: float) -> float:
+        if pos.market == Market.KR_OPTIONS:
+            return _paper_call_option_premium(underlying_price)
+        return underlying_price
+
     async def _submit_virtual_futures_order(self, order: Order) -> OrderResult:
-        if not self._is_valid_kospi200_symbol(order.symbol):
+        if order.market == Market.KR_OPTIONS:
+            if not is_call_option_order(order):
+                logger.warning(
+                    "options_virtual_non_call_rejected",
+                    symbol=order.symbol,
+                    side=order.side.value,
+                    option_type=order.option_type,
+                    exchange=order.exchange,
+                )
+                return OrderResult(
+                    order_id="", symbol=order.symbol, side=order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected",
+                    market=order.market,
+                    metadata={"error": "only_call_options_allowed"},
+                )
+            if order.side == OrderSide.SELL and order.position_effect != "close":
+                return OrderResult(
+                    order_id="", symbol=order.symbol, side=order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected",
+                    market=order.market,
+                    metadata={"error": "call_option_sell_requires_close"},
+                )
+
+        valid_symbol = (
+            self._is_valid_call_option_symbol(order.symbol)
+            if order.market == Market.KR_OPTIONS
+            else self._is_valid_kospi200_symbol(order.symbol)
+        )
+        if not valid_symbol:
             logger.warning(
                 "futures_virtual_invalid_symbol",
                 symbol=order.symbol,
-                hint="Use 101/105 + month_code(C/F/I/L) + year_digit. Call get_futures_symbols() first.",
+                market=order.market.value,
+                hint="Use a valid futures code or an explicit local call option symbol such as K200_CALL_ATM.",
             )
             return OrderResult(
                 order_id="", symbol=order.symbol, side=order.side,
@@ -178,8 +232,8 @@ class FuturesVirtualAdapter(TradingPort):
                 metadata={"error": f"invalid_symbol:{order.symbol} — call get_futures_symbols() for valid symbols"},
             )
 
-        fill_price = await _fetch_kospi200_price()
-        if fill_price <= 0:
+        underlying_price = await _fetch_kospi200_price()
+        if underlying_price <= 0:
             logger.warning("futures_virtual_no_price", symbol=order.symbol)
             return OrderResult(
                 order_id="", symbol=order.symbol, side=order.side,
@@ -187,9 +241,18 @@ class FuturesVirtualAdapter(TradingPort):
                 market=order.market,
                 metadata={"error": "no_price_data"},
             )
+        fill_price = (
+            _paper_call_option_premium(underlying_price)
+            if order.market == Market.KR_OPTIONS
+            else underlying_price
+        )
 
         mult = order.multiplier or _multiplier_for(order.symbol)
-        order_id = str(uuid4())[:8]
+        order_id = (
+            f"PAPER-CALL-{str(uuid4())[:8]}"
+            if order.market == Market.KR_OPTIONS
+            else str(uuid4())[:8]
+        )
         qty = int(order.quantity)
 
         if order.position_effect == "open":
@@ -220,11 +283,12 @@ class FuturesVirtualAdapter(TradingPort):
                     symbol=order.symbol, side=side, quantity=qty,
                     avg_price=fill_price, multiplier=mult,
                 )
+                self._positions[order.symbol].market = order.market
             logger.info(
-                "futures_virtual_order_filled",
+                "options_virtual_call_order_filled" if order.market == Market.KR_OPTIONS else "futures_virtual_order_filled",
                 order_id=order_id, symbol=order.symbol,
                 side=order.side.value, qty=qty, price=fill_price,
-                effect="open",
+                effect="open", underlying_price=underlying_price,
             )
 
         elif order.position_effect == "close":
@@ -247,10 +311,10 @@ class FuturesVirtualAdapter(TradingPort):
                 pos.quantity -= close_qty
 
             logger.info(
-                "futures_virtual_order_filled",
+                "options_virtual_call_order_filled" if order.market == Market.KR_OPTIONS else "futures_virtual_order_filled",
                 order_id=order_id, symbol=order.symbol,
                 side=order.side.value, qty=close_qty, price=fill_price,
-                effect="close", realized_pnl=realized,
+                effect="close", realized_pnl=realized, underlying_price=underlying_price,
             )
         else:
             return OrderResult(
@@ -268,6 +332,10 @@ class FuturesVirtualAdapter(TradingPort):
             filled_price=fill_price,
             status="filled",
             market=order.market,
+            metadata=(
+                {"option_type": "call", "underlying_price": underlying_price}
+                if order.market == Market.KR_OPTIONS else {}
+            ),
         )
 
     # ── Delegation ────────────────────────────────────────────────────────────

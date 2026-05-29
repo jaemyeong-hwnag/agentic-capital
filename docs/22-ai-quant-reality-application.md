@@ -100,7 +100,7 @@ AI는 자유롭게 결정하지만 모든 행동은 증거로 남는다.
 | `formats.compact.bal` | `AI_DAILY_OP_COST_KRW` 기반 `op_cost`, `net_today` 노출 |
 | `build_agent_tools` | 비용 인식 잔고, 자유 거래/비거래, HR, 동적 도구 생성 제공 |
 | `FuturesSessionGuard` | 자본 제약을 물리적 리스크 가드로 구현 |
-| `FuturesVirtualAdapter` | KIS 모의투자 미니 선물 조회가 실패할 때 자본 한도 내 가상 미니 계약으로 paper loop 지속 |
+| `FuturesVirtualAdapter` | KIS 모의투자 미니 선물 조회가 실패할 때 자본 한도 내 가상 미니 계약으로 paper loop 지속. `kr_options` paper flow에서는 명시적 콜옵션만 KOSPI200 기반 로컬 프리미엄으로 산정해 `PAPER-CALL-*` 체결로 기록하고 풋/불명확 옵션은 거절 |
 | `build_futures_tools.get_futures_symbols` | 현재 자본으로 즉시 거절될 표준 선물 대신 거래 가능한 계약을 우선 노출 |
 
 ## 선물 스캘핑 운영 보정
@@ -114,6 +114,7 @@ AI는 자유롭게 결정하지만 모든 행동은 증거로 남는다.
 2. AI에게 노출되는 심볼은 capital_limit, multiplier, futures_stop_loss_pct 기준으로 필터링한다.
 3. 표준 선물은 자본 한도 초과 시 숨기고, 미니 선물이 감당 가능하면 미니를 우선 노출한다.
 4. 실제 KIS 체결 조회는 선물/옵션 API가 요구하는 주문일자 파라미터로 호출한다.
+5. 옵션 주문은 콜옵션만 허용한다. Trader paper loop는 `kr_options:K200_CALL_ATM`처럼 콜 여부가 명시된 심볼/metadata만 주문 후보로 만들고, 풋옵션 또는 옵션 타입이 불명확한 주문은 어댑터 단에서 거절한다. 로컬 paper 콜옵션은 KOSPI200 지수 가격에서 산출한 프리미엄 포인트로 체결/평가해 소액 paper capital에서도 실제 주문 경로 검증이 가능하게 한다.
 ```
 
 이 보정은 실전 주문 우회가 아니다. `kis_is_paper=True`이고 `futures_virtual_paper_fallback=True`인 경우에만 시뮬레이션 지속성을 위해 적용된다. 실전 모드에서는 브로커가 실제 제공하는 계약과 체결만 사용한다.

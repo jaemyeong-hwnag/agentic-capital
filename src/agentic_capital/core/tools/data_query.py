@@ -827,6 +827,8 @@ def build_agent_tools(
         market: str,
         price: float | None = None,
         exchange: str | None = None,
+        position_effect: str | None = None,
+        option_type: str | None = None,
         reason: str = "",
     ) -> str:
         """Submit a buy or sell order. Returns compact order result."""
@@ -834,12 +836,24 @@ def build_agent_tools(
             return "ERR:no_trading"
         try:
             from agentic_capital.formats.compact import order as _order
-            from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
+            from agentic_capital.ports.trading import (
+                Market,
+                Order,
+                OrderSide,
+                OrderType,
+                infer_option_type,
+            )
 
             # Capital hard limit only — the ONLY system-imposed constraint
             # Position policy is AI-decided and informational only (not enforced here)
             side_l = side.lower()
             market_l = market.lower()
+            if market_l == "kr_options":
+                inferred_option_type = infer_option_type(symbol, option_type, exchange)
+                if inferred_option_type != "call":
+                    return "ERR:only_call_options_allowed"
+                if side_l == "sell" and position_effect != "close":
+                    return "ERR:call_option_sell_requires_close"
             is_paper_overseas = (
                 settings.kis_is_paper
                 and market_l in {"us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
@@ -889,6 +903,8 @@ def build_agent_tools(
                 price=price,
                 market=Market(market),
                 exchange=exchange,
+                position_effect=position_effect,
+                option_type=option_type,
             )
             result = await trading.submit_order(o)
 

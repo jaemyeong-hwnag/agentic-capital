@@ -32,6 +32,7 @@ from agentic_capital.ports.trading import (
     OrderSide,
     Position,
     TradingPort,
+    is_call_option_order,
 )
 
 logger = structlog.get_logger()
@@ -1076,6 +1077,29 @@ class KISTradingAdapter(TradingPort):
 
     async def _submit_futures_order(self, order: Order) -> OrderResult:
         """국내선물/옵션 주문."""
+        if order.market == Market.KR_OPTIONS:
+            if not is_call_option_order(order):
+                logger.warning(
+                    "kis_options_non_call_rejected",
+                    symbol=order.symbol,
+                    side=order.side.value,
+                    option_type=order.option_type,
+                    exchange=order.exchange,
+                )
+                return OrderResult(
+                    order_id="", symbol=order.symbol, side=order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected",
+                    market=order.market,
+                    metadata={"error": "only_call_options_allowed"},
+                )
+            if order.side == OrderSide.SELL and order.position_effect != "close":
+                return OrderResult(
+                    order_id="", symbol=order.symbol, side=order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected",
+                    market=order.market,
+                    metadata={"error": "call_option_sell_requires_close"},
+                )
+
         await self._session.ensure_token()
         action = "order_buy" if order.side == OrderSide.BUY else "order_sell"
         try:
@@ -1137,6 +1161,7 @@ class KISTradingAdapter(TradingPort):
                     "KRX_FWDG_ORD_ORGNO": output.get("KRX_FWDG_ORD_ORGNO", ""),
                     "est_commission": round(est_commission, 0),
                     "commission_rate": _FUT_COMMISSION_RATE,
+                    "option_type": "call" if order.market == Market.KR_OPTIONS else None,
                 },
             )
         except Exception:
