@@ -254,6 +254,25 @@ def test_trade_with_unknown_market_session_is_blocked_and_learnable() -> None:
     assert failure["retrain_candidate"] is True
 
 
+def test_trade_with_nxt_extended_session_is_still_blocked_for_shadow_execution() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "005930",
+        "market": "kr_stock",
+        "quantity": 1,
+        "evidence_ids": ["ev-samsung-risk-001"],
+    }
+    tool_results = {
+        **_complete_tool_results(),
+        "get_market_session": {"exchange": "NXT", "state": "extended", "session": "nxt_pre", "is_open": True, "regular_session": False},
+    }
+
+    with pytest.raises(FinanceShadowValidationError) as exc_info:
+        validate_finance_shadow_payload(payload, tool_results=tool_results)
+
+    assert exc_info.value.code == "trade_when_market_closed"
+
+
 def test_trade_with_conflicting_market_session_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",

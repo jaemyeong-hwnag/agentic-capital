@@ -1,6 +1,6 @@
 """Market clock — multi-market trading hours and session management.
 
-Supports KRX, NASDAQ, NYSE, and other markets including pre/after-hours.
+Supports KRX, NXT, NASDAQ, NYSE, and other markets including pre/after-hours.
 The system checks ALL markets — if any market is open, trading is possible.
 No restrictions on which markets agents can trade.
 """
@@ -21,6 +21,9 @@ _TRADING_DAYS = {0, 1, 2, 3, 4}
 # US pre/after-hours included so agents can trade extended sessions.
 MARKETS = {
     "KRX": (time(9, 0), time(15, 30), KST),              # 한국거래소 정규
+    "NXT_PRE": (time(8, 0), time(8, 50), KST),           # 넥스트레이드 프리마켓
+    "NXT": (time(9, 0, 30), time(15, 20), KST),          # 넥스트레이드 메인마켓
+    "NXT_AFTER": (time(15, 40), time(20, 0), KST),       # 넥스트레이드 애프터마켓
     "NASDAQ": (time(9, 30), time(16, 0), ET),             # 나스닥 정규
     "NYSE": (time(9, 30), time(16, 0), ET),               # 뉴욕증권거래소 정규
     "NASDAQ_PRE": (time(4, 0), time(9, 30), ET),          # 나스닥 프리마켓

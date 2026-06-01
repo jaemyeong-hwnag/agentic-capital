@@ -112,7 +112,7 @@ RAG Gateway가 거부하는 native `tools`/`tool_choice` 필드는 기본 전송
 | `reallocation` | 보유자산 매도 후 재배분 판단 | SELL+BUY 비용 하한 계산 후 우위 비교 |
 | `no_trade_alpha` | 무리한 거래 회피 | 기대값 음수면 wait/observe |
 | `tool_use` | tool 호출 정확도 | get_balance -> get_positions -> evaluate_reallocation |
-| `market_session` | 시장 시간 인지 | KRX closed, NASDAQ premarket 구분 |
+| `market_session` | 시장 시간 인지 | KRX closed, NXT pre/after, NASDAQ premarket 구분 |
 | `futures_guard` | 선물 주문 가드 이해 | live_orders_disabled 상태에서 주문 금지 |
 | `hr_autonomy` | CEO 조직 자율성 | 성과 기반 역할 생성/해고 판단 |
 

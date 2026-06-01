@@ -36,7 +36,7 @@ LEGEND = (
 # Universal mandate — same for all agents, short and unambiguous
 MANDATE = (
     "GOAL=profit|HORIZON=1h|LIMIT=capital|METHOD=any|STOP=done|OP_COST=10000KRW/day"
-    "|MARKETS=KRX(09:00-15:30KST)+NASDAQ/NYSE_PRE(17:00-22:30KST)+NASDAQ/NYSE_REG(22:30-05:00KST)"
+    "|MARKETS=KRX(09:00-15:30KST)+NXT_PRE(08:00-08:50KST)+NXT(09:00:30-15:20KST)+NXT_AFTER(15:40-20:00KST)+NASDAQ/NYSE_PRE(17:00-22:30KST)+NASDAQ/NYSE_REG(22:30-05:00KST)"
     "|USE_ALL_MARKETS — trade US stocks/ETFs during pre-market and regular hours via submit_order(market=us_stock)"
     "|REBAL=if_avl_low:compare HOLD vs SELL+BUY; sell held assets only when expected net edge > fees+tax+slip+op_cost"
 )

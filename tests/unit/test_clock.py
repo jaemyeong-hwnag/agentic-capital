@@ -28,6 +28,18 @@ class TestIsMarketOpenFor:
         dt = datetime(2026, 3, 16, 15, 30, tzinfo=KST)
         assert is_market_open_for("KRX", dt) is False
 
+    def test_nxt_pre_open(self):
+        dt = datetime(2026, 3, 16, 8, 30, tzinfo=KST)
+        assert is_market_open_for("NXT_PRE", dt) is True
+
+    def test_nxt_regular_open(self):
+        dt = datetime(2026, 3, 16, 10, 0, tzinfo=KST)
+        assert is_market_open_for("NXT", dt) is True
+
+    def test_nxt_after_open(self):
+        dt = datetime(2026, 3, 16, 16, 0, tzinfo=KST)
+        assert is_market_open_for("NXT_AFTER", dt) is True
+
     def test_nasdaq_open(self):
         dt = datetime(2026, 3, 16, 10, 0, tzinfo=EDT)
         assert is_market_open_for("NASDAQ", dt) is True
@@ -78,6 +90,10 @@ class TestIsMarketOpenFor:
 
 
 class TestIsMarketOpen:
+    def test_nxt_pre_only(self):
+        dt = datetime(2026, 3, 16, 8, 30, tzinfo=KST)
+        assert is_market_open(dt) is True
+
     def test_krx_hours_only(self):
         # Monday 10:00 KST → KRX open, US closed
         dt = datetime(2026, 3, 16, 10, 0, tzinfo=KST)
@@ -99,18 +115,31 @@ class TestIsMarketOpen:
         assert is_market_open(dt) is False
 
     def test_gap_between_markets(self):
-        # Monday 8:00 KST = Sunday 23:00 EDT (weekend) → both closed
-        dt = datetime(2026, 3, 16, 8, 0, tzinfo=KST)
+        # Monday 07:59 KST = before NXT pre-market and before KRX regular
+        dt = datetime(2026, 3, 16, 7, 59, tzinfo=KST)
         assert is_market_open(dt) is False
 
 
 class TestGetOpenMarkets:
+    def test_nxt_pre_open(self):
+        dt = datetime(2026, 3, 16, 8, 30, tzinfo=KST)
+        markets = get_open_markets(dt)
+        assert "NXT_PRE" in markets
+        assert "KRX" not in markets
+
     def test_krx_open(self):
         dt = datetime(2026, 3, 16, 10, 0, tzinfo=KST)
         markets = get_open_markets(dt)
         assert "KRX" in markets
+        assert "NXT" in markets
         assert "NASDAQ" not in markets
         assert "NASDAQ_PRE" not in markets
+
+    def test_nxt_after_open(self):
+        dt = datetime(2026, 3, 16, 16, 0, tzinfo=KST)
+        markets = get_open_markets(dt)
+        assert "NXT_AFTER" in markets
+        assert "KRX" not in markets
 
     def test_us_regular_open(self):
         dt = datetime(2026, 3, 16, 23, 30, tzinfo=KST)
@@ -148,8 +177,7 @@ class TestSecondsUntilMarketOpen:
 
     def test_before_krx_open(self):
         dt = datetime(2026, 3, 16, 8, 0, tzinfo=KST)
-        # 1 hour until KRX 09:00
-        assert seconds_until_market_open(dt) == 3600
+        assert seconds_until_market_open(dt) == 0
 
     def test_saturday(self):
         dt = datetime(2026, 3, 21, 12, 0, tzinfo=KST)

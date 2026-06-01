@@ -104,6 +104,9 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   agentic-capital이 tiny paper scout order를 제출해 운영 loop를 복구할 수 있다. 이 주문 브리지는
   `KIS_IS_PAPER=true`, `FUTURES_LIVE_ORDERS_ENABLED=false`,
   `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`일 때만 동작하고 live 주문 권한이 아니다.
+- `market_session`에는 KRX 외에도 NXT 프리/메인/애프터 세션을 기록할 수 있다. 다만 현재
+  `kr_stock` paper 주문 경로는 별도 NXT 주문 라우팅을 구현하지 않았으므로, NXT extended session은
+  시장 관측/의사결정 컨텍스트에는 포함하되 정규 KRX session과 동일한 주문 개방 신호로 쓰지 않는다.
 - KRX/해외 현물 종목 1주 가격이 `LOCAL_FINANCE_RISK_PER_TRADE_PCT`로 산정한 risk budget보다 커도,
   총 주문 가능 한도(`available`, `max_order_value`, `capital_limit`) 안에 1주가 들어오면
   minimum board-lot paper scout로 1주를 제출한다. 그렇지 않으면 quantity는 0으로 유지되고 주문하지 않는다.

@@ -183,19 +183,54 @@ def _symbol_from_plan(tool_plan_payload: dict[str, Any], fallback: str = "") -> 
 def _market_session_from_open_markets(open_markets: list[str] | None, market: str) -> dict[str, Any]:
     market_l = _market_key(market or "kr_stock")
     open_values = {str(item).upper() for item in (open_markets or [])}
-    exchange = "KRX" if market_l.startswith("kr_") else "NASDAQ" if market_l == "us_stock" else "NYSE"
-    is_open = (
-        exchange in open_values
-        or market_l.upper() in open_values
-        or any(item.startswith(f"{exchange}_") for item in open_values)
-    )
+    if market_l.startswith("kr_"):
+        if "KRX" in open_values:
+            exchange = "KRX"
+            state = "regular"
+            session = "regular"
+            is_open = True
+            regular_session = True
+        elif "NXT" in open_values:
+            exchange = "NXT"
+            state = "regular"
+            session = "nxt_regular"
+            is_open = True
+            regular_session = False
+        elif "NXT_PRE" in open_values:
+            exchange = "NXT"
+            state = "extended"
+            session = "nxt_pre"
+            is_open = True
+            regular_session = False
+        elif "NXT_AFTER" in open_values:
+            exchange = "NXT"
+            state = "extended"
+            session = "nxt_after"
+            is_open = True
+            regular_session = False
+        else:
+            exchange = "KRX"
+            state = "closed"
+            session = "closed"
+            is_open = False
+            regular_session = False
+    else:
+        exchange = "NASDAQ" if market_l == "us_stock" else "NYSE"
+        is_open = (
+            exchange in open_values
+            or market_l.upper() in open_values
+            or any(item.startswith(f"{exchange}_") for item in open_values)
+        )
+        state = "regular" if is_open else "closed"
+        session = "regular" if is_open else "closed"
+        regular_session = is_open
     return {
         "market": market_l or "kr_stock",
         "exchange": exchange,
-        "state": "regular" if is_open else "closed",
-        "session": "regular" if is_open else "closed",
+        "state": state,
+        "session": session,
         "is_open": is_open,
-        "regular_session": is_open,
+        "regular_session": regular_session,
         "open_markets": sorted(open_values),
     }
 
