@@ -50,6 +50,37 @@ def test_finance_paper_order_plan_allows_overseas_buy_with_local_paper_price():
     assert plan["quantity"] == 1
 
 
+def test_finance_paper_order_plan_allows_overseas_buy_during_premarket():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.2),
+    ):
+        plan = _finance_paper_order_plan(
+            record={
+                "paper_trade_only": True,
+                "within_risk_limit": True,
+                "would_submit_order": True,
+                "market": "us_stock",
+                "symbol": "AAPL",
+            },
+            decision={"action": "BUY", "symbol": "AAPL", "market": "us_stock", "exchange": "NASD"},
+            tool_results={
+                **_tool_results(),
+                "get_market_session": {"exchange": "NASDAQ", "state": "pre", "session": "pre", "is_open": True, "regular_session": False},
+            },
+            primary_symbol="AAPL",
+            primary_market="us_stock",
+            open_markets=["NASDAQ_PRE"],
+            capital_limit=10_000.0,
+        )
+
+    assert plan is not None
+    assert plan["market"] == "us_stock"
+    assert plan["price"] == 185.0
+
+
 def test_finance_paper_order_plan_allows_overseas_sell_when_position_owned():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
@@ -108,6 +139,38 @@ def test_finance_paper_order_plan_allows_call_option_buy_without_quote_price():
     assert plan["position_effect"] == "open"
     assert plan["quantity"] == 1
     assert plan["price"] is None
+
+
+def test_finance_paper_order_plan_allows_call_option_buy_with_explicit_night_session():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+    ):
+        plan = _finance_paper_order_plan(
+            record={
+                "paper_trade_only": True,
+                "within_risk_limit": True,
+                "would_submit_order": True,
+                "market": "kr_options",
+                "symbol": "K200_CALL_ATM",
+                "option_type": "call",
+            },
+            decision={"action": "BUY", "symbol": "K200_CALL_ATM", "market": "kr_options"},
+            tool_results={
+                **_tool_results(),
+                "get_market_session": {"exchange": "NIGHT", "state": "night", "session": "night", "is_open": True, "regular_session": False},
+                "get_quote": {"price": 0.0, "market": "kr_options"},
+            },
+            primary_symbol="K200_CALL_ATM",
+            primary_market="kr_options",
+            open_markets=[],
+            capital_limit=10_000.0,
+        )
+
+    assert plan is not None
+    assert plan["market"] == "kr_options"
+    assert plan["option_type"] == "call"
 
 
 def test_finance_paper_order_plan_rejects_put_option():

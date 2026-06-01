@@ -196,7 +196,8 @@ async def test_collect_finance_decision_tool_results_treats_us_premarket_as_open
 
     assert result["get_market_session"]["exchange"] == "NASDAQ"
     assert result["get_market_session"]["is_open"] is True
-    assert result["get_market_session"]["state"] == "regular"
+    assert result["get_market_session"]["state"] == "pre"
+    assert result["get_market_session"]["regular_session"] is False
 
 
 @pytest.mark.asyncio
@@ -215,6 +216,24 @@ async def test_collect_finance_decision_tool_results_marks_nxt_premarket_open_bu
     assert result["get_market_session"]["is_open"] is True
     assert result["get_market_session"]["regular_session"] is False
     assert result["get_market_session"]["session"] == "nxt_pre"
+
+
+@pytest.mark.asyncio
+async def test_collect_finance_decision_tool_results_marks_night_session_open_for_kr_options():
+    result = await collect_finance_decision_tool_results(
+        tool_plan_payload={"tool_plan": [{"tool": "get_market_session"}]},
+        trading=_make_trading(),
+        market_data=_make_market_data(),
+        symbol="K200_CALL_ATM",
+        market="kr_options",
+        open_markets=["NIGHT"],
+        capital_limit=1_000_000,
+    )
+
+    assert result["get_market_session"]["exchange"] == "NIGHT"
+    assert result["get_market_session"]["is_open"] is True
+    assert result["get_market_session"]["state"] == "night"
+    assert result["get_market_session"]["regular_session"] is False
 
 
 @pytest.mark.asyncio

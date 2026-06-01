@@ -273,6 +273,48 @@ def test_trade_with_nxt_extended_session_is_still_blocked_for_shadow_execution()
     assert exc_info.value.code == "trade_when_market_closed"
 
 
+def test_trade_during_us_premarket_is_allowed() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "AAPL",
+        "market": "us_stock",
+        "quantity": 1,
+        "evidence_ids": ["ev-aapl-risk-001"],
+    }
+    tool_results = {
+        "get_balance": {"available": 1_000_000, "total": 1_000_000, "currency": "USD"},
+        "get_positions": [],
+        "get_quote": {"symbol": "AAPL", "price": 185.0, "market": "us_stock"},
+        "get_market_session": {"exchange": "NASDAQ", "state": "pre", "session": "pre", "is_open": True, "regular_session": False},
+        "get_risk_limit": {"max_order_value": 1_000_000},
+        "search_rag": {"evidence_ids": ["ev-aapl-risk-001"]},
+    }
+
+    validation = validate_finance_shadow_payload(payload, tool_results=tool_results)
+    assert validation["would_submit_order"] is True
+
+
+def test_trade_during_night_session_is_allowed_for_kr_options() -> None:
+    payload = {
+        "action": "BUY",
+        "symbol": "K200_CALL_ATM",
+        "market": "kr_options",
+        "quantity": 1,
+        "evidence_ids": ["ev-call-risk-001"],
+    }
+    tool_results = {
+        "get_balance": {"available": 1_000_000, "total": 1_000_000, "currency": "KRW"},
+        "get_positions": [],
+        "get_quote": {"symbol": "K200_CALL_ATM", "price": 42.0, "market": "kr_options"},
+        "get_market_session": {"exchange": "NIGHT", "state": "night", "session": "night", "is_open": True, "regular_session": False},
+        "get_risk_limit": {"max_order_value": 1_000_000},
+        "search_rag": {"evidence_ids": ["ev-call-risk-001"]},
+    }
+
+    validation = validate_finance_shadow_payload(payload, tool_results=tool_results)
+    assert validation["would_submit_order"] is True
+
+
 def test_trade_with_conflicting_market_session_is_blocked_and_learnable() -> None:
     payload = {
         "action": "BUY",

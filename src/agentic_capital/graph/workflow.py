@@ -500,15 +500,33 @@ def _finance_failure_recovery_decision(
     }
 
 
-def _market_session_open(tool_results: dict[str, Any], open_markets: list[str] | None) -> bool:
+def _market_session_open(tool_results: dict[str, Any], open_markets: list[str] | None, market: str) -> bool:
     session = tool_results.get("get_market_session")
+    market_l = str(market or "").lower()
+    open_values = {str(item).upper() for item in (open_markets or [])}
     if isinstance(session, dict):
         state = str(session.get("state") or session.get("status") or "").lower()
+        named_session = str(session.get("session") or "").lower()
+        exchange = str(session.get("exchange") or "").upper()
+        if state in {"closed", "halted", "suspended"}:
+            return False
+        if exchange == "NXT" and named_session in {"nxt_pre", "nxt_after"}:
+            return False
+        if market_l == _PAPER_CALL_OPTION_MARKET and (state == "night" or named_session == "night"):
+            return True
+        if market_l == "us_stock" and state in {"open", "regular", "regular_open", "pre", "preopen", "post", "after_hours"}:
+            return True
         if state in {"open", "regular", "regular_open"}:
             return True
-        if state in {"closed", "halted", "suspended", "pre", "preopen", "post", "after_hours"}:
-            return False
-    return any(str(market).upper() == "KRX" for market in (open_markets or []))
+        if named_session == "nxt_regular":
+            return True
+        if session.get("is_open") is True and market_l == "us_stock" and exchange in {"NASDAQ", "NYSE"}:
+            return True
+    if market_l == _PAPER_CALL_OPTION_MARKET:
+        return "NIGHT" in open_values or "KRX" in open_values
+    if market_l == "us_stock":
+        return any(item in {"NASDAQ", "NYSE", "NASDAQ_PRE", "NYSE_PRE", "NASDAQ_AFTER", "NYSE_AFTER"} for item in open_values)
+    return "KRX" in open_values
 
 
 def _paper_market_session_open(
@@ -516,7 +534,7 @@ def _paper_market_session_open(
     open_markets: list[str] | None,
     market: str,
 ) -> bool:
-    if _market_session_open(tool_results, open_markets):
+    if _market_session_open(tool_results, open_markets, market):
         return True
     if market == _PAPER_CALL_OPTION_MARKET and settings.kis_is_paper:
         return any(str(item).upper() == "NIGHT" for item in (open_markets or []))

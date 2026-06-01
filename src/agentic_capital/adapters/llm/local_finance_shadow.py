@@ -24,8 +24,8 @@ ORDER_TOOLS = {
     "place_order",
     "execute_trade",
 }
-OPEN_MARKET_SESSION_STATES = {"open", "regular", "regular_open"}
-CLOSED_MARKET_SESSION_STATES = {"closed", "halted", "suspended", "pre", "preopen", "post", "after_hours"}
+OPEN_MARKET_SESSION_STATES = {"open", "regular", "regular_open", "pre", "preopen", "post", "after_hours", "night"}
+CLOSED_MARKET_SESSION_STATES = {"closed", "halted", "suspended"}
 PROFIT_GUARANTEE_TERMS = (
     "guaranteed profit",
     "profit guaranteed",
@@ -381,12 +381,18 @@ def _market_session_is_open(tool_results: dict[str, Any]) -> bool:
     session = tool_results.get("get_market_session")
     if not isinstance(session, dict):
         return False
-    if session.get("is_open") is False or session.get("regular_session") is False:
+    if session.get("is_open") is False:
         return False
     state = str(session.get("state") or session.get("session") or "").lower()
+    exchange = str(session.get("exchange") or "").upper()
+    named_session = str(session.get("session") or "").lower()
     if state in CLOSED_MARKET_SESSION_STATES:
         return False
+    if exchange == "NXT" and named_session in {"nxt_pre", "nxt_after"}:
+        return False
     if state in OPEN_MARKET_SESSION_STATES:
+        return True
+    if named_session == "nxt_regular":
         return True
     return session.get("is_open") is True or session.get("regular_session") is True
 

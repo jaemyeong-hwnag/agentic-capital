@@ -205,7 +205,7 @@ tool name으로 결과를 붙인다. 따라서 `agent_cycles.tool_sequence`에�
 - `get_quote.price`가 있으면 model payload의 `price`나 `notional`보다 우선해서 주문 규모를 계산한다.
 - quote가 없는 경우에도 `quantity`, payload `price`, 또는 명시적 `notional`로 주문 규모를 계산할 수 있다.
 - `SELL`은 `get_positions`의 보유 수량을 넘지 않는다.
-- market session이 명시적으로 open/regular 상태다. 빈 값, 미확인 상태, closed/halted 등 닫힌 상태와 open flag가 충돌하는 경우는 매매 불가로 본다.
+- market session이 명시적으로 열려 있다. KRX 정규장, US pre/regular/after-hours, `NIGHT`처럼 허용된 세션은 매매 가능으로 보되, 빈 값/미확인/closed/halted/suspended 또는 지원하지 않는 NXT extended-only 세션은 매매 불가로 본다.
 - reason/final answer에 수익 보장 표현이 없다.
 
 위 조건 미달이면 주문 대신 `raw_model_failure` record를 만들고, `retrain_candidate=true`로 남겨 raw model failure 학습 루프에 넣는다.

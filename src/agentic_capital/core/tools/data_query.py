@@ -183,7 +183,56 @@ def _symbol_from_plan(tool_plan_payload: dict[str, Any], fallback: str = "") -> 
 def _market_session_from_open_markets(open_markets: list[str] | None, market: str) -> dict[str, Any]:
     market_l = _market_key(market or "kr_stock")
     open_values = {str(item).upper() for item in (open_markets or [])}
-    if market_l.startswith("kr_"):
+    if market_l == "us_stock":
+        if "NASDAQ" in open_values:
+            exchange = "NASDAQ"
+            state = "regular"
+            session = "regular"
+            is_open = True
+            regular_session = True
+        elif "NYSE" in open_values:
+            exchange = "NYSE"
+            state = "regular"
+            session = "regular"
+            is_open = True
+            regular_session = True
+        elif "NASDAQ_PRE" in open_values:
+            exchange = "NASDAQ"
+            state = "pre"
+            session = "pre"
+            is_open = True
+            regular_session = False
+        elif "NYSE_PRE" in open_values:
+            exchange = "NYSE"
+            state = "pre"
+            session = "pre"
+            is_open = True
+            regular_session = False
+        elif "NASDAQ_AFTER" in open_values:
+            exchange = "NASDAQ"
+            state = "after_hours"
+            session = "after_hours"
+            is_open = True
+            regular_session = False
+        elif "NYSE_AFTER" in open_values:
+            exchange = "NYSE"
+            state = "after_hours"
+            session = "after_hours"
+            is_open = True
+            regular_session = False
+        else:
+            exchange = "NASDAQ"
+            state = "closed"
+            session = "closed"
+            is_open = False
+            regular_session = False
+    elif market_l in {"kr_options", "kr_futures"} and "NIGHT" in open_values:
+        exchange = "NIGHT"
+        state = "night"
+        session = "night"
+        is_open = True
+        regular_session = False
+    elif market_l.startswith("kr_"):
         if "KRX" in open_values:
             exchange = "KRX"
             state = "regular"
