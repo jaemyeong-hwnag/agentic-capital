@@ -266,7 +266,7 @@ def _build_system_prompt(agent: BaseAgent) -> str:
     if "CEO" in agent_class:
         role = "CEO"
     elif "Analyst" in agent_class:
-        role = "analyst"
+        role = str(getattr(agent, "role", "") or "analyst")
     else:
         role = "trader"
 
@@ -1736,6 +1736,7 @@ async def run_agent_cycle(
                     "prompt_summary": _compact_text(system_prompt, limit=700),
                     "cycle_trigger": cycle_trigger,
                     "agent_role": _agent_tool_role(agent),
+                    "declared_role": str(getattr(agent, "role", "") or _agent_tool_role(agent)),
                     "tool_names": [str(getattr(tool, "name", "")) for tool in tools],
                 },
                 "agent_response": {

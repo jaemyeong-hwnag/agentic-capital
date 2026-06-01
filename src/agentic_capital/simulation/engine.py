@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from typing import TYPE_CHECKING
 
 import structlog
 
 from agentic_capital.config import settings
-from agentic_capital.core.agents.base import BaseAgent
-from agentic_capital.core.agents.factory import create_agent, create_random_personality
-from agentic_capital.core.personality.models import EmotionState
+from agentic_capital.core.agents.factory import create_agent
+from agentic_capital.core.organization.audit import audit_roster
 from agentic_capital.graph.workflow import run_agent_cycle
 from agentic_capital.infra.tracing import setup_tracing
 from agentic_capital.simulation.clock import get_open_markets, is_market_open
+
+if TYPE_CHECKING:
+    from agentic_capital.core.agents.base import BaseAgent
 
 logger = structlog.get_logger()
 
@@ -134,8 +136,8 @@ class SimulationEngine:
     async def _init_recorder(self) -> None:
         """Initialize DB recorder if database is available."""
         try:
-            from agentic_capital.infra.database import async_session
             from agentic_capital.adapters.llm.router import llm_run_metadata
+            from agentic_capital.infra.database import async_session
             from agentic_capital.simulation.recorder import SimulationRecorder
 
             session = async_session()
@@ -158,9 +160,10 @@ class SimulationEngine:
                 await self._recorder.record_agent(
                     agent_id=agent.agent_id,
                     name=agent.name,
-                    role=type(agent).__name__,
+                    role=agent.role,
                     philosophy=agent.profile.philosophy,
                     personality=agent.personality,
+                    allocated_capital=agent.profile.allocated_capital,
                 )
 
             await self._recorder.commit()
@@ -285,10 +288,8 @@ class SimulationEngine:
                     available_cash=available_cash,
                     agents_count=len(self._agents),
                     org_snapshot={
-                        "agents": [
-                            {"id": str(a.agent_id), "name": a.name, "role": type(a).__name__}
-                            for a in self._agents
-                        ],
+                        "agents": audit_roster(self._agents)["active_agents"],
+                        "organization_health": audit_roster(self._agents),
                         "broker_balance": {
                             "total": balance.total,
                             "available": balance.available,
@@ -476,9 +477,13 @@ class SimulationEngine:
 
     async def _handle_hire(self, ceo: BaseAgent, decision: dict) -> None:
         """Execute a hire decision — create new agent."""
-        role = decision.get("detail", decision.get("role", "trader")).lower()
-        base_name = decision.get("target", f"Agent-{len(self._agents) + 1}")
-        capital = float(decision.get("capital", 0))
+        role = str(decision.get("detail", decision.get("role", "trader")) or "trader").strip().lower()
+        base_name = str(decision.get("target", f"Agent-{len(self._agents) + 1}") or "").strip()
+        if not base_name:
+            base_name = f"Agent-{len(self._agents) + 1}"
+        requested_capital = max(0.0, float(decision.get("capital", 0) or 0.0))
+        capital = min(requested_capital, max(0.0, self._capital_limit))
+        philosophy = str(decision.get("philosophy") or decision.get("reason") or "")
         personality_spec = decision.get("personality", {})
 
         # Deduplicate by name — append UUID suffix if name already taken
@@ -506,6 +511,7 @@ class SimulationEngine:
 
             new_agent = create_agent(
                 allocated_capital=capital,
+                philosophy=philosophy,
                 **kwargs,
             )
             self._agents.append(new_agent)
@@ -518,6 +524,8 @@ class SimulationEngine:
                     role=role,
                     philosophy=new_agent.profile.philosophy,
                     personality=new_agent.personality,
+                    allocated_capital=capital,
+                    created_by=ceo.agent_id,
                 )
                 from agentic_capital.core.organization.hr import HREvent, HREventType
                 await self._recorder.record_hr_event(HREvent(
@@ -526,9 +534,22 @@ class SimulationEngine:
                     decided_by=ceo.agent_id,
                     reasoning=decision.get("reason", ""),
                     new_capital=capital,
+                    context_snapshot={
+                        "requested_capital": requested_capital,
+                        "allocated_capital": capital,
+                        "role": role,
+                        "name": name,
+                    },
                 ))
 
-            logger.info("agent_hired", name=name, role=role, hired_by=ceo.name)
+            logger.info(
+                "agent_hired",
+                name=name,
+                role=role,
+                hired_by=ceo.name,
+                requested_capital=requested_capital,
+                allocated_capital=capital,
+            )
 
         except Exception:
             logger.exception("hire_failed", name=name)
@@ -545,6 +566,12 @@ class SimulationEngine:
                 break
 
         if not agent_to_fire or agent_to_fire is ceo:
+            logger.warning(
+                "agent_fire_skipped",
+                target=target,
+                decided_by=ceo.name,
+                reason="self_or_missing_agent",
+            )
             return  # Can't fire self or nonexistent agent
 
         self._agents.remove(agent_to_fire)

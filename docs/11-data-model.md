@@ -70,6 +70,11 @@
 | created_at | TIMESTAMPTZ | 채용 시점 |
 | created_by | UUID | 채용 결정자 |
 
+런타임의 `AgentProfile.role`은 AI가 선언한 원래 역할명을 보존한다. 커스텀 역할은 실행 클래스상
+`AnalystAgent`로 동작할 수 있지만, company snapshot의 `organization_health.active_agents`에는
+선언 역할(`role`)과 실행 클래스(`runtime_class`)가 함께 기록된다. 채용 시 `allocated_capital`과
+`created_by`도 `agents` 테이블에 기록한다.
+
 ### agent_personality 테이블 (현재 성격 — 경험으로 변동)
 
 | 컬럼 | 타입 | 설명 |

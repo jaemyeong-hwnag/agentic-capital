@@ -8,7 +8,7 @@ import pytest
 
 from agentic_capital.core.decision.pipeline import TradingDecision
 from agentic_capital.core.personality.models import EmotionState, PersonalityVector
-from agentic_capital.infra.models.agent import AgentDecisionModel, RawModelFailureModel
+from agentic_capital.infra.models.agent import AgentDecisionModel, AgentModel, RawModelFailureModel
 from agentic_capital.infra.models.cycle import AgentCycleModel
 from agentic_capital.infra.models.memory import EpisodicDetailModel, MemoryModel
 from agentic_capital.simulation.recorder import SimulationRecorder, _emotion_to_dict, _personality_to_dict
@@ -91,9 +91,15 @@ class TestSimulationRecorder:
             role="trader",
             philosophy="test",
             personality=PersonalityVector(),
+            allocated_capital=125_000,
+            created_by=uuid.uuid4(),
         )
         # Two adds: AgentModel + AgentPersonalityModel
         assert recorder._session.add.call_count == 2
+        agent_record = recorder._session.add.call_args_list[0].args[0]
+        assert isinstance(agent_record, AgentModel)
+        assert agent_record.allocated_capital == 125_000
+        assert agent_record.created_by is not None
 
     @pytest.mark.asyncio
     async def test_record_decision_hold(self):

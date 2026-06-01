@@ -5,11 +5,11 @@ from uuid import uuid4
 
 import pytest
 
+from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.base import AgentProfile
 from agentic_capital.core.agents.ceo import CEOAgent
-from agentic_capital.core.agents.analyst import AnalystAgent
 from agentic_capital.core.agents.factory import create_random_personality
-from agentic_capital.core.personality.models import PersonalityVector
+from agentic_capital.core.organization.audit import audit_roster
 from agentic_capital.ports.llm import LLMPort
 from agentic_capital.simulation.engine import SimulationEngine
 
@@ -22,7 +22,7 @@ def _make_llm(response='{"actions": [], "confidence": 0.5}'):
 
 
 def _make_profile(name="Test"):
-    return AgentProfile(id=uuid4(), name=name, philosophy="test")
+    return AgentProfile(id=uuid4(), name=name, role="analyst", philosophy="test")
 
 
 class TestSimulationEngine:
@@ -776,6 +776,59 @@ class TestSimulationEngine:
         hired_name = call_kwargs.get("name", mock_create.call_args[0][0] if mock_create.call_args[0] else "")
         assert hired_name != "RiskManager-Rho"
         assert "RiskManager-Rho-" in hired_name
+
+    @pytest.mark.asyncio
+    async def test_hire_preserves_custom_role_philosophy_and_capital_recording(self):
+        """CEO-created roles survive runtime creation and DB audit metadata."""
+        engine = SimulationEngine()
+        engine._capital_limit = 500_000
+        llm = _make_llm()
+        engine._llm = llm
+        engine._trading = MagicMock()
+
+        ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=llm)
+        engine._agents = [ceo]
+        engine._recorder = MagicMock()
+        engine._recorder.record_agent = AsyncMock()
+        engine._recorder.record_hr_event = AsyncMock()
+
+        result = {
+            "decisions": [
+                {
+                    "type": "hire",
+                    "target": "RiskManager-Rho",
+                    "detail": "risk_manager",
+                    "reason": "watch drawdown and decision ROI",
+                    "capital": 900_000,
+                }
+            ],
+        }
+
+        await engine._process_org_actions(ceo, result)
+
+        hired = engine._agents[1]
+        assert hired.role == "risk_manager"
+        assert hired.profile.philosophy == "watch drawdown and decision ROI"
+        assert hired.profile.allocated_capital == 500_000
+        engine._recorder.record_agent.assert_awaited_once()
+        call_kwargs = engine._recorder.record_agent.await_args.kwargs
+        assert call_kwargs["role"] == "risk_manager"
+        assert call_kwargs["allocated_capital"] == 500_000
+        assert call_kwargs["created_by"] == ceo.agent_id
+
+    def test_audit_roster_reports_declared_role_and_runtime_class(self):
+        llm = _make_llm()
+        analyst = AnalystAgent(
+            profile=AgentProfile(id=uuid4(), name="RiskManager-Rho", role="risk_manager", philosophy="test"),
+            personality=create_random_personality(99),
+            llm=llm,
+        )
+
+        audit = audit_roster([analyst])
+
+        assert audit["ok"] is True
+        assert audit["active_agents"][0]["role"] == "risk_manager"
+        assert audit["active_agents"][0]["runtime_class"] == "AnalystAgent"
 
     @pytest.mark.asyncio
     async def test_process_org_actions_skips_duplicate_hires_in_same_cycle(self):

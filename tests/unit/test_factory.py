@@ -22,9 +22,11 @@ class TestAgentFactory:
     def test_create_agent_profile(self) -> None:
         profile = create_agent_profile(
             name="Analyst Alpha",
+            role="sector_researcher",
             philosophy="Technical analysis first",
             allocated_capital=50_000.0,
         )
         assert profile.name == "Analyst Alpha"
+        assert profile.role == "sector_researcher"
         assert profile.allocated_capital == 50_000.0
         assert profile.id is not None

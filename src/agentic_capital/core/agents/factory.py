@@ -38,6 +38,7 @@ def create_random_personality(seed: int | None = None) -> PersonalityVector:
 
 def create_agent_profile(
     name: str,
+    role: str = "agent",
     philosophy: str = "",
     allocated_capital: float = 0.0,
 ) -> AgentProfile:
@@ -45,6 +46,7 @@ def create_agent_profile(
     return AgentProfile(
         id=uuid4(),
         name=name,
+        role=role,
         philosophy=philosophy,
         allocated_capital=allocated_capital,
     )
@@ -82,7 +84,7 @@ def create_agent(
     from agentic_capital.ports.llm import LLMPort
     from agentic_capital.ports.trading import TradingPort
 
-    profile = create_agent_profile(name, philosophy, allocated_capital)
+    profile = create_agent_profile(name, role, philosophy, allocated_capital)
     p = personality or create_random_personality(seed)
 
     if not isinstance(llm, LLMPort):

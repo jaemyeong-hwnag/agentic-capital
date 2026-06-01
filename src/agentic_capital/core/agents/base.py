@@ -13,6 +13,7 @@ class AgentProfile(BaseModel):
 
     id: UUID
     name: str
+    role: str = "agent"
     role_id: UUID | None = None
     philosophy: str = ""
     allocated_capital: float = 0.0
@@ -57,6 +58,10 @@ class BaseAgent(ABC):
     @property
     def name(self) -> str:
         return self.profile.name
+
+    @property
+    def role(self) -> str:
+        return self.profile.role
 
 
 class AgentContext(BaseModel):

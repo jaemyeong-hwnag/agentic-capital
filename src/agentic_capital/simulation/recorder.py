@@ -150,6 +150,9 @@ class SimulationRecorder:
         role: str,
         philosophy: str,
         personality: PersonalityVector,
+        *,
+        allocated_capital: float = 0.0,
+        created_by: uuid.UUID | None = None,
     ) -> None:
         """Record agent creation."""
         agent = AgentModel(
@@ -158,6 +161,8 @@ class SimulationRecorder:
             name=name,
             status="active",
             philosophy=philosophy,
+            allocated_capital=max(0.0, float(allocated_capital or 0.0)),
+            created_by=created_by,
         )
         self._session.add(agent)
 
