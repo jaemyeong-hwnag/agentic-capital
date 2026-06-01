@@ -100,6 +100,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_FINANCE_TOOL_PLANNER_BASE_URL` | 선택 | `finance_tool_planner_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
 | `LOCAL_FINANCE_DECISION_BASE_URL` | 선택 | `finance_decision_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용. `search_rag`도 기본적으로 이 gateway의 `/search`를 사용 |
 | `LOCAL_FINANCE_RISK_GUARD_BASE_URL` | 선택 | `finance_risk_guard_model` 전용 gateway `/v1` URL. 비우면 `LOCAL_LLM_BASE_URL` 사용 |
+| `LOCAL_RUNTIME_HEALTHCHECK_ENABLED` | 선택 | 기본값 `true`. 각 simulation cycle 시작 시 CEO/Analyst용 local agent LLM, finance 4단계 sidecar, psychology sidecar, DB를 자동 health check하고 `company_snapshots.org_snapshot.runtime_health`와 `runtime_health_check` 로그에 남긴다. 주문 제출/취소/수량 변경은 하지 않는다 |
 | `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
 | `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |

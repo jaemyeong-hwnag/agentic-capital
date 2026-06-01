@@ -235,6 +235,14 @@ class SimulationEngine:
         market_open = is_market_open()
         open_markets = get_open_markets()
         logger.info("cycle_start", cycle=self._cycle_count, market_open=market_open, open_markets=open_markets)
+        runtime_health: dict | None = None
+        if settings.local_runtime_healthcheck_enabled:
+            try:
+                from agentic_capital.monitoring.runtime_health import collect_runtime_health
+
+                runtime_health = await collect_runtime_health()
+            except Exception:
+                logger.exception("runtime_health_check_failed", cycle=self._cycle_count)
 
         # Run each agent through LangGraph workflow
         cycle_results = []
@@ -287,6 +295,7 @@ class SimulationEngine:
                             "currency": balance.currency,
                         },
                         "paper_allocated_capital": allocated_capital,
+                        "runtime_health": runtime_health,
                     },
                 )
                 await self._recorder.commit()

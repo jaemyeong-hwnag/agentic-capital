@@ -46,6 +46,16 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 
 기본값은 zero-decision 5 cycles, minimum pacing 60 seconds다.
 
+`LOCAL_RUNTIME_HEALTHCHECK_ENABLED=true`이면 각 cycle 시작 시 다음 local-only 의존성을 자동 점검한다.
+
+- CEO/Analyst용 `agentic_capital_react_model` local agent runtime.
+- Trader 전용 finance sidecar 4단계: `finance_rag_query_model`, `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model`.
+- context-only psychology sidecar `psychology_model_suite`.
+- paper simulation DB 연결.
+
+점검 결과는 `runtime_health_check` 로그와 `company_snapshots.org_snapshot.runtime_health`에 저장한다.
+이 health check는 관측 전용이며 BUY/SELL, 수량, 주문 권한, 자본 배분, risk limit을 바꾸지 않는다.
+
 로컬 ReAct loop는 기본적으로 OpenAI native tool payload를 전송하지 않는다.
 `LOCAL_LLM_SEND_NATIVE_TOOLS=false`일 때 tool 목록은 compact system prompt로 들어가며,
 서버가 native tool calling을 지원한다는 smoke/eval이 끝난 경우에만 `true`로 전환한다.

@@ -155,6 +155,30 @@ class TestSimulationEngine:
         assert call["available_cash"] == 4_000_000
         assert call["org_snapshot"]["paper_allocated_capital"] == 1_000_000
 
+    @pytest.mark.asyncio
+    async def test_run_cycle_records_runtime_health_in_company_snapshot(self):
+        engine = SimulationEngine()
+        engine._agents = []
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=5_000_000, available=5_000_000, currency="KRW")
+        )
+        engine._trading.get_positions = AsyncMock(return_value=[])
+        engine._recorder = MagicMock()
+        engine._recorder.record_company_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+        engine._reconcile_with_broker = AsyncMock()
+
+        health = {"ok": True, "checks": [{"name": "database", "ok": True}]}
+        with patch(
+            "agentic_capital.monitoring.runtime_health.collect_runtime_health",
+            new=AsyncMock(return_value=health),
+        ):
+            await engine._run_cycle()
+
+        call = engine._recorder.record_company_snapshot.await_args.kwargs
+        assert call["org_snapshot"]["runtime_health"] == health
+
     def test_guard_context_classifies_finance_first_failing_stage(self):
         engine = SimulationEngine()
         context = engine._classify_guard_context([
