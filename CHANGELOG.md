@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.30.3] - 2026-06-01
+
+- Added deterministic local `get_quote` fallback for `K200_CALL_ATM`-style paper call-option symbols so the finance shadow pipeline can keep quote evidence even when public vendors do not list the symbol.
+
 ## [0.22.0] - 2026-05-27
 
 - Added finance sidecar stage telemetry with latency, status, compact payload hash, failure body summaries, and first failing stage diagnostics.
