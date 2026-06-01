@@ -279,7 +279,11 @@ async def collect_runtime_health() -> dict[str, Any]:
     ]
     if settings.local_model_inventory_healthcheck_enabled:
         checks.append(check_model_inventory_health(finance_check, psychology_check))
-    ok = all(bool(check.get("ok")) for check in checks)
+    ok = all(
+        bool(check.get("ok"))
+        for check in checks
+        if check.get("blocking", True) is not False
+    )
     result = {"ok": ok, "checks": checks}
     log = logger.info if ok else logger.warning
     log("runtime_health_check", ok=ok, checks=checks)

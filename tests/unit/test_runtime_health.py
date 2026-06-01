@@ -91,6 +91,34 @@ async def test_collect_runtime_health_aggregates_services() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_collect_runtime_health_ignores_nonblocking_inventory_for_overall_ok() -> None:
+    with patch(
+        "agentic_capital.monitoring.runtime_health.check_local_agent_health",
+        return_value={"name": "agent_llm", "ok": True},
+    ), patch(
+        "agentic_capital.monitoring.runtime_health.check_finance_sidecar_health",
+        return_value={"name": "finance_sidecars", "ok": True},
+    ), patch(
+        "agentic_capital.monitoring.runtime_health.check_psychology_sidecar_health",
+        return_value={"name": "psychology_sidecar", "ok": True},
+    ), patch(
+        "agentic_capital.monitoring.runtime_health.check_database_health",
+        new=AsyncMock(return_value={"name": "database", "ok": True}),
+    ), patch.object(
+        runtime_health.settings,
+        "local_model_inventory_healthcheck_enabled",
+        True,
+    ), patch(
+        "agentic_capital.monitoring.runtime_health.check_model_inventory_health",
+        return_value={"name": "local_model_inventory", "ok": False, "blocking": False},
+    ):
+        result = await runtime_health.collect_runtime_health()
+
+    assert result["ok"] is True
+    assert result["checks"][-1] == {"name": "local_model_inventory", "ok": False, "blocking": False}
+
+
 def test_model_inventory_reports_unvalidated_non_runtime_models() -> None:
     result = runtime_health.check_model_inventory_health(
         {
