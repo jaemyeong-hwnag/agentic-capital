@@ -18,6 +18,7 @@ from agentic_capital.graph.workflow import (
     _agent_cycle_trigger,
     _build_system_prompt,
     _error_retry_seconds,
+    _execute_finance_paper_order,
     _exception_summary,
     _extract_psychology_context,
     _extract_tool_sequence,
@@ -75,6 +76,7 @@ def _make_recorder():
     recorder.record_hr_event = AsyncMock()
     recorder.record_agent_message = AsyncMock()
     recorder.record_position_snapshot = AsyncMock()
+    recorder.get_last_positions = AsyncMock(return_value=[])
     recorder.load_tools = AsyncMock(return_value=[])
     recorder.commit = AsyncMock()
     return recorder
@@ -137,6 +139,62 @@ def test_extract_tool_sequence_preserves_duplicate_local_call_ids_in_order() -> 
         {"t": "get_balance", "in": "", "out": "tot:5000000,avl:5000000,ccy:KRW"},
         {"t": "get_ohlcv", "in": "symbol:005930", "out": "@ohlcv:005930[20](dt,o,h,l,c,v)"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_finance_paper_order_records_position_snapshot_after_sell() -> None:
+    trading = _make_trading()
+    trader = TraderAgent(
+        profile=_make_profile("Trader"),
+        personality=create_random_personality(42),
+        llm=_make_llm(),
+        trading=trading,
+    )
+    trading.submit_order.return_value = OrderResult(
+        order_id="ord-1",
+        symbol="TSLA",
+        side=OrderSide.SELL,
+        quantity=1.0,
+        filled_price=425.17,
+        status="filled",
+        market=Market.US_STOCK,
+    )
+    trading.get_positions.return_value = []
+    recorder = _make_recorder()
+    recorder.get_last_positions.return_value = [
+        {"symbol": "TSLA", "market": "us_stock", "quantity": 531.0, "avg_price": 435.79},
+    ]
+
+    await _execute_finance_paper_order(
+        agent=trader,
+        plan={
+            "action": "SELL",
+            "symbol": "TSLA",
+            "market": "us_stock",
+            "quantity": 1,
+            "estimated_price": 425.17,
+            "position_effect": "close",
+            "reason": "paper scout rebalance sell after complete WAIT/HOLD no-order finance decision",
+            "recovery": True,
+        },
+        trading=trading,
+        market_data=None,
+        recorder=recorder,
+        cycle_number=48,
+        record={"record_type": "finance_paper_shadow_decision", "failure_type": None, "confidence": 0.0},
+        sidecar_calls=[],
+    )
+
+    recorder.record_decision.assert_awaited_once()
+    recorder.record_position_snapshot.assert_awaited_once_with(
+        agent_id=trader.agent_id,
+        symbol="TSLA",
+        quantity=0.0,
+        avg_price=435.79,
+        unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0,
+        market="us_stock",
+    )
 
 
 def test_psychology_cycle_input_compacts_trace_decisions_and_tool_outputs() -> None:

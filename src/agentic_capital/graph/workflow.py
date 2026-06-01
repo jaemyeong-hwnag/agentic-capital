@@ -987,6 +987,53 @@ async def _execute_finance_paper_order(
             },
             outcome=outcome,
         )
+        if str(result.status) in {"submitted", "filled"}:
+            market_name = str(plan["market"])
+            current_positions = []
+            try:
+                current_positions = await trading.get_positions()
+            except Exception:
+                logger.warning(
+                    "local_finance_paper_order_positions_unavailable",
+                    agent=agent.name,
+                    cycle=cycle_number,
+                    symbol=plan["symbol"],
+                )
+            matched_position = next(
+                (
+                    pos
+                    for pos in current_positions
+                    if getattr(pos, "symbol", None) == plan["symbol"]
+                    and str(getattr(pos, "market", market_name)) == market_name
+                ),
+                None,
+            )
+            avg_price = effective_price
+            if matched_position is None:
+                try:
+                    last_positions = await recorder.get_last_positions()
+                except Exception:
+                    last_positions = []
+                previous_position = next(
+                    (
+                        pos
+                        for pos in last_positions
+                        if pos.get("symbol") == plan["symbol"]
+                        and str(pos.get("market", market_name)) == market_name
+                    ),
+                    None,
+                )
+                if previous_position is not None:
+                    avg_price = float(previous_position.get("avg_price") or avg_price or 0.0)
+            await recorder.record_position_snapshot(
+                agent_id=agent.agent_id,
+                symbol=plan["symbol"],
+                quantity=float(getattr(matched_position, "quantity", 0.0) or 0.0),
+                avg_price=float(getattr(matched_position, "avg_price", avg_price) or avg_price or 0.0),
+                unrealized_pnl=float(getattr(matched_position, "unrealized_pnl", 0.0) or 0.0),
+                unrealized_pnl_pct=float(getattr(matched_position, "unrealized_pnl_pct", 0.0) or 0.0),
+                market=market_name,
+            )
     logger.info(
         "local_finance_paper_order_submitted",
         agent=agent.name,
