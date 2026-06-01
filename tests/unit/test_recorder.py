@@ -427,6 +427,7 @@ class TestSimulationRecorder:
                 "evidence_ids": ["ev-1"],
                 "risk_flags": ["paper"],
                 "confidence": 0.4,
+                "no_trade_reason": "missing_evidence_ids",
             },
             cycle_number=3,
             sidecar_latency_ms=42,
@@ -453,6 +454,7 @@ class TestSimulationRecorder:
         assert decision.context_snapshot["sidecar_stage_metrics"][0]["status_code"] == 503
         assert decision.context_snapshot["sidecar_stage_metrics"][0]["compact_payload_hash"] == "abc123"
         assert decision.outcome["would_submit_order"] is False
+        assert decision.outcome["no_trade_reason"] == "missing_evidence_ids"
 
     @pytest.mark.asyncio
     async def test_record_raw_model_failure(self):

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.30.5] - 2026-06-02
+
+- Persisted `no_trade_reason` for `finance_paper_shadow_decision` records so hourly local paper-trading monitoring can classify evidence gaps directly from DB outcomes.
+
 ## [0.30.3] - 2026-06-01
 
 - Added deterministic local `get_quote` fallback for `K200_CALL_ATM`-style paper call-option symbols so the finance shadow pipeline can keep quote evidence even when public vendors do not list the symbol.

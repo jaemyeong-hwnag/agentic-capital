@@ -527,6 +527,7 @@ class SimulationRecorder:
                     "order_status": record.get("order_status"),
                     "evidence_ids": evidence,
                     "risk_flags": risks,
+                    "no_trade_reason": record.get("no_trade_reason"),
                     "sidecar_stage_metrics": stage_metrics,
                     "first_failing_stage": first_failing_stage,
                 },
