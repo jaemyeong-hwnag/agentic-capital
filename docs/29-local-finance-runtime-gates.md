@@ -51,10 +51,12 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 - CEO/Analyst용 `agentic_capital_react_model` local agent runtime.
 - Trader 전용 finance sidecar 4단계: `finance_rag_query_model`, `finance_tool_planner_model`, `finance_decision_model`, `finance_risk_guard_model`.
 - context-only psychology sidecar `psychology_model_suite`.
+- 전체 local model inventory: finance/psychology 모델 카탈로그 전체가 paper runtime, 별도 validation sidecar, suite-only, unvalidated 중 어디에 속하는지 기록한다.
 - paper simulation DB 연결.
 
 점검 결과는 `runtime_health_check` 로그와 `company_snapshots.org_snapshot.runtime_health`에 저장한다.
 이 health check는 관측 전용이며 BUY/SELL, 수량, 주문 권한, 자본 배분, risk limit을 바꾸지 않는다.
+`local_model_inventory`에서 `unvalidated_models`가 비어 있지 않으면 해당 모델은 현재 paper loop 또는 별도 validation sidecar에서 직접 검증되지 않는 상태다. 이 값은 runtime 가시성 신호이며, 직접 주문 또는 수동 복구를 수행하지 않는다.
 
 로컬 ReAct loop는 기본적으로 OpenAI native tool payload를 전송하지 않는다.
 `LOCAL_LLM_SEND_NATIVE_TOOLS=false`일 때 tool 목록은 compact system prompt로 들어가며,
