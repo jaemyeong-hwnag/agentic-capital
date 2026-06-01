@@ -177,6 +177,8 @@ read-only tool result schema:
 - `get_positions`/`positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`,
   `current_price`, PnL, `market`, `currency`
 - `get_quote`/`quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
+- explicit local paper call-option symbols such as `K200_CALL_ATM` must return a deterministic `get_quote`
+  price derived from the local KOSPI200 premium fallback when public quote vendors do not serve the symbol.
 - `get_market_session`/`market_session`: `state`, `session`, `is_open`,
   `regular_session`, `open_markets`
 - `get_risk_limit`/`risk_limit`: `max_order_value`, `max_trade_value`,
