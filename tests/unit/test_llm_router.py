@@ -299,7 +299,7 @@ def test_validate_local_finance_runtime_reports_pipeline_health():
 
 
 @pytest.mark.asyncio
-async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context():
+async def test_local_finance_decision_pipeline_repairs_no_context_with_complete_runtime_tool_evidence():
     async def collect_tool_results(payload):
         return {
             "get_balance": {"available": 1000000},
@@ -334,10 +334,54 @@ async def test_local_finance_decision_pipeline_records_raw_failure_on_no_context
             collect_tool_results=collect_tool_results,
         )
 
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["decision"]["action"] == "OBSERVE"
+    assert result["decision"]["repaired_from_action"] == "NO_CONTEXT"
+    assert result["decision"]["repair_applied"] is True
+    assert result["record"]["action"] == "OBSERVE"
+    assert result["record"]["would_submit_order"] is False
+    assert result["first_failing_stage"] == local_finance_runtime.FINANCE_DECISION_MODEL
+    assert result["risk_flags"] == ["missing_context"]
+
+
+@pytest.mark.asyncio
+async def test_local_finance_decision_pipeline_keeps_raw_failure_on_no_context_without_complete_runtime_tool_evidence():
+    async def collect_tool_results(payload):
+        return {
+            "get_balance": {"available": 1000000},
+            "get_positions": [],
+            "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
+            "get_risk_limit": {"max_order_value": 1000000},
+            "search_rag": {"evidence_ids": [], "evidence_count": 0},
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {"queries": ["005930 risk check"]}, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {"tool_plan": ["get_balance", "get_positions"]}, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            return {"action": "NO_CONTEXT", "reason": "근거 부족"}, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": ["missing_context"], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=([], {"model": "rag_search", "latency_ms": 1, "ok": True})),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-2",
+            user_question="005930 매수 가능?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"stop_on_missing_context": True},
+            collect_tool_results=collect_tool_results,
+        )
+
     assert result["record_type"] == "raw_model_failure"
     assert result["record"]["failure_type"] == "no_context"
     assert result["decision"]["action"] == "NO_CONTEXT"
-    assert result["risk_flags"] == ["missing_context"]
 
 
 @pytest.mark.asyncio

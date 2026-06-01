@@ -593,6 +593,35 @@ def _call_tool_loop_with_sufficient_evidence(
     return bool(requested & set(REQUIRED_FINANCE_TOOL_RESULT_IDS))
 
 
+def _repair_no_context_with_runtime_tool_evidence(
+    *,
+    decision: dict[str, Any],
+    tool_results: dict[str, Any],
+    evidence_ids: list[str],
+) -> dict[str, Any] | None:
+    """Downgrade NO_CONTEXT to OBSERVE when runtime read tools already cover the cycle."""
+    if _normalize_action(decision.get("action")) != "NO_CONTEXT":
+        return None
+    if not _has_complete_runtime_tool_evidence(tool_results, evidence_ids):
+        return None
+    if tool_results.get("_errors"):
+        return None
+
+    risk_tags = decision.get("risk_tags")
+    if not isinstance(risk_tags, list):
+        risk_tags = []
+    reason = str(decision.get("reason") or decision.get("message") or "").strip() or "runtime_tool_evidence_complete"
+    return {
+        **decision,
+        "action": "OBSERVE",
+        "reason": f"{reason}; runtime_tool_evidence_complete",
+        "risk_tags": sorted({*map(str, risk_tags), "no_context_repaired_to_observe", "runtime_tool_evidence_complete"}),
+        "repair_applied": True,
+        "repair_source": "agentic_capital.local_finance_runtime",
+        "repaired_from_action": "NO_CONTEXT",
+    }
+
+
 def _deterministic_paper_tool_plan(agent_state: dict[str, Any]) -> dict[str, Any]:
     """Fallback tool plan used when the tool planner sidecar is unavailable."""
     symbol = str(agent_state.get("symbol") or "").strip()
@@ -910,6 +939,15 @@ async def run_local_finance_decision_pipeline(
                 "risk_tags": sorted(set([*risk_flags, *decision.get("risk_tags", [])])),
                 "reason": f"risk_guard_hard_fail:{risk_guard.get('explanation', '')}",
             }
+
+        repaired_decision = _repair_no_context_with_runtime_tool_evidence(
+            decision=decision,
+            tool_results=tool_results,
+            evidence_ids=evidence_ids,
+        )
+        if repaired_decision is not None:
+            decision = repaired_decision
+            first_failing_stage = first_failing_stage or FINANCE_DECISION_MODEL
 
         if blocked_order_tools:
             record = build_finance_shadow_failure_record(
