@@ -7,6 +7,7 @@ import pytest
 
 from agentic_capital.adapters.market_data.yfinance_adapter import (
     YFinanceMarketDataAdapter,
+    _is_local_kospi200_call_symbol,
     _resolve_symbol,
 )
 
@@ -26,6 +27,10 @@ class TestResolveSymbol:
 
     def test_strip_whitespace(self):
         assert _resolve_symbol(" 005930 ") == ["005930.KS", "005930.KQ"]
+
+    def test_detects_local_kospi200_call_symbol(self):
+        assert _is_local_kospi200_call_symbol("K200_CALL_ATM") is True
+        assert _is_local_kospi200_call_symbol("AAPL") is False
 
 
 class TestYFinanceMarketDataAdapter:
@@ -97,6 +102,21 @@ class TestYFinanceMarketDataAdapter:
 
             with pytest.raises(RuntimeError, match="no data"):
                 await adapter.get_quote("999999")
+
+    @pytest.mark.asyncio
+    async def test_get_quote_uses_local_kospi200_call_fallback(self):
+        adapter = self._make_adapter()
+
+        with patch(
+            "agentic_capital.adapters.trading.kis._fetch_yfinance_kospi200",
+            return_value={"price": 350.0},
+        ):
+            result = await adapter.get_quote("K200_CALL_ATM")
+
+        assert result.symbol == "K200_CALL_ATM"
+        assert result.price == 10.5
+        assert result.market == "kr_options"
+        assert result.currency == "KRW"
 
     @pytest.mark.asyncio
     async def test_get_ohlcv_success(self):

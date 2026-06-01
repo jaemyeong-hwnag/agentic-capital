@@ -7,14 +7,19 @@ US/overseas:  standard ticker (AAPL, TSLA, etc.).
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
-from functools import lru_cache
 
 import structlog
 
 from agentic_capital.ports.market_data import OHLCV, MarketDataPort, Quote
 
 logger = structlog.get_logger()
+
+_CALL_OPTION_PAPER_PREMIUM_RATE = 0.03
+_KOSPI200_CALL_SYMBOL_RE = re.compile(
+    r"^(K200_CALL(?:_[A-Z0-9]+)*|KOSPI200_CALL(?:_[A-Z0-9]+)*|(K200|KOSPI200)?C[0-9A-Z._-]+)$"
+)
 
 # yfinance period/interval mappings
 _PERIOD_MAP = {
@@ -39,6 +44,34 @@ def _resolve_symbol(symbol: str) -> list[str]:
     if s.isdigit() and len(s) == 6:
         return [f"{s}.KS", f"{s}.KQ"]
     return [s]
+
+
+def _is_local_kospi200_call_symbol(symbol: str) -> bool:
+    return bool(_KOSPI200_CALL_SYMBOL_RE.fullmatch(symbol.strip().upper()))
+
+
+def _paper_call_option_premium(underlying_price: float) -> float:
+    return max(float(underlying_price) * _CALL_OPTION_PAPER_PREMIUM_RATE, 0.1)
+
+
+async def _local_kospi200_call_quote(symbol: str) -> Quote | None:
+    from agentic_capital.adapters.trading.kis import _fetch_yfinance_kospi200
+
+    data = await _fetch_yfinance_kospi200()
+    underlying_price = float((data or {}).get("price") or 0.0)
+    if underlying_price <= 0:
+        return None
+    price = _paper_call_option_premium(underlying_price)
+    return Quote(
+        symbol=symbol,
+        price=price,
+        bid=price,
+        ask=price,
+        volume=0.0,
+        timestamp=datetime.now(timezone.utc),
+        market="kr_options",
+        currency="KRW",
+    )
 
 
 def _fetch_quote_sync(symbol: str) -> Quote | None:
@@ -102,6 +135,11 @@ class YFinanceMarketDataAdapter(MarketDataPort):
     """Market data via yfinance — no API key, covers 80k+ global symbols."""
 
     async def get_quote(self, symbol: str, **kwargs) -> Quote:
+        if _is_local_kospi200_call_symbol(symbol):
+            local_quote = await _local_kospi200_call_quote(symbol)
+            if local_quote is not None:
+                logger.debug("local_kospi200_call_quote_fetched", symbol=symbol, price=local_quote.price)
+                return local_quote
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _fetch_quote_sync, symbol)
         if result is None:
