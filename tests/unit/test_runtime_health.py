@@ -75,6 +75,10 @@ async def test_collect_runtime_health_aggregates_services() -> None:
     ), patch(
         "agentic_capital.monitoring.runtime_health.check_database_health",
         new=AsyncMock(return_value={"name": "database", "ok": True}),
+    ), patch.object(
+        runtime_health.settings,
+        "local_model_inventory_healthcheck_enabled",
+        False,
     ):
         result = await runtime_health.collect_runtime_health()
 
@@ -85,3 +89,69 @@ async def test_collect_runtime_health_aggregates_services() -> None:
         "psychology_sidecar",
         "database",
     ]
+
+
+def test_model_inventory_reports_unvalidated_non_runtime_models() -> None:
+    result = runtime_health.check_model_inventory_health(
+        {
+            "name": "finance_sidecars",
+            "ok": True,
+            "primary": {"ok": True, "actual_model": "finance_decision_model"},
+            "pipeline": {
+                "ok": True,
+                "stages": {
+                    "finance_rag_query_model": {
+                        "ok": True,
+                        "actual_model": "finance_rag_query_model",
+                    },
+                    "finance_tool_planner_model": {
+                        "ok": True,
+                        "actual_model": "finance_tool_planner_model",
+                    },
+                    "finance_decision_model": {"ok": True, "actual_model": "finance_decision_model"},
+                    "finance_risk_guard_model": {"ok": True, "actual_model": "finance_risk_guard_model"},
+                },
+            },
+        },
+        {"name": "psychology_sidecar", "ok": True, "actual_model": "psychology_model_suite"},
+    )
+
+    assert result["ok"] is False
+    assert "finance_embedding_model" in result["unvalidated_models"]
+    assert "psychology_profile_model" in result["unvalidated_models"]
+    assert next(
+        item for item in result["finance_models"] if item["name"] == "finance_decision_model"
+    )["coverage"] == "paper_runtime_sidecar"
+    assert next(
+        item for item in result["psychology_models"] if item["name"] == "psychology_profile_model"
+    )["coverage"] == "suite_only"
+
+
+def test_model_inventory_checks_configured_validation_sidecar() -> None:
+    response = MagicMock()
+    response.json.return_value = {"ok": True, "model": "finance_embedding_model"}
+    response.raise_for_status.return_value = None
+
+    with patch.object(
+        runtime_health.settings,
+        "local_finance_validation_base_urls",
+        "finance_embedding_model=http://127.0.0.1:18105/v1",
+    ), patch.object(
+        runtime_health.settings,
+        "local_psychology_validation_base_urls",
+        "",
+    ), patch(
+        "agentic_capital.monitoring.runtime_health.httpx.get",
+        return_value=response,
+    ) as mock_get:
+        result = runtime_health.check_model_inventory_health(
+            {"name": "finance_sidecars", "ok": True, "primary": {}, "pipeline": {"stages": {}}},
+            {"name": "psychology_sidecar", "ok": False},
+        )
+
+    embedding = next(
+        item for item in result["finance_models"] if item["name"] == "finance_embedding_model"
+    )
+    assert embedding["ok"] is True
+    assert embedding["coverage"] == "validation_sidecar"
+    mock_get.assert_called_once_with("http://127.0.0.1:18105/healthz", timeout=5.0)

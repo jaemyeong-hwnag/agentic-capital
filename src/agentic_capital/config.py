@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     local_psychology_smoke_enabled: bool = True
     local_psychology_timeout_seconds: float = 30.0
     local_runtime_healthcheck_enabled: bool = True
+    local_model_inventory_healthcheck_enabled: bool = True
+    local_finance_validation_base_urls: str = ""
+    local_psychology_validation_base_urls: str = ""
 
     # Database
     database_url: str = "postgresql+asyncpg://agent:agent_dev_password@localhost:5432/agentic_capital"
