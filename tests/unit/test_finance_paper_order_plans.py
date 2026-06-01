@@ -204,6 +204,40 @@ def test_finance_wait_probe_uses_primary_market_when_record_omits_market():
     assert plan["price"] == 185.0
 
 
+def test_finance_wait_probe_recovers_hold_call_option():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "HOLD",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "market": "kr_options",
+                "symbol": "K200_CALL_ATM",
+                "option_type": "call",
+            },
+            tool_results={**_tool_results(), "get_quote": {"price": 0.0}},
+            primary_symbol="K200_CALL_ATM",
+            primary_market="kr_options",
+            open_markets=["KRX"],
+            capital_limit=10_000.0,
+            evidence_ids=["source_reference.md"],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["market"] == "kr_options"
+    assert plan["option_type"] == "call"
+    assert plan["quantity"] == 1
+
+
 def test_finance_wait_probe_sells_one_when_current_symbol_is_owned():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),

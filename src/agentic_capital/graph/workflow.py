@@ -810,7 +810,7 @@ def _finance_wait_probe_order_plan(
         return None
     if str(record.get("record_type") or "") != "finance_paper_shadow_decision":
         return None
-    if str(record.get("action") or "").upper() != "WAIT":
+    if str(record.get("action") or "").upper() not in {"WAIT", "HOLD"}:
         return None
     if record.get("paper_trade_only") is not True:
         return None
@@ -850,7 +850,7 @@ def _finance_wait_probe_order_plan(
             "estimated_price": price,
             "exchange": record.get("exchange"),
             "position_effect": "close",
-            "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
+            "reason": "paper scout rebalance sell after complete WAIT/HOLD no-order finance decision",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -865,7 +865,7 @@ def _finance_wait_probe_order_plan(
             "estimated_price": price,
             "exchange": record.get("exchange") or "CALL",
             "position_effect": "open",
-            "reason": "paper scout recovery after complete WAIT/no-order finance decision for call option",
+            "reason": "paper scout recovery after complete WAIT/HOLD no-order finance decision for call option",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -888,7 +888,7 @@ def _finance_wait_probe_order_plan(
         "estimated_price": price,
         "exchange": record.get("exchange"),
         "position_effect": "open",
-        "reason": "paper scout recovery after complete WAIT/no-order finance decision",
+        "reason": "paper scout recovery after complete WAIT/HOLD no-order finance decision",
         "recovery": True,
     }
 

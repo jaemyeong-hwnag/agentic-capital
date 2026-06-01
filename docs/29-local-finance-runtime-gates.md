@@ -124,7 +124,7 @@ paper order bridge:
 - finance sidecar는 주문을 직접 실행하지 않는다. `finance_decision_model`은 `paper_order_intent`와 `would_submit_order=true` 같은 intent telemetry만 반환한다.
 - agentic-capital은 Trader finance cycle 안에서만 `paper_order_intent`를 읽고, market open, risk limit, available cash, position cap, paper-only safety를 다시 검증한 뒤 `trading.submit_order`를 호출한다.
 - recoverable `CALL_TOOL` loop나 complete evidence가 있는 `trade_missing_notional`은 raw failure로 남기고, `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`이면 tiny scout BUY를 제출한다.
-- 정상 JSON인 `finance_paper_shadow_decision`이 `WAIT / would_submit_order=false`만 반환해 paper loop가 자본을 전혀 배치하지 못하는 경우도 운영 복구 대상이다. `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`, KIS paper, 대상 market open, evidence 존재, risk flag 없음, 무보유 종목, 1주 가격이 max order/capital gate 안에 들어오는 조건에서만 tiny scout BUY를 제출한다. 이는 live 주문 권한이 아니며, finance/psychology 모델이 주문 권한을 갖는다는 뜻도 아니다.
+- 정상 JSON인 `finance_paper_shadow_decision`이 `WAIT` 또는 `HOLD`와 `would_submit_order=false`만 반환해 paper loop가 자본을 전혀 배치하지 못하는 경우도 운영 복구 대상이다. `LOCAL_FINANCE_PAPER_PROBE_ON_MODEL_LOOP=true`, KIS paper, 대상 market open, evidence 존재, risk flag 없음, 무보유 종목, 1주 가격이 max order/capital gate 안에 들어오는 조건에서만 tiny scout BUY를 제출한다. 명시적 콜옵션은 로컬 `PAPER-CALL` 브리지로 1계약 paper probe를 기록할 수 있다. 이는 live 주문 권한이 아니며, finance/psychology 모델이 주문 권한을 갖는다는 뜻도 아니다.
 - paper order 결과는 일반 `trade` decision과 별도로 `paper_order_result` decision/context/outcome에 기록한다.
 - 해외 현물 paper order는 `PAPER-OVS-*` 주문번호와 `paper_virtual=true`, `broker=local_paper_overseas` metadata를 남긴다. KIS 실전 해외 broker endpoint는 `KIS_IS_PAPER=false`일 때만 사용된다.
 - 매 cycle 종료 후 `agentic-capital`은 broker/KIS 포지션을 다시 읽어 `positions` snapshot을 동기화한다.
