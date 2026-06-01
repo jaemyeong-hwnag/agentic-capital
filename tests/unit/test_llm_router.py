@@ -385,6 +385,56 @@ async def test_local_finance_decision_pipeline_keeps_raw_failure_on_no_context_w
 
 
 @pytest.mark.asyncio
+async def test_local_finance_decision_pipeline_repairs_call_tool_with_complete_runtime_tool_evidence():
+    async def collect_tool_results(payload):
+        return {
+            "get_balance": {"available": 1000000},
+            "get_positions": [],
+            "get_quote": {"price": 70000},
+            "get_market_session": {"state": "closed", "is_open": False, "open_markets": ["NASDAQ", "NIGHT", "NYSE"]},
+            "get_risk_limit": {"max_order_value": 1000000},
+            "search_rag": {"evidence_ids": [], "evidence_count": 0},
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {"queries": ["005930 risk check"]}, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {"tool_plan": ["get_balance", "get_positions"]}, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            return {
+                "action": "CALL_TOOL",
+                "reason": "balance, positions, quote, market_session, risk_limit, and RAG evidence are required before BUY/SELL",
+                "risk_tags": ["missing_tool_results", "paper_shadow_only"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": [], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=([], {"model": "rag_search", "latency_ms": 1, "ok": True})),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-call-tool-repair",
+            user_question="005930 매수 가능?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={"paper_trade_only": True},
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["decision"]["action"] == "OBSERVE"
+    assert result["decision"]["repaired_from_action"] == "CALL_TOOL"
+    assert result["decision"]["repair_applied"] is True
+    assert "call_tool_repaired_to_observe" in result["decision"]["risk_tags"]
+    assert result["record"]["action"] == "OBSERVE"
+    assert result["record"]["would_submit_order"] is False
+    assert result["first_failing_stage"] == local_finance_runtime.FINANCE_DECISION_MODEL
+
+
+@pytest.mark.asyncio
 async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
     captured_planner_payload = {}
     captured_decision_payload = {}
@@ -488,10 +538,11 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
             collect_tool_results=collect_tool_results,
         )
 
-    assert result["record_type"] == "raw_model_failure"
-    assert result["record"]["failure_type"] == "call_tool_loop_with_sufficient_tool_evidence"
-    assert result["record"]["no_trade_reason"] == "blocked:call_tool_loop_with_sufficient_tool_evidence"
-    assert result["decision"]["no_trade_reason"] == "blocked:call_tool_loop_with_sufficient_tool_evidence"
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["record"]["action"] == "OBSERVE"
+    assert result["record"]["no_trade_reason"] == "insufficient_edge"
+    assert result["decision"]["repaired_from_action"] == "CALL_TOOL"
+    assert result["decision"]["no_trade_reason"] == "insufficient_edge"
     assert result["first_failing_stage"] == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL
     assert result["tool_plan"]["fallback"] == "deterministic_paper_tool_plan"
     assert captured_planner_payload["evidence_count"] == 1
@@ -513,7 +564,7 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
 
 
 @pytest.mark.asyncio
-async def test_local_finance_call_tool_loop_with_complete_tools_is_raw_failure():
+async def test_local_finance_call_tool_loop_with_complete_tools_repairs_to_observe():
     captured_decision_system = {}
 
     async def collect_tool_results(payload):
@@ -611,14 +662,14 @@ async def test_local_finance_call_tool_loop_with_complete_tools_is_raw_failure()
             collect_tool_results=collect_tool_results,
         )
 
-    assert result["ok"] is False
-    assert result["record_type"] == "raw_model_failure"
-    assert result["record"]["failure_type"] == "call_tool_loop_with_sufficient_tool_evidence"
-    assert result["record"]["retrain_candidate"] is True
+    assert result["ok"] is True
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["record"]["action"] == "OBSERVE"
+    assert result["record"]["would_submit_order"] is False
     assert result["first_failing_stage"] == local_finance_runtime.FINANCE_DECISION_MODEL
-    assert result["record"]["details"]["risk_flags"] == ["missing_evidence_review"]
-    assert result["record"]["details"]["evidence_ids"] == []
-    assert result["record"]["details"]["tool_result_ids"] == sorted([
+    assert result["decision"]["repaired_from_action"] == "CALL_TOOL"
+    assert "call_tool_repaired_to_observe" in result["decision"]["risk_tags"]
+    assert result["decision"]["tool_result_ids"] == sorted([
         "get_balance",
         "get_market_session",
         "get_positions",
@@ -1752,3 +1803,117 @@ async def test_local_finance_pipeline_records_call_tool_shadow_from_gateway_repa
     assert result["record"]["action"] == "CALL_TOOL"
     assert result["record"]["would_submit_order"] is False
     assert "get_quote" in result["record"]["missing_tool_results"]
+
+
+@pytest.mark.asyncio
+async def test_local_finance_pipeline_sends_explicit_paper_mode_to_decision_stage():
+    async def collect_tool_results(_payload):
+        return {
+            "get_balance": {"total": 5_000_000.0, "available": 5_000_000.0, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"symbol": "005930", "market": "kr_stock", "price": 349000.0, "currency": "KRW"},
+            "get_market_session": {
+                "market": "kr_stock",
+                "exchange": "KRX",
+                "state": "closed",
+                "session": "closed",
+                "is_open": False,
+                "regular_session": False,
+                "open_markets": ["NASDAQ", "NIGHT", "NYSE"],
+            },
+            "get_risk_limit": {
+                "max_order_value": 5_000_000.0,
+                "max_trade_value": 5_000_000.0,
+                "capital_limit": 5_000_000.0,
+                "paper_trade_only": True,
+            },
+            "search_rag": {"evidence_ids": [], "evidence_count": 0, "evidence": []},
+            "finance_decision_payload": {
+                "balance": {"total": 5_000_000.0, "available": 5_000_000.0, "currency": "KRW"},
+                "positions": [],
+                "quote": {"symbol": "005930", "market": "kr_stock", "price": 349000.0, "currency": "KRW"},
+                "market_session": {
+                    "market": "kr_stock",
+                    "exchange": "KRX",
+                    "state": "closed",
+                    "session": "closed",
+                    "is_open": False,
+                    "regular_session": False,
+                    "open_markets": ["NASDAQ", "NIGHT", "NYSE"],
+                },
+                "risk_limit": {
+                    "max_order_value": 5_000_000.0,
+                    "max_trade_value": 5_000_000.0,
+                    "capital_limit": 5_000_000.0,
+                    "paper_trade_only": True,
+                },
+                "rag": {"evidence_ids": [], "evidence_count": 0, "evidence": []},
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {
+                "query": "005930 지금 매수?",
+                "queries": ["005930 지금 매수?"],
+                "symbol": "005930",
+                "market": "kr_stock",
+                "route": "rag_and_fresh_quote",
+                "requires_fresh_data": True,
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_risk_limit"},
+                ],
+                "forbidden_tools": ["submit_order"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            assert payload["account_mode"] == "paper"
+            assert payload["deployment_mode"] == "paper"
+            assert payload["paper_trading_mode"] is True
+            assert payload["live_order_permission"] is False
+            assert payload["finance_context"]["account_mode"] == "paper"
+            assert payload["finance_context"]["paper_trading_mode"] is True
+            return {
+                "action": "OBSERVE",
+                "symbol": "005930",
+                "market": "kr_stock",
+                "confidence": 0.35,
+                "evidence_ids": [],
+                "tool_result_ids": payload["tool_result_ids"],
+                "risk_tags": ["complete_tool_evidence", "paper_shadow_only", "scout_order_disabled"],
+                "no_trade_reason": "insufficient_edge",
+                "would_submit_order": False,
+                "paper_order_intent": None,
+                "reason": "complete runtime tool evidence is present",
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": [], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=([], {"model": "rag_search", "latency_ms": 1, "ok": True})),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-paper-flags",
+            user_question="005930 지금 매수?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "005930"},
+            required_safety={
+                "paper_trade_only": True,
+                "kis_is_paper": True,
+                "futures_live_orders_enabled": False,
+            },
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["decision"]["action"] == "OBSERVE"
+    assert result["decision"]["paper_order_intent"] is None

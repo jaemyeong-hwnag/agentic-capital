@@ -465,6 +465,31 @@ def _compact_rag_query_payload(rag_query: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _paper_runtime_context(
+    *,
+    agent_state: dict[str, Any],
+    required_safety: dict[str, Any],
+) -> dict[str, Any]:
+    """Expose explicit paper-mode metadata for finance gateway repairs."""
+    deployment_mode = str(agent_state.get("deployment_mode") or "").strip().lower()
+    trading_mode = str(agent_state.get("trading_mode") or "").strip().lower()
+    live_order_enabled = bool(agent_state.get("live_order_enabled"))
+    paper_trade_only = bool(required_safety.get("paper_trade_only"))
+    kis_is_paper = bool(required_safety.get("kis_is_paper", settings.kis_is_paper))
+    futures_live_orders_enabled = bool(
+        required_safety.get("futures_live_orders_enabled", settings.futures_live_orders_enabled)
+    )
+    paper_mode = paper_trade_only or kis_is_paper or deployment_mode in {"paper", "shadow"} or trading_mode == "paper"
+    account_mode = "paper" if paper_mode else "live"
+    return {
+        "account_mode": account_mode,
+        "deployment_mode": "paper" if paper_mode else (deployment_mode or account_mode),
+        "trading_mode": "paper" if paper_mode else (trading_mode or account_mode),
+        "paper_trading_mode": paper_mode,
+        "live_order_permission": live_order_enabled and not futures_live_orders_enabled and not paper_mode,
+    }
+
+
 def _compact_tool_plan_payload(tool_plan: dict[str, Any]) -> dict[str, Any]:
     plan = tool_plan.get("tool_plan") or tool_plan.get("tools") or tool_plan.get("tool_calls") or []
     compact_plan: list[dict[str, Any]] = []
@@ -593,14 +618,15 @@ def _call_tool_loop_with_sufficient_evidence(
     return bool(requested & set(REQUIRED_FINANCE_TOOL_RESULT_IDS))
 
 
-def _repair_no_context_with_runtime_tool_evidence(
+def _repair_paper_non_trade_with_runtime_tool_evidence(
     *,
     decision: dict[str, Any],
     tool_results: dict[str, Any],
     evidence_ids: list[str],
 ) -> dict[str, Any] | None:
-    """Downgrade NO_CONTEXT to OBSERVE when runtime read tools already cover the cycle."""
-    if _normalize_action(decision.get("action")) != "NO_CONTEXT":
+    """Downgrade paper-safe non-trade loops when runtime read tools already cover the cycle."""
+    original_action = _normalize_action(decision.get("action"))
+    if original_action not in {"NO_CONTEXT", "CALL_TOOL"}:
         return None
     if not _has_complete_runtime_tool_evidence(tool_results, evidence_ids):
         return None
@@ -611,14 +637,19 @@ def _repair_no_context_with_runtime_tool_evidence(
     if not isinstance(risk_tags, list):
         risk_tags = []
     reason = str(decision.get("reason") or decision.get("message") or "").strip() or "runtime_tool_evidence_complete"
+    repair_tags = {"runtime_tool_evidence_complete"}
+    if original_action == "NO_CONTEXT":
+        repair_tags.add("no_context_repaired_to_observe")
+    else:
+        repair_tags.add("call_tool_repaired_to_observe")
     return {
         **decision,
         "action": "OBSERVE",
         "reason": f"{reason}; runtime_tool_evidence_complete",
-        "risk_tags": sorted({*map(str, risk_tags), "no_context_repaired_to_observe", "runtime_tool_evidence_complete"}),
+        "risk_tags": sorted({*map(str, risk_tags), *repair_tags}),
         "repair_applied": True,
         "repair_source": "agentic_capital.local_finance_runtime",
-        "repaired_from_action": "NO_CONTEXT",
+        "repaired_from_action": original_action,
     }
 
 
@@ -810,6 +841,11 @@ async def run_local_finance_decision_pipeline(
             base_payload["psychology_context"] = build_finance_soft_context(psychology_context)
         except LocalPsychologyRuntimeError as exc:
             raise LocalFinanceRuntimeError(f"local_finance_psychology_context_unsafe: {exc}") from exc
+    paper_runtime_context = _paper_runtime_context(
+        agent_state=agent_state,
+        required_safety=required_safety,
+    )
+    base_payload.update(paper_runtime_context)
 
     try:
         rag_query, meta = await _call_finance_stage(
@@ -871,6 +907,7 @@ async def run_local_finance_decision_pipeline(
         if isinstance(compact_finance_context, dict):
             compact_finance_context = {
                 **compact_finance_context,
+                **paper_runtime_context,
                 "tool_result_ids": compact_finance_context.get("tool_result_ids") or tool_result_ids,
             }
         compact_base_payload = {
@@ -878,6 +915,7 @@ async def run_local_finance_decision_pipeline(
             "user_question": _summary_text(user_question, limit=300),
             "agent_state": _compact_agent_state(agent_state),
             "required_safety": required_safety,
+            **paper_runtime_context,
         }
 
         decision_payload = {
@@ -940,7 +978,7 @@ async def run_local_finance_decision_pipeline(
                 "reason": f"risk_guard_hard_fail:{risk_guard.get('explanation', '')}",
             }
 
-        repaired_decision = _repair_no_context_with_runtime_tool_evidence(
+        repaired_decision = _repair_paper_non_trade_with_runtime_tool_evidence(
             decision=decision,
             tool_results=tool_results,
             evidence_ids=evidence_ids,
