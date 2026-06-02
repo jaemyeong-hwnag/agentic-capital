@@ -58,6 +58,11 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 이 health check는 관측 전용이며 BUY/SELL, 수량, 주문 권한, 자본 배분, risk limit을 바꾸지 않는다.
 `local_model_inventory`에서 `unvalidated_models`가 비어 있지 않으면 해당 모델은 현재 paper loop 또는 별도 validation sidecar에서 직접 검증되지 않는 상태다. 이 값은 runtime 가시성 신호이며 non-blocking이다. 따라서 `runtime_health.ok`는 agent runtime, finance sidecars, psychology sidecar, DB 같은 blocking 체크들로 계산하고, inventory 미검증만으로 paper loop를 unhealthy로 내리지는 않는다.
 
+recorder 초기화는 paper loop 시작 조건이다. `simulation_runs`, `agents`, 이후 cycle/decision/trade
+기록을 생성할 수 없으면 paper loop는 DB 없이 조용히 계속 돌지 않고 즉시 실패한다. 실패한 recorder
+session은 rollback/close한 뒤 `recorder_init_failed` 예외 로그를 남겨 원인 분류와 재기동 판단에
+사용한다.
+
 로컬 ReAct loop는 기본적으로 OpenAI native tool payload를 전송하지 않는다.
 `LOCAL_LLM_SEND_NATIVE_TOOLS=false`일 때 tool 목록은 compact system prompt로 들어가며,
 서버가 native tool calling을 지원한다는 smoke/eval이 끝난 경우에만 `true`로 전환한다.
@@ -104,6 +109,14 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   agentic-capital이 tiny paper scout order를 제출해 운영 loop를 복구할 수 있다. 이 주문 브리지는
   `KIS_IS_PAPER=true`, `FUTURES_LIVE_ORDERS_ENABLED=false`,
   `LOCAL_FINANCE_PAPER_ORDER_EXECUTION_ENABLED=true`일 때만 동작하고 live 주문 권한이 아니다.
+- `WAIT`/`HOLD`/`OBSERVE` no-order 복구 scout는 시장과 무관하게 1주/1계약으로 제한한다.
+  이는 포지션 개시 신호를 만들기 위한 paper-only probe이며, 환율 미변환이나 max order 값으로
+  대량 해외주식 포지션을 만들지 않는다.
+- KIS paper 국내주식 주문이 broker paper 계좌의 `주문가능금액 부족`으로 거절되더라도,
+  시뮬레이션 자본/가격/risk gate를 통과한 recovery scout는 local domestic paper fill로 기록할 수 있다.
+  이 fallback은 `KIS_IS_PAPER=true`에서만 동작하고, live 주문이나 일반 broker 주문 실패에는 적용하지 않는다.
+- 국내주식 limit price는 KRX 호가단위에 맞춰 broker 제출 전 정규화한다. BUY는 다음 유효 호가로 올림,
+  SELL은 이전 유효 호가로 내림 처리해 KIS paper `40030000`/`호가단위 오류`가 paper loop를 끊지 않게 한다.
 - `market_session`에는 KRX 외에도 NXT 프리/메인/애프터 세션을 기록할 수 있다. 다만 현재
   `kr_stock` paper 주문 경로는 별도 NXT 주문 라우팅을 구현하지 않았으므로, NXT extended session은
   시장 관측/의사결정 컨텍스트에는 포함하되 정규 KRX session과 동일한 주문 개방 신호로 쓰지 않는다.
