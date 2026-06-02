@@ -758,6 +758,23 @@ def _classify_no_trade_reason(
 ) -> str | None:
     """Explain why a paper-shadow cycle did not become an order candidate."""
     action = _normalize_action(decision.get("action"))
+    explicit_no_trade_reason = str(
+        decision.get("no_trade_reason") or record.get("no_trade_reason") or ""
+    ).strip()
+    explicit_non_trade_reasons = {
+        "insufficient_edge",
+        "market_condition",
+        "risk_guard_block",
+        "missing_signal",
+        "missing_evidence",
+        "missing_tool_results",
+        "paper_shadow_only",
+        "tool_collection_only",
+        "model_rejected_trade",
+        "no_context",
+        "missing_evidence_ids",
+        "missing_evidence_review",
+    }
     if action in {"BUY", "SELL"} and record.get("record_type") == "finance_paper_shadow_decision":
         return None
     if record.get("record_type") == "raw_model_failure":
@@ -771,6 +788,8 @@ def _classify_no_trade_reason(
         return f"tool_error:{tool}:{error}"
     if risk_guard.get("hard_fail") is True:
         return "risk_guard_block"
+    if explicit_no_trade_reason in explicit_non_trade_reasons:
+        return explicit_no_trade_reason
     if any("missing_evidence" in str(flag) for flag in risk_flags):
         return "missing_evidence_review"
     if not decision.get("evidence_ids"):
