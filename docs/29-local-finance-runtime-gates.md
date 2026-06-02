@@ -112,6 +112,11 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 - `WAIT`/`HOLD`/`OBSERVE` no-order 복구 scout는 시장과 무관하게 1주/1계약으로 제한한다.
   이는 포지션 개시 신호를 만들기 위한 paper-only probe이며, 환율 미변환이나 max order 값으로
   대량 해외주식 포지션을 만들지 않는다.
+- `OBSERVE`/`WAIT`/`HOLD`가 `no_trade_reason=insufficient_edge`, `confidence=0`,
+  `evidence_ids=[]`처럼 성과 후보 근거가 없는 상태이면 scout 주문을 만들지 않는다. recovery scout는
+  루프 생존용 주문이 아니라 성과 후보 검증용 주문이어야 한다.
+- 보유 포지션을 scout로 청산할 때는 현재가와 평균단가의 차이가 왕복 추정 수수료보다 커야 한다.
+  동일 가격 buy/sell 반복이나 수수료 차감 후 음수인 churn은 paper에서도 차단한다.
 - KIS paper 국내주식 주문이 broker paper 계좌의 `주문가능금액 부족`으로 거절되더라도,
   시뮬레이션 자본/가격/risk gate를 통과한 recovery scout는 local domestic paper fill로 기록할 수 있다.
   이 fallback은 `KIS_IS_PAPER=true`에서만 동작하고, live 주문이나 일반 broker 주문 실패에는 적용하지 않는다.
