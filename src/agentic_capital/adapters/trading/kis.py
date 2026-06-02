@@ -50,6 +50,34 @@ _MINI_FUTURES_MULTIPLIER = 50_000
 _STANDARD_FUTURES_MULTIPLIER = 250_000
 
 
+def _kr_stock_tick_size(price: float) -> int:
+    """Return KRX stock tick size for a KRW price."""
+    if price < 2_000:
+        return 1
+    if price < 5_000:
+        return 5
+    if price < 20_000:
+        return 10
+    if price < 50_000:
+        return 50
+    if price < 200_000:
+        return 100
+    if price < 500_000:
+        return 500
+    return 1_000
+
+
+def _normalize_kr_stock_limit_price(price: float, side: OrderSide) -> int:
+    """Normalize a domestic stock limit price to a valid KRX tick."""
+    tick = _kr_stock_tick_size(price)
+    raw = int(float(price))
+    if raw <= 0:
+        return 0
+    if side == OrderSide.BUY:
+        return ((raw + tick - 1) // tick) * tick
+    return (raw // tick) * tick
+
+
 def _symbol_multiplier(symbol: str) -> int:
     """Return KRW/pt multiplier for a KIS futures symbol.
 
@@ -168,6 +196,10 @@ class KISTradingAdapter(TradingPort):
         if session is None:
             session = KISSession()
         self._session = session
+        self._paper_domestic_positions: dict[tuple[Market, str], Position] = {}
+        self._paper_domestic_fills: list[OrderResult] = []
+        self._paper_domestic_orders: dict[str, OrderResult] = {}
+        self._paper_domestic_order_seq = 0
         self._paper_overseas_positions: dict[tuple[Market, str, str], Position] = {}
         self._paper_overseas_fills: list[OrderResult] = []
         self._paper_overseas_orders: dict[str, OrderResult] = {}
@@ -211,6 +243,17 @@ class KISTradingAdapter(TradingPort):
     def _paper_overseas_key(order: Order) -> tuple[Market, str, str]:
         exchange = _exchange_code(order)
         return (order.market, exchange, order.symbol)
+
+    @staticmethod
+    def _paper_domestic_key(order: Order) -> tuple[Market, str]:
+        return (order.market, order.symbol)
+
+    def _paper_domestic_position_list(self) -> list[Position]:
+        return [
+            p
+            for p in self._paper_domestic_positions.values()
+            if p.quantity > 0
+        ]
 
     def _paper_overseas_position_list(self) -> list[Position]:
         return [
@@ -508,6 +551,9 @@ class KISTradingAdapter(TradingPort):
                 overseas = []
         else:
             overseas = []
+
+        if self._session.is_paper:
+            domestic = domestic + self._paper_domestic_position_list()
 
         return domestic + overseas + futures
 
@@ -856,14 +902,28 @@ class KISTradingAdapter(TradingPort):
         """국내주식 주문 (현금)."""
         await self._session.ensure_token()
         action = "order_buy" if order.side == OrderSide.BUY else "order_sell"
+        normalized_price = (
+            _normalize_kr_stock_limit_price(order.price, order.side)
+            if order.price
+            else 0
+        )
+        broker_order = order.model_copy(update={"price": float(normalized_price)}) if normalized_price else order
+        if order.price and normalized_price != int(order.price):
+            logger.info(
+                "kis_domestic_price_tick_normalized",
+                symbol=order.symbol,
+                side=order.side.value,
+                original_price=order.price,
+                normalized_price=normalized_price,
+            )
         try:
             body = {
                 "CANO": self._session.cano,
                 "ACNT_PRDT_CD": self._session.prdt_cd,
-                "PDNO": order.symbol,
-                "ORD_DVSN": "00" if order.price else "01",  # 00=지정가, 01=시장가
-                "ORD_QTY": str(int(order.quantity)),
-                "ORD_UNPR": str(int(order.price)) if order.price else "0",
+                "PDNO": broker_order.symbol,
+                "ORD_DVSN": "00" if broker_order.price else "01",  # 00=지정가, 01=시장가
+                "ORD_QTY": str(int(broker_order.quantity)),
+                "ORD_UNPR": str(int(broker_order.price)) if broker_order.price else "0",
             }
             r = await self._session.post(
                 f"{self._session.base_url}/uapi/domestic-stock/v1/trading/order-cash",
@@ -879,27 +939,29 @@ class KISTradingAdapter(TradingPort):
                     msg=data.get("msg1", ""),
                     msg_cd=data.get("msg_cd", ""),
                     rt_cd=data.get("rt_cd", ""),
-                    price=order.price,
-                    quantity=order.quantity,
+                    price=broker_order.price,
+                    quantity=broker_order.quantity,
                     ord_dvsn=body["ORD_DVSN"],
                 )
+                if self._session.is_paper and self._domestic_paper_cash_reject(data) and broker_order.price:
+                    return self._submit_paper_domestic_order(broker_order, broker_reject=data)
                 return OrderResult(
-                    order_id="", symbol=order.symbol, side=order.side,
-                    quantity=0.0, filled_price=0.0, status="rejected", market=order.market,
+                    order_id="", symbol=broker_order.symbol, side=broker_order.side,
+                    quantity=0.0, filled_price=0.0, status="rejected", market=broker_order.market,
                 )
 
             output = data.get("output", {})
             order_id = output.get("ODNO", "")
             logger.info("kis_domestic_order_submitted", order_id=order_id,
-                        symbol=order.symbol, side=order.side.value, quantity=order.quantity)
+                        symbol=broker_order.symbol, side=broker_order.side.value, quantity=broker_order.quantity)
             return OrderResult(
                 order_id=order_id,
-                symbol=order.symbol,
-                side=order.side,
-                quantity=order.quantity,
-                filled_price=order.price or 0.0,
+                symbol=broker_order.symbol,
+                side=broker_order.side,
+                quantity=broker_order.quantity,
+                filled_price=broker_order.price or 0.0,
                 status="submitted",
-                market=order.market,
+                market=broker_order.market,
                 metadata={
                     "KRX_FWDG_ORD_ORGNO": output.get("KRX_FWDG_ORD_ORGNO", ""),
                     "ORD_TMD": output.get("ORD_TMD", ""),
@@ -908,6 +970,113 @@ class KISTradingAdapter(TradingPort):
         except Exception:
             logger.exception("kis_submit_domestic_order_failed", symbol=order.symbol)
             raise
+
+    @staticmethod
+    def _domestic_paper_cash_reject(data: dict[str, Any]) -> bool:
+        msg = str(data.get("msg1") or "")
+        return str(data.get("msg_cd") or "") == "40250000" or "주문가능금액이 부족" in msg
+
+    def _submit_paper_domestic_order(
+        self,
+        order: Order,
+        *,
+        broker_reject: dict[str, Any] | None = None,
+    ) -> OrderResult:
+        fill_price = float(order.price or 0.0)
+        if fill_price <= 0:
+            return OrderResult(
+                order_id="",
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                filled_price=0.0,
+                status="rejected",
+                market=order.market,
+                metadata={"paper_virtual": True, "reason": "price_required_for_paper_domestic"},
+            )
+
+        key = self._paper_domestic_key(order)
+        existing = self._paper_domestic_positions.get(key)
+        if order.side == OrderSide.SELL:
+            owned_qty = existing.quantity if existing else 0.0
+            if order.quantity > owned_qty:
+                return OrderResult(
+                    order_id="",
+                    symbol=order.symbol,
+                    side=order.side,
+                    quantity=0.0,
+                    filled_price=0.0,
+                    status="rejected",
+                    market=order.market,
+                    metadata={"paper_virtual": True, "reason": "insufficient_position"},
+                )
+
+        self._paper_domestic_order_seq += 1
+        order_id = f"PAPER-KR-{datetime.now().strftime('%Y%m%d%H%M%S')}-{self._paper_domestic_order_seq:04d}"
+
+        if order.side == OrderSide.BUY:
+            old_qty = existing.quantity if existing else 0.0
+            old_avg = existing.avg_price if existing else 0.0
+            new_qty = old_qty + order.quantity
+            new_avg = ((old_qty * old_avg) + (order.quantity * fill_price)) / new_qty
+            self._paper_domestic_positions[key] = Position(
+                symbol=order.symbol,
+                quantity=new_qty,
+                avg_price=new_avg,
+                current_price=fill_price,
+                unrealized_pnl=(fill_price - new_avg) * new_qty,
+                unrealized_pnl_pct=((fill_price - new_avg) / new_avg * 100) if new_avg else 0.0,
+                market=order.market,
+                exchange="KRX",
+                currency="KRW",
+            )
+        else:
+            remaining_qty = (existing.quantity if existing else 0.0) - order.quantity
+            if remaining_qty <= 0:
+                self._paper_domestic_positions.pop(key, None)
+            elif existing:
+                self._paper_domestic_positions[key] = Position(
+                    symbol=existing.symbol,
+                    quantity=remaining_qty,
+                    avg_price=existing.avg_price,
+                    current_price=fill_price,
+                    unrealized_pnl=(fill_price - existing.avg_price) * remaining_qty,
+                    unrealized_pnl_pct=((fill_price - existing.avg_price) / existing.avg_price * 100)
+                    if existing.avg_price else 0.0,
+                    market=existing.market,
+                    exchange=existing.exchange,
+                    currency=existing.currency,
+                )
+
+        result = OrderResult(
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_price=fill_price,
+            status="filled",
+            market=order.market,
+            metadata={
+                "exchange": "KRX",
+                "paper_virtual": True,
+                "broker": "local_paper_domestic_after_kis_reject",
+                "broker_reject_msg_cd": str((broker_reject or {}).get("msg_cd") or ""),
+                "broker_reject_msg": str((broker_reject or {}).get("msg1") or ""),
+                "currency": "KRW",
+            },
+        )
+        self._paper_domestic_orders[order_id] = result
+        self._paper_domestic_fills.append(result)
+        logger.info(
+            "kis_paper_domestic_order_filled",
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side.value,
+            quantity=order.quantity,
+            price=fill_price,
+            broker_reject_msg_cd=str((broker_reject or {}).get("msg_cd") or ""),
+        )
+        return result
 
     async def _submit_overseas_order(self, order: Order) -> OrderResult:
         """해외주식 주문.
@@ -1379,6 +1548,12 @@ class KISTradingAdapter(TradingPort):
                 ))
 
             logger.debug("kis_fills_fetched", count=len(fills), start=start, end=end)
+            if self._session.is_paper:
+                fills.extend(
+                    fill
+                    for fill in self._paper_domestic_fills
+                    if not symbol or fill.symbol == symbol
+                )
             return fills
         except Exception:
             logger.exception("kis_get_fills_failed")

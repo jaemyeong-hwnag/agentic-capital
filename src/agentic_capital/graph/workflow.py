@@ -555,6 +555,16 @@ def _tool_quote_price(tool_results: dict[str, Any]) -> float:
     return 0.0
 
 
+def _has_complete_read_only_tool_evidence(tool_results: dict[str, Any], *, market: str) -> bool:
+    """Treat complete read-only runtime tool output as evidence for no-order recovery."""
+    required = ("get_balance", "get_positions", "get_market_session", "get_risk_limit")
+    if any(name not in tool_results for name in required):
+        return False
+    if market != _PAPER_CALL_OPTION_MARKET and _tool_quote_price(tool_results) <= 0:
+        return False
+    return True
+
+
 def _owned_quantity(tool_results: dict[str, Any], symbol: str, market: str) -> float:
     positions = tool_results.get("get_positions")
     if not isinstance(positions, list):
@@ -765,7 +775,7 @@ def _finance_loop_probe_order_plan(
             "symbol": symbol,
             "market": market,
             "quantity": 1,
-            "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
+            "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
             "position_effect": "close",
@@ -796,6 +806,7 @@ def _finance_loop_probe_order_plan(
         max_order_value=max_order_value,
         risk_budget=risk_budget,
     )
+    quantity = min(quantity, 1)
     if quantity <= 0:
         return None
     return {
@@ -803,7 +814,7 @@ def _finance_loop_probe_order_plan(
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": price if market != "kr_stock" else None,
+        "price": price,
         "estimated_price": price,
         "exchange": record.get("exchange"),
         "position_effect": "open",
@@ -823,12 +834,13 @@ def _finance_wait_probe_order_plan(
     evidence_ids: list[Any],
     risk_flags: list[Any],
 ) -> dict[str, Any] | None:
-    """Recover paper-only WAIT loops with a tiny scout order when all gates are clear."""
+    """Recover paper-only no-order loops with a tiny scout order when all gates are clear."""
     if not settings.local_finance_paper_probe_on_model_loop:
         return None
     if str(record.get("record_type") or "") != "finance_paper_shadow_decision":
         return None
-    if str(record.get("action") or "").upper() not in {"WAIT", "HOLD"}:
+    no_order_action = str(record.get("action") or "").upper()
+    if no_order_action not in {"WAIT", "HOLD", "OBSERVE"}:
         return None
     if record.get("paper_trade_only") is not True:
         return None
@@ -838,8 +850,6 @@ def _finance_wait_probe_order_plan(
         return None
     if risk_flags:
         return None
-    if not evidence_ids:
-        return None
     if not settings.local_finance_paper_order_execution_enabled:
         return None
     if not settings.kis_is_paper or settings.futures_live_orders_enabled:
@@ -847,6 +857,8 @@ def _finance_wait_probe_order_plan(
 
     symbol = str(record.get("symbol") or primary_symbol).strip()
     market = str(record.get("market") or primary_market or "kr_stock").lower() or "kr_stock"
+    if not (evidence_ids or record.get("evidence_ids") or _has_complete_read_only_tool_evidence(tool_results, market=market)):
+        return None
     if not _paper_market_session_open(tool_results, open_markets, market):
         return None
     price = _tool_quote_price(tool_results)
@@ -864,11 +876,11 @@ def _finance_wait_probe_order_plan(
             "symbol": symbol,
             "market": market,
             "quantity": 1,
-            "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
+            "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
             "position_effect": "close",
-            "reason": "paper scout rebalance sell after complete WAIT/HOLD no-order finance decision",
+            "reason": f"paper scout rebalance sell after complete {no_order_action} no-order finance decision",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -883,7 +895,7 @@ def _finance_wait_probe_order_plan(
             "estimated_price": price,
             "exchange": record.get("exchange") or "CALL",
             "position_effect": "open",
-            "reason": "paper scout recovery after complete WAIT/HOLD no-order finance decision for call option",
+            "reason": f"paper scout recovery after complete {no_order_action} no-order finance decision for call option",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -895,6 +907,7 @@ def _finance_wait_probe_order_plan(
         max_order_value=max_order_value,
         risk_budget=risk_budget,
     )
+    quantity = min(quantity, 1)
     if quantity <= 0:
         return None
     return {
@@ -902,11 +915,11 @@ def _finance_wait_probe_order_plan(
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": price if market != "kr_stock" else None,
+        "price": price,
         "estimated_price": price,
         "exchange": record.get("exchange"),
         "position_effect": "open",
-        "reason": "paper scout recovery after complete WAIT/HOLD no-order finance decision",
+        "reason": f"paper scout recovery after complete {no_order_action} no-order finance decision",
         "recovery": True,
     }
 

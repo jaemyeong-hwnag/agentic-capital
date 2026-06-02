@@ -693,7 +693,7 @@ class TestRunAgentCycle:
             order_id="paper-1",
             symbol="005930",
             side=OrderSide.BUY,
-            quantity=3,
+            quantity=1,
             filled_price=0.0,
             status="submitted",
             market=Market.KR_STOCK,
@@ -761,7 +761,7 @@ class TestRunAgentCycle:
         submitted = trading.submit_order.await_args.args[0]
         assert submitted.symbol == "005930"
         assert submitted.side == OrderSide.BUY
-        assert submitted.quantity == 3
+        assert submitted.quantity == 1
         recorder.record_decision.assert_awaited_once()
         assert any(item["type"] == "paper_order_result" for item in result["decisions"])
 

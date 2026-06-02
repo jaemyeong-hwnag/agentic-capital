@@ -135,6 +135,7 @@ class SimulationEngine:
 
     async def _init_recorder(self) -> None:
         """Initialize DB recorder if database is available."""
+        session = None
         try:
             from agentic_capital.adapters.llm.router import llm_run_metadata
             from agentic_capital.infra.database import async_session
@@ -168,9 +169,18 @@ class SimulationEngine:
 
             await self._recorder.commit()
             logger.info("recorder_initialized", simulation_id=str(sim_id))
-        except Exception:
-            logger.warning("recorder_init_failed_running_without_db")
+        except Exception as exc:
+            if session is not None:
+                try:
+                    await session.rollback()
+                    await session.close()
+                except Exception:
+                    logger.exception("recorder_init_cleanup_failed")
             self._recorder = None
+            logger.exception("recorder_init_failed")
+            raise RuntimeError(
+                "recorder initialization failed; refusing to run paper loop without DB recording"
+            ) from exc
 
     async def start(self) -> None:
         """Start the simulation loop.

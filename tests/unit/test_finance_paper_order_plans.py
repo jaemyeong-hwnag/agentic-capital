@@ -265,6 +265,85 @@ def test_finance_wait_probe_uses_primary_market_when_record_omits_market():
     assert plan["symbol"] == "AAPL"
     assert plan["market"] == "us_stock"
     assert plan["price"] == 185.0
+    assert plan["quantity"] == 1
+
+
+def test_finance_wait_probe_recovers_observe_no_order_decision():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.1),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "005930",
+                "market": "kr_stock",
+            },
+            tool_results={
+                **_tool_results(),
+                "get_quote": {"symbol": "005930", "price": 350500, "market": "kr_stock"},
+                "get_balance": {"available": 5_000_000.0},
+                "get_risk_limit": {"max_order_value": 5_000_000.0},
+            },
+            primary_symbol="005930",
+            primary_market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000.0,
+            evidence_ids=["runtime-tool-evidence"],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["symbol"] == "005930"
+    assert plan["market"] == "kr_stock"
+    assert plan["quantity"] == 1
+    assert "OBSERVE" in plan["reason"]
+
+
+def test_finance_wait_probe_uses_complete_runtime_tools_as_evidence():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.1),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "005930",
+                "market": "kr_stock",
+            },
+            tool_results={
+                "get_market_session": {"state": "regular", "market": "kr_stock"},
+                "get_quote": {"symbol": "005930", "price": 351000, "market": "kr_stock"},
+                "get_balance": {"available": 5_000_000.0},
+                "get_risk_limit": {"max_order_value": 5_000_000.0},
+                "get_positions": [],
+            },
+            primary_symbol="005930",
+            primary_market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000.0,
+            evidence_ids=[],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["quantity"] == 1
 
 
 def test_finance_wait_probe_recovers_hold_call_option():

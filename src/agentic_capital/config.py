@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     local_finance_smoke_timeout_seconds: float = 30.0
     local_finance_pipeline_enabled: bool = True
     local_finance_paper_order_execution_enabled: bool = True
-    local_finance_paper_probe_on_model_loop: bool = False
+    local_finance_paper_probe_on_model_loop: bool = True
     local_finance_default_symbol: str = "005930"
     local_finance_default_symbols: str = "005930,AAPL"
     local_finance_default_market: str = "kr_stock"

@@ -541,14 +541,15 @@ class TestSimulationEngine:
         mock_recorder.record_agent.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_init_recorder_db_failure_graceful(self):
-        """_init_recorder handles DB errors gracefully, recorder = None."""
+    async def test_init_recorder_db_failure_stops_paper_loop(self):
+        """_init_recorder fails closed so paper trading cannot run unrecorded."""
         engine = SimulationEngine()
         engine._agents = []
         engine._symbols = []
 
         with patch("agentic_capital.infra.database.async_session", side_effect=Exception("DB not available")):
-            await engine._init_recorder()
+            with pytest.raises(RuntimeError, match="refusing to run paper loop without DB recording"):
+                await engine._init_recorder()
 
         assert engine._recorder is None
 

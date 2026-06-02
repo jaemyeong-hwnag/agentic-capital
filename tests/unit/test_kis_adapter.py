@@ -6,7 +6,7 @@ import pytest
 
 from agentic_capital.adapters.kis_session import KISSession
 from agentic_capital.adapters.trading.kis import KISTradingAdapter
-from agentic_capital.ports.trading import Order, OrderSide, OrderType
+from agentic_capital.ports.trading import Market, Order, OrderSide, OrderType
 
 
 def _make_session(*, is_paper: bool = True) -> KISSession:
@@ -235,6 +235,30 @@ class TestKISTradingAdapter:
         assert result.status == "submitted"
 
     @pytest.mark.asyncio
+    async def test_submit_domestic_order_normalizes_krx_tick_price(self):
+        adapter = self._make_adapter()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "rt_cd": "0",
+            "output": {"ODNO": "ORDER123"},
+        }
+        adapter._session.post = AsyncMock(return_value=mock_response)
+
+        order = Order(
+            symbol="005930",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=1,
+            price=354250,
+            market=Market.KR_STOCK,
+        )
+        result = await adapter.submit_order(order)
+
+        assert result.status == "submitted"
+        assert result.filled_price == 354500
+        assert adapter._session.post.await_args.kwargs["json"]["ORD_UNPR"] == "354500"
+
+    @pytest.mark.asyncio
     async def test_submit_order_rejected(self):
         adapter = self._make_adapter()
         mock_response = MagicMock()
@@ -244,6 +268,39 @@ class TestKISTradingAdapter:
         order = Order(symbol="005930", side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=10)
         result = await adapter.submit_order(order)
         assert result.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_submit_domestic_paper_cash_reject_fills_locally(self):
+        adapter = self._make_adapter(is_paper=True)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "40250000",
+            "msg1": "모의투자 주문가능금액이 부족합니다.",
+        }
+        adapter._session.post = AsyncMock(return_value=mock_response)
+        adapter._get_domestic_positions = AsyncMock(return_value=[])
+
+        order = Order(
+            symbol="005930",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=1,
+            price=350500,
+            market=Market.KR_STOCK,
+        )
+        result = await adapter.submit_order(order)
+
+        assert result.status == "filled"
+        assert result.order_id.startswith("PAPER-KR-")
+        assert result.metadata["paper_virtual"] is True
+        positions = await adapter.get_positions()
+        assert any(p.symbol == "005930" and p.quantity == 1 for p in positions)
+        fills_response = MagicMock()
+        fills_response.json.return_value = {"rt_cd": "0", "output1": []}
+        adapter._session.get = AsyncMock(return_value=fills_response)
+        fills = await adapter.get_fills(symbol="005930")
+        assert any(fill.order_id == result.order_id for fill in fills)
 
     @pytest.mark.asyncio
     async def test_get_order_status(self):
