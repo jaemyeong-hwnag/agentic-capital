@@ -307,6 +307,70 @@ def _serialise_balance(balance: Any) -> dict[str, Any]:
     }
 
 
+def _serialise_ohlcv(candle: Any) -> dict[str, Any]:
+    timestamp = getattr(candle, "timestamp", None)
+    return {
+        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp or ""),
+        "open": float(getattr(candle, "open", 0) or 0),
+        "high": float(getattr(candle, "high", 0) or 0),
+        "low": float(getattr(candle, "low", 0) or 0),
+        "close": float(getattr(candle, "close", 0) or 0),
+        "volume": float(getattr(candle, "volume", 0) or 0),
+    }
+
+
+def _pct_change(start: float, end: float) -> float | None:
+    if start <= 0:
+        return None
+    return round(((end - start) / start) * 100.0, 6)
+
+
+def _market_signal_from_ohlcv(candles: list[dict[str, Any]], quote: dict[str, Any]) -> dict[str, Any]:
+    closes: list[float] = []
+    for item in candles:
+        try:
+            close = float(item.get("close") or 0)
+        except (TypeError, ValueError):
+            close = 0.0
+        if close > 0:
+            closes.append(close)
+    latest_price = float(quote.get("price") or (closes[-1] if closes else 0) or 0)
+    signal: dict[str, Any] = {
+        "source": "ohlcv_quote_runtime",
+        "candidate_action": "HOLD",
+        "confidence": 0.0,
+        "reason": "insufficient_ohlcv_signal",
+        "horizon": "15m_runtime",
+        "latest_price": latest_price,
+        "close_count": len(closes),
+    }
+    if len(closes) < 4 or latest_price <= 0:
+        return signal
+
+    prev_close = closes[-2]
+    base_close = closes[0]
+    recent_return_pct = _pct_change(prev_close, latest_price)
+    window_return_pct = _pct_change(base_close, latest_price)
+    signal["recent_return_pct"] = recent_return_pct
+    signal["window_return_pct"] = window_return_pct
+
+    if recent_return_pct is None or window_return_pct is None:
+        return signal
+    if recent_return_pct > 0.08 and window_return_pct > 0.15:
+        signal.update({
+            "candidate_action": "BUY",
+            "confidence": min(0.5, round(0.2 + abs(window_return_pct) / 10.0, 3)),
+            "reason": "short_window_positive_momentum",
+        })
+    elif recent_return_pct < -0.08 and window_return_pct < -0.15:
+        signal.update({
+            "candidate_action": "SELL_OR_AVOID",
+            "confidence": min(0.5, round(0.2 + abs(window_return_pct) / 10.0, 3)),
+            "reason": "short_window_negative_momentum",
+        })
+    return signal
+
+
 def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
     """Return the structure expected by the finance decision sidecar."""
     tool_result_ids = sorted(
@@ -317,7 +381,9 @@ def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
             "get_balance",
             "get_positions",
             "get_quote",
+            "get_ohlcv",
             "get_risk_limit",
+            "market_signal",
         )
         if name in results
     )
@@ -325,6 +391,8 @@ def _finance_decision_payload(results: dict[str, Any]) -> dict[str, Any]:
         "balance": results.get("get_balance", {}),
         "positions": results.get("get_positions", []),
         "quote": results.get("get_quote", {}),
+        "ohlcv": results.get("get_ohlcv", {}),
+        "market_signal": results.get("market_signal", {}),
         "market_session": results.get("get_market_session", {}),
         "risk_limit": results.get("get_risk_limit", {}),
         "rag": results.get("search_rag", {}),
@@ -377,7 +445,7 @@ async def collect_finance_decision_tool_results(
     """
     requested = _extract_finance_tool_names(tool_plan_payload)
     forbidden = sorted(requested & {"submit_order", "submit_live_order", "place_order", "execute_trade"})
-    required = {"get_balance", "get_positions", "get_quote", "get_market_session", "get_risk_limit", "search_rag"}
+    required = {"get_balance", "get_positions", "get_quote", "get_ohlcv", "get_market_session", "get_risk_limit", "search_rag"}
     if not requested:
         requested = set(required)
     requested |= required
@@ -453,6 +521,27 @@ async def collect_finance_decision_tool_results(
                 }
             except Exception as exc:
                 errors.append({"tool": "get_quote", "error": type(exc).__name__, "symbol": resolved_symbol})
+
+    if "get_ohlcv" in requested:
+        if not market_data:
+            errors.append({"tool": "get_ohlcv", "error": "no_market_data"})
+        elif not resolved_symbol:
+            errors.append({"tool": "get_ohlcv", "error": "missing_symbol"})
+        elif symbol_error := _quote_symbol_error(resolved_symbol):
+            errors.append({"tool": "get_ohlcv", "error": "invalid_symbol", "reason": symbol_error, "symbol": resolved_symbol})
+        else:
+            try:
+                candles = await market_data.get_ohlcv(resolved_symbol, timeframe="15m", limit=8)
+                compact_candles = [_serialise_ohlcv(candle) for candle in candles][-8:]
+                results["get_ohlcv"] = {
+                    "symbol": resolved_symbol,
+                    "timeframe": "15m",
+                    "candles": compact_candles,
+                    "count": len(compact_candles),
+                }
+                results["market_signal"] = _market_signal_from_ohlcv(compact_candles, results.get("get_quote", {}))
+            except Exception as exc:
+                errors.append({"tool": "get_ohlcv", "error": type(exc).__name__, "symbol": resolved_symbol})
 
     if "get_market_session" in requested:
         results["get_market_session"] = _market_session_from_open_markets(open_markets, market)

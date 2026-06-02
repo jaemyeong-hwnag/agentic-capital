@@ -1,5 +1,6 @@
 """Unit tests for build_agent_tools()."""
 
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,6 +45,19 @@ def _make_market_data(price: float = 70_000.0):
         market="kr_stock",
         currency="KRW",
     ))
+    base_time = datetime(2026, 6, 2, 9, 0)
+    closes = [price * 0.996, price * 0.997, price * 0.998, price * 1.0]
+    market_data.get_ohlcv = AsyncMock(return_value=[
+        MagicMock(
+            timestamp=base_time + timedelta(minutes=15 * idx),
+            open=close - 20,
+            high=close + 40,
+            low=close - 40,
+            close=close,
+            volume=10_000 + idx,
+        )
+        for idx, close in enumerate(closes)
+    ])
     return market_data
 
 
@@ -72,9 +86,13 @@ class TestFinanceDecisionToolCollector:
         assert result["get_balance"]["available"] == 5_000_000
         assert result["get_positions"][0]["symbol"] == "005930"
         assert result["get_quote"]["price"] == 70_000
+        assert result["get_ohlcv"]["timeframe"] == "15m"
+        assert result["market_signal"]["candidate_action"] == "BUY"
         assert result["get_market_session"]["state"] == "regular"
         assert result["get_risk_limit"]["max_order_value"] == 5_000_000
         assert result["search_rag"]["evidence_ids"] == ["ev-1"]
+        assert result["finance_decision_payload"]["market_signal"]["reason"] == "short_window_positive_momentum"
+        assert "market_signal" in result["finance_decision_payload"]["tool_result_ids"]
         assert result["_errors"][0]["error"] == "order_tool_blocked_in_shadow"
 
     @pytest.mark.asyncio
@@ -113,7 +131,9 @@ class TestFinanceDecisionToolCollector:
             }
             for error in result["_errors"]
         )
+        assert any(error.get("tool") == "get_ohlcv" for error in result["_errors"])
         market_data.get_quote.assert_not_awaited()
+        market_data.get_ohlcv.assert_not_awaited()
 
 
 class TestBuildAgentTools:

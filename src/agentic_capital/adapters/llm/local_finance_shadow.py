@@ -12,6 +12,8 @@ PRE_TRADE_TOOLS = {
     "get_balance",
     "get_positions",
     "get_quote",
+    "get_ohlcv",
+    "market_signal",
     "get_market_session",
     "get_risk_limit",
     "search_rag",

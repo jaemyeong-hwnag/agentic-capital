@@ -9,6 +9,22 @@ from agentic_capital import local_finance_smoke
 from agentic_capital.adapters.llm import local_finance_runtime, router
 
 
+def _market_edge_tool_results(symbol: str = "005930") -> dict:
+    return {
+        "get_ohlcv": {
+            "symbol": symbol,
+            "timeframe": "15m",
+            "candles": [{"close": 70_000.0}],
+            "count": 1,
+        },
+        "market_signal": {
+            "candidate_action": "BUY",
+            "confidence": 0.4,
+            "reason": "short_window_positive_momentum",
+        },
+    }
+
+
 def test_local_provider_names_enable_local_mode():
     with patch.object(router.settings, "llm_provider", "domain_llm_forge"):
         assert router.is_local_llm_enabled() is True
@@ -307,6 +323,7 @@ async def test_local_finance_decision_pipeline_repairs_no_context_with_complete_
             "get_quote": {"price": 70000},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1000000},
+            **_market_edge_tool_results(),
             "search_rag": {"evidence_ids": [], "evidence_count": 0},
         }
 
@@ -352,6 +369,7 @@ async def test_local_finance_decision_pipeline_keeps_raw_failure_on_no_context_w
             "get_positions": [],
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1000000},
+            **_market_edge_tool_results(),
             "search_rag": {"evidence_ids": [], "evidence_count": 0},
         }
 
@@ -393,6 +411,7 @@ async def test_local_finance_decision_pipeline_repairs_call_tool_with_complete_r
             "get_quote": {"price": 70000},
             "get_market_session": {"state": "closed", "is_open": False, "open_markets": ["NASDAQ", "NIGHT", "NYSE"]},
             "get_risk_limit": {"max_order_value": 1000000},
+            **_market_edge_tool_results(),
             "search_rag": {"evidence_ids": [], "evidence_count": 0},
         }
 
@@ -448,6 +467,7 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -487,9 +507,11 @@ async def test_local_finance_tool_planner_uses_compact_evidence_and_fallback():
             assert payload["tool_results"]["available"] == sorted([
                 "get_balance",
                 "get_market_session",
+                "get_ohlcv",
                 "get_positions",
                 "get_quote",
                 "get_risk_limit",
+                "market_signal",
                 "search_rag",
             ])
             assert payload["tool_result_ids"] == payload["tool_results"]["tool_result_ids"]
@@ -574,6 +596,7 @@ async def test_local_finance_call_tool_loop_with_complete_tools_repairs_to_obser
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -619,9 +642,11 @@ async def test_local_finance_call_tool_loop_with_complete_tools_repairs_to_obser
             assert payload["tool_result_ids"] == sorted([
                 "get_balance",
                 "get_market_session",
+                "get_ohlcv",
                 "get_positions",
                 "get_quote",
                 "get_risk_limit",
+                "market_signal",
                 "search_rag",
             ])
             return {
@@ -690,6 +715,7 @@ async def test_local_finance_decision_pipeline_blocks_buy_over_risk_limit():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 300_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -774,6 +800,7 @@ async def test_local_finance_decision_pipeline_uses_quote_price_over_model_price
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 300_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -856,6 +883,7 @@ async def test_local_finance_decision_pipeline_blocks_mismatched_quote_symbol():
             "get_quote": {"price": 70_000, "symbol": "000660", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -937,6 +965,7 @@ async def test_local_finance_decision_pipeline_blocks_buy_over_available_cash():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1021,6 +1050,7 @@ async def test_local_finance_decision_pipeline_learns_missing_buy_notional():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1101,6 +1131,7 @@ async def test_local_finance_decision_pipeline_records_order_tool_planner_failur
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1191,6 +1222,7 @@ async def test_local_finance_decision_pipeline_blocks_trade_without_rag_evidence
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1270,6 +1302,7 @@ async def test_local_finance_decision_pipeline_records_risk_guard_hard_fail_as_r
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1359,6 +1392,7 @@ async def test_local_finance_decision_pipeline_blocks_buy_when_market_closed():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "closed", "is_open": False, "regular_session": False},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1441,6 +1475,7 @@ async def test_local_finance_decision_pipeline_blocks_buy_with_unknown_market_se
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1522,6 +1557,7 @@ async def test_local_finance_decision_pipeline_blocks_buy_with_conflicting_marke
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "closed", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),
@@ -1605,6 +1641,7 @@ async def test_local_finance_decision_pipeline_blocks_sell_over_position():
             "get_quote": {"price": 70_000, "symbol": "005930", "market": "kr_stock"},
             "get_market_session": {"state": "regular", "is_open": True, "regular_session": True},
             "get_risk_limit": {"max_order_value": 1_000_000},
+            **_market_edge_tool_results(),
             "search_rag": {
                 "evidence_ids": payload["evidence_ids"],
                 "evidence_count": len(payload["evidence"]),

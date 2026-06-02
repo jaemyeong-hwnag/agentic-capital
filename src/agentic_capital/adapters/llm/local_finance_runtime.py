@@ -560,6 +560,8 @@ def _risk_guard_finance_context(finance_context: dict[str, Any]) -> dict[str, An
         "balance": finance_context.get("balance", {}),
         "positions": finance_context.get("positions", []),
         "quote": finance_context.get("quote", {}),
+        "ohlcv": finance_context.get("ohlcv", {}),
+        "market_signal": finance_context.get("market_signal", {}),
         "market_session": finance_context.get("market_session", {}),
         "risk_limit": finance_context.get("risk_limit", {}),
         "rag": compact_rag,
@@ -663,6 +665,7 @@ def _deterministic_paper_tool_plan(agent_state: dict[str, Any]) -> dict[str, Any
             {"tool": "get_balance"},
             {"tool": "get_positions"},
             {"tool": "get_quote", "args": {"symbol": symbol} if symbol else {}},
+            {"tool": "get_ohlcv", "args": {"symbol": symbol, "timeframe": "15m", "limit": 8} if symbol else {}},
             {"tool": "get_risk_limit"},
         ],
         "stop_if_missing": [
@@ -958,8 +961,10 @@ async def run_local_finance_decision_pipeline(
                 "get_balance, get_positions, get_quote, and get_risk_limit, do not return "
                 "CALL_TOOL or missing_evidence_review only because service-document evidence_ids "
                 "are sparse; return HOLD or WAIT with no_trade_reason=insufficient_edge unless "
-                "a paper BUY/SELL is justified. If balance, positions, quote, risk limit, or "
-                "runtime evidence is insufficient, do not return BUY or SELL."
+                "a paper BUY/SELL is justified. Use finance_context.market_signal and 15m OHLCV "
+                "as runtime evidence for short-window momentum, but never treat a single quote as "
+                "an edge. If balance, positions, quote, risk limit, or runtime evidence is "
+                "insufficient, do not return BUY or SELL."
             ),
         )
         sidecar_calls.append(meta)
@@ -968,6 +973,7 @@ async def run_local_finance_decision_pipeline(
             tool_results=compact_tool_results,
             evidence_ids=evidence_ids,
         )
+        decision["required_tools"] = sorted(set(decision.get("required_tools") or []) | set(tool_result_ids))
         blocked_order_tools = _blocked_order_tools(tool_results)
 
         risk_guard_payload = {
