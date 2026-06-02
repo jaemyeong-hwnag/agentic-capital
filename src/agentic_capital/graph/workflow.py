@@ -585,6 +585,99 @@ def _owned_quantity(tool_results: dict[str, Any], symbol: str, market: str) -> f
     return owned
 
 
+def _position_for(tool_results: dict[str, Any], symbol: str, market: str) -> dict[str, Any] | None:
+    positions = tool_results.get("get_positions")
+    if not isinstance(positions, list):
+        return None
+    for position in positions:
+        if not isinstance(position, dict):
+            continue
+        if str(position.get("symbol") or "") != symbol:
+            continue
+        position_market = str(position.get("market") or market or "kr_stock").lower()
+        if market and position_market != market:
+            continue
+        try:
+            if float(position.get("quantity") or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        return position
+    return None
+
+
+def _paper_roundtrip_commission(market: str, entry_price: float, exit_price: float, quantity: int) -> float:
+    from agentic_capital.simulation.recorder import _estimate_commission
+
+    if quantity <= 0:
+        return 0.0
+    return _estimate_commission(market, entry_price * quantity) + _estimate_commission(market, exit_price * quantity)
+
+
+def _paper_sell_has_positive_net_edge(
+    *,
+    tool_results: dict[str, Any],
+    symbol: str,
+    market: str,
+    exit_price: float,
+    quantity: int,
+) -> bool:
+    position = _position_for(tool_results, symbol, market)
+    if position is None:
+        return False
+    try:
+        entry_price = float(position.get("avg_price") or 0)
+    except (TypeError, ValueError):
+        entry_price = 0.0
+    if entry_price <= 0 or exit_price <= 0:
+        return False
+    gross_edge = (exit_price - entry_price) * quantity
+    required_edge = _paper_roundtrip_commission(market, entry_price, exit_price, quantity)
+    return gross_edge > required_edge
+
+
+def _record_has_performance_candidate_edge(record: dict[str, Any], evidence_ids: list[Any] | None) -> bool:
+    """Only convert no-order model output into scout orders when it carries usable edge evidence."""
+    no_trade_reason = str(record.get("no_trade_reason") or "").lower()
+    if no_trade_reason in {"insufficient_edge", "missing_evidence_review", "tool_collection_only"}:
+        return False
+    try:
+        confidence = float(record.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence <= 0 and not (evidence_ids or record.get("evidence_ids")):
+        return False
+    return True
+
+
+def _recent_same_price_churn(
+    *,
+    tool_results: dict[str, Any],
+    symbol: str,
+    action: str,
+    price: float,
+) -> bool:
+    fills = tool_results.get("get_fills")
+    if not isinstance(fills, list) or price <= 0:
+        return False
+    opposite = "sell" if action.upper() == "BUY" else "buy"
+    for fill in reversed(fills[-6:]):
+        if not isinstance(fill, dict):
+            continue
+        if str(fill.get("symbol") or "") != symbol:
+            continue
+        side = str(fill.get("side") or "").lower()
+        if side != opposite:
+            continue
+        try:
+            fill_price = float(fill.get("filled_price") or fill.get("price") or 0)
+        except (TypeError, ValueError):
+            fill_price = 0.0
+        if abs(fill_price - price) < 1e-9:
+            return True
+    return False
+
+
 _PAPER_SPOT_MARKETS = {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
 _PAPER_CALL_OPTION_MARKET = "kr_options"
 _PAPER_ORDER_MARKETS = _PAPER_SPOT_MARKETS | {_PAPER_CALL_OPTION_MARKET}
@@ -770,16 +863,25 @@ def _finance_loop_probe_order_plan(
         return None
     owned = int(_owned_quantity(tool_results, symbol, market))
     if owned > 0:
+        quantity = 1
+        if market != _PAPER_CALL_OPTION_MARKET and not _paper_sell_has_positive_net_edge(
+            tool_results=tool_results,
+            symbol=symbol,
+            market=market,
+            exit_price=price,
+            quantity=quantity,
+        ):
+            return None
         plan = {
             "action": "SELL",
             "symbol": symbol,
             "market": market,
-            "quantity": 1,
+            "quantity": quantity,
             "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
             "position_effect": "close",
-            "reason": "paper scout rebalance sell after complete WAIT/no-order finance decision",
+            "reason": "paper scout net-positive sell after finance_decision_model CALL_TOOL loop",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -808,6 +910,8 @@ def _finance_loop_probe_order_plan(
     )
     quantity = min(quantity, 1)
     if quantity <= 0:
+        return None
+    if _recent_same_price_churn(tool_results=tool_results, symbol=symbol, action="BUY", price=price):
         return None
     return {
         "action": "BUY",
@@ -850,6 +954,8 @@ def _finance_wait_probe_order_plan(
         return None
     if risk_flags:
         return None
+    if not _record_has_performance_candidate_edge(record, evidence_ids):
+        return None
     if not settings.local_finance_paper_order_execution_enabled:
         return None
     if not settings.kis_is_paper or settings.futures_live_orders_enabled:
@@ -871,16 +977,25 @@ def _finance_wait_probe_order_plan(
         return None
     owned = int(_owned_quantity(tool_results, symbol, market))
     if owned > 0:
+        quantity = 1
+        if market != _PAPER_CALL_OPTION_MARKET and not _paper_sell_has_positive_net_edge(
+            tool_results=tool_results,
+            symbol=symbol,
+            market=market,
+            exit_price=price,
+            quantity=quantity,
+        ):
+            return None
         plan = {
             "action": "SELL",
             "symbol": symbol,
             "market": market,
-            "quantity": 1,
+            "quantity": quantity,
             "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
             "exchange": record.get("exchange"),
             "position_effect": "close",
-            "reason": f"paper scout rebalance sell after complete {no_order_action} no-order finance decision",
+            "reason": f"paper scout net-positive sell after complete {no_order_action} no-order finance decision",
             "recovery": True,
         }
         plan.update(option_fields)
@@ -910,6 +1025,8 @@ def _finance_wait_probe_order_plan(
     quantity = min(quantity, 1)
     if quantity <= 0:
         return None
+    if _recent_same_price_churn(tool_results=tool_results, symbol=symbol, action="BUY", price=price):
+        return None
     return {
         "action": "BUY",
         "symbol": symbol,
@@ -919,7 +1036,7 @@ def _finance_wait_probe_order_plan(
         "estimated_price": price,
         "exchange": record.get("exchange"),
         "position_effect": "open",
-        "reason": f"paper scout recovery after complete {no_order_action} no-order finance decision",
+        "reason": f"paper scout performance candidate after complete {no_order_action} no-order finance decision",
         "recovery": True,
     }
 

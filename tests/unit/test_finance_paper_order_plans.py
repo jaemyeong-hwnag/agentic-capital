@@ -268,7 +268,7 @@ def test_finance_wait_probe_uses_primary_market_when_record_omits_market():
     assert plan["quantity"] == 1
 
 
-def test_finance_wait_probe_recovers_observe_no_order_decision():
+def test_finance_wait_probe_blocks_observe_insufficient_edge_without_confidence():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
         patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
@@ -285,6 +285,45 @@ def test_finance_wait_probe_recovers_observe_no_order_decision():
                 "within_risk_limit": True,
                 "symbol": "005930",
                 "market": "kr_stock",
+                "confidence": 0.0,
+                "no_trade_reason": "insufficient_edge",
+            },
+            tool_results={
+                **_tool_results(),
+                "get_quote": {"symbol": "005930", "price": 350500, "market": "kr_stock"},
+                "get_balance": {"available": 5_000_000.0},
+                "get_risk_limit": {"max_order_value": 5_000_000.0},
+            },
+            primary_symbol="005930",
+            primary_market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000.0,
+            evidence_ids=[],
+            risk_flags=[],
+        )
+
+    assert plan is None
+
+
+def test_finance_wait_probe_recovers_observe_performance_candidate():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.1),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "005930",
+                "market": "kr_stock",
+                "confidence": 0.2,
+                "no_trade_reason": "paper_scout_candidate",
             },
             tool_results={
                 **_tool_results(),
@@ -325,6 +364,8 @@ def test_finance_wait_probe_uses_complete_runtime_tools_as_evidence():
                 "within_risk_limit": True,
                 "symbol": "005930",
                 "market": "kr_stock",
+                "confidence": 0.3,
+                "no_trade_reason": "paper_scout_candidate",
             },
             tool_results={
                 "get_market_session": {"state": "regular", "market": "kr_stock"},
@@ -346,6 +387,43 @@ def test_finance_wait_probe_uses_complete_runtime_tools_as_evidence():
     assert plan["quantity"] == 1
 
 
+def test_finance_wait_probe_blocks_same_price_rebuy_churn():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.2),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "AAPL",
+                "market": "us_stock",
+                "confidence": 0.4,
+                "no_trade_reason": "paper_scout_candidate",
+            },
+            tool_results={
+                **_tool_results(),
+                "get_fills": [
+                    {"symbol": "AAPL", "side": "sell", "filled_price": 185.0, "quantity": 1},
+                ],
+            },
+            primary_symbol="AAPL",
+            primary_market="us_stock",
+            open_markets=["NASDAQ"],
+            capital_limit=10_000.0,
+            evidence_ids=["source_reference.md"],
+            risk_flags=[],
+        )
+
+    assert plan is None
+
+
 def test_finance_wait_probe_recovers_hold_call_option():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
@@ -363,6 +441,8 @@ def test_finance_wait_probe_recovers_hold_call_option():
                 "market": "kr_options",
                 "symbol": "K200_CALL_ATM",
                 "option_type": "call",
+                "confidence": 0.2,
+                "no_trade_reason": "paper_scout_candidate",
             },
             tool_results={**_tool_results(), "get_quote": {"price": 0.0}},
             primary_symbol="K200_CALL_ATM",
@@ -395,9 +475,11 @@ def test_finance_wait_probe_sells_one_when_current_symbol_is_owned():
                 "would_submit_order": False,
                 "within_risk_limit": True,
                 "symbol": "AAPL",
+                "confidence": 0.2,
+                "no_trade_reason": "paper_scout_candidate",
             },
             tool_results=_tool_results(positions=[
-                {"symbol": "AAPL", "market": "us_stock", "quantity": 159}
+                {"symbol": "AAPL", "market": "us_stock", "quantity": 159, "avg_price": 180.0}
             ]),
             primary_symbol="AAPL",
             primary_market="us_stock",
@@ -412,6 +494,38 @@ def test_finance_wait_probe_sells_one_when_current_symbol_is_owned():
     assert plan["market"] == "us_stock"
     assert plan["quantity"] == 1
     assert plan["price"] == 185.0
+
+
+def test_finance_wait_probe_blocks_sell_when_fees_exceed_edge():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "AAPL",
+                "confidence": 0.2,
+                "no_trade_reason": "paper_scout_candidate",
+            },
+            tool_results=_tool_results(positions=[
+                {"symbol": "AAPL", "market": "us_stock", "quantity": 1, "avg_price": 185.0}
+            ]),
+            primary_symbol="AAPL",
+            primary_market="us_stock",
+            open_markets=["NASDAQ_PRE"],
+            capital_limit=10_000.0,
+            evidence_ids=["source_reference.md"],
+            risk_flags=[],
+        )
+
+    assert plan is None
 
 
 def test_finance_cycle_symbol_market_rotates_configured_multi_market_universe():
