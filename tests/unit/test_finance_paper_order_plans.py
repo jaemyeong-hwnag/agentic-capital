@@ -305,6 +305,55 @@ def test_finance_wait_probe_blocks_observe_insufficient_edge_without_confidence(
     assert plan is None
 
 
+def test_finance_wait_probe_recovers_observe_with_buy_market_signal():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.1),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "OBSERVE",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "TQQQ",
+                "market": "us_stock",
+                "confidence": 0.0,
+                "no_trade_reason": "insufficient_edge",
+            },
+            tool_results={
+                **_tool_results(),
+                "get_quote": {"symbol": "TQQQ", "price": 92.5, "market": "us_stock"},
+                "get_ohlcv": {
+                    "symbol": "TQQQ",
+                    "timeframe": "15m",
+                    "candles": [{"close": 90.0}, {"close": 91.0}, {"close": 92.0}, {"close": 92.5}],
+                },
+                "market_signal": {
+                    "candidate_action": "BUY",
+                    "confidence": 0.35,
+                    "reason": "short_window_positive_momentum",
+                },
+            },
+            primary_symbol="TQQQ",
+            primary_market="us_stock",
+            open_markets=["NASDAQ_PRE"],
+            capital_limit=10_000.0,
+            evidence_ids=[],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["symbol"] == "TQQQ"
+    assert plan["market"] == "us_stock"
+    assert plan["quantity"] == 1
+
+
 def test_finance_wait_probe_recovers_observe_performance_candidate():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),

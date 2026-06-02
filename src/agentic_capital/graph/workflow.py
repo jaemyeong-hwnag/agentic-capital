@@ -636,8 +636,22 @@ def _paper_sell_has_positive_net_edge(
     return gross_edge > required_edge
 
 
-def _record_has_performance_candidate_edge(record: dict[str, Any], evidence_ids: list[Any] | None) -> bool:
+def _record_has_performance_candidate_edge(
+    record: dict[str, Any],
+    evidence_ids: list[Any] | None,
+    tool_results: dict[str, Any] | None = None,
+) -> bool:
     """Only convert no-order model output into scout orders when it carries usable edge evidence."""
+    market_signal = (tool_results or {}).get("market_signal")
+    if isinstance(market_signal, dict):
+        candidate_action = str(market_signal.get("candidate_action") or "").upper()
+        try:
+            signal_confidence = float(market_signal.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            signal_confidence = 0.0
+        if candidate_action == "BUY" and signal_confidence > 0:
+            return True
+
     no_trade_reason = str(record.get("no_trade_reason") or "").lower()
     if no_trade_reason in {"insufficient_edge", "missing_evidence_review", "tool_collection_only"}:
         return False
@@ -954,7 +968,7 @@ def _finance_wait_probe_order_plan(
         return None
     if risk_flags:
         return None
-    if not _record_has_performance_candidate_edge(record, evidence_ids):
+    if not _record_has_performance_candidate_edge(record, evidence_ids, tool_results):
         return None
     if not settings.local_finance_paper_order_execution_enabled:
         return None
