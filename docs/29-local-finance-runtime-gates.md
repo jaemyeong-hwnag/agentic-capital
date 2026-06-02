@@ -130,7 +130,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
   minimum board-lot paper scout로 1주를 제출한다. 그렇지 않으면 quantity는 0으로 유지되고 주문하지 않는다.
 - `finance_tool_planner_model` 호출 실패는 즉시 주문/decision으로 이어지지 않는다.
   paper/shadow mode에서는 deterministic fallback plan을 사용한다:
-  `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_risk_limit`.
+  `search_rag -> get_market_session -> get_balance -> get_positions -> get_quote -> get_ohlcv -> get_risk_limit`.
   이때 `first_failing_stage=finance_tool_planner_model`을 같이 기록한다.
 - tool planner에는 RAG evidence 원문 전체를 전달하지 않는다. planner payload는 `evidence_ids`,
   `evidence_count`, source/score/text preview 중심의 compact evidence만 포함한다.
@@ -138,7 +138,7 @@ paper shadow 검증은 외부 유료 API나 실제 주문 없이 로컬 finance 
 필수 순서:
 
 1. `finance_rag_query_model`: 질문을 `query`, `symbol`, `market`, `route`, `requires_fresh_data`로 정규화
-2. `finance_tool_planner_model`: `get_balance`, `get_positions`, `get_quote`, `get_market_session`, `get_risk_limit`, `search_rag` 계획
+2. `finance_tool_planner_model`: `get_balance`, `get_positions`, `get_quote`, `get_ohlcv`, `get_market_session`, `get_risk_limit`, `search_rag` 계획
 3. `finance_decision_model`: `BUY | SELL | HOLD | WAIT | OBSERVE | REJECT | CALL_TOOL` 중 하나 반환
 4. `finance_risk_guard_model`: 보장 수익, live 권한 없는 주문, 근거 없는 매매 차단
 5. shadow/order gate: `finance_paper_shadow_decision` 또는 `raw_model_failure` record 생성 후, 검증된 BUY/SELL paper intent나 recoverable CALL_TOOL loop에 한해 agentic-capital이 KIS paper 주문을 제출
@@ -186,6 +186,7 @@ read-only tool result schema:
   `get_risk_limit`, `search_rag`
 - finance decision payload alias: `finance_decision_payload.balance`,
   `finance_decision_payload.positions`, `finance_decision_payload.quote`,
+  `finance_decision_payload.ohlcv`, `finance_decision_payload.market_signal`,
   `finance_decision_payload.market_session`, `finance_decision_payload.risk_limit`,
   `finance_decision_payload.rag`, `finance_decision_payload.tool_result_ids`
 - `get_balance`/`balance`: `total`, `available`, `currency`, `daily_pnl`, `daily_fee`,
@@ -195,6 +196,15 @@ read-only tool result schema:
 - `get_positions`/`positions`: 보유 종목별 `symbol`, `quantity`, `avg_price`,
   `current_price`, PnL, `market`, `currency`
 - `get_quote`/`quote`: `symbol`, `price`, `bid`, `ask`, `volume`, `market`, `currency`
+- `get_ohlcv`/`ohlcv`: 15분봉 compact candle 최대 8개. 단일 quote만으로 edge를 만들지 않고
+  짧은 구간 가격 흐름을 확인하기 위한 read-only evidence다.
+- `market_signal`: 15분봉과 quote에서 산출한 후보 신호. `candidate_action`,
+  `confidence`, `reason`, `recent_return_pct`, `window_return_pct`를 포함하지만 주문 권한이나
+  risk 통과를 의미하지 않는다.
+- `BUY`/`SELL` paper intent는 `get_balance`, `get_positions`, `get_quote`, `get_ohlcv`,
+  `market_signal`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있어야
+  shadow gate를 통과한다. OHLCV/market signal 부재 시 scout/order intent가 성과 후보 검증이 아니라
+  루프 생존용 주문으로 변질될 수 있으므로 차단한다.
 - explicit local paper call-option symbols such as `K200_CALL_ATM` must return a deterministic `get_quote`
   price derived from the local KOSPI200 premium fallback when public quote vendors do not serve the symbol.
 - `get_market_session`/`market_session`: `state`, `session`, `is_open`,
