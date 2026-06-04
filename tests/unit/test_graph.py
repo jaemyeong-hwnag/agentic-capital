@@ -559,7 +559,7 @@ class TestRunAgentCycle:
 
         with patch("agentic_capital.graph.workflow.settings.local_finance_pipeline_enabled", True), \
              patch("agentic_capital.graph.workflow.settings.local_llm_model", "finance_decision_model"), \
-             patch("agentic_capital.adapters.llm.router.settings.llm_provider", "gemini"), \
+             patch("agentic_capital.adapters.llm.router.settings.llm_provider", "deepseek"), \
              patch("agentic_capital.graph.workflow.create_react_agent") as mock_react, \
              patch(
                  "agentic_capital.graph.workflow._run_psychology_observation",
@@ -1002,7 +1002,7 @@ class TestRunAgentCycle:
         ceo = CEOAgent(profile=_make_profile("CEO"), personality=create_random_personality(42), llm=_make_llm())
         mock_agent = MagicMock()
         message = (
-            "Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED): "
+            "Error calling model 'deepseek-v4-flash' (RESOURCE_EXHAUSTED): "
             "429 RESOURCE_EXHAUSTED. Quota exceeded. retryDelay': '26105s'"
         )
         mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError(message))
@@ -1017,7 +1017,7 @@ class TestRunAgentCycle:
         assert result["next_cycle_seconds"] == 26105
 
     def test_parses_human_quota_retry_delay(self):
-        """Gemini human-readable retry hints should be parsed for long backoff."""
+        """Provider human-readable retry hints should be parsed for long backoff."""
         error = "Quota exceeded. Please retry in 7h15m5.72624757s."
         assert _error_retry_seconds(error) == 26105
 

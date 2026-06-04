@@ -150,6 +150,7 @@ class SimulationEngine:
                 config={
                     "agents": [a.name for a in self._agents],
                     "llm_provider": metadata["llm_provider"],
+                    "requested_llm_provider": metadata.get("requested_llm_provider"),
                     "llm_base_url": metadata.get("llm_base_url"),
                     "agent_llm_base_url": metadata.get("agent_llm_base_url"),
                 },

@@ -81,12 +81,28 @@ def test_router_requires_agent_base_url_when_finance_model_is_primary():
         router.build_langchain_chat_model()
 
 
-def test_router_uses_gemini_only_when_explicitly_configured():
-    with patch.object(router.settings, "llm_provider", "gemini"), \
-         patch("langchain_google_genai.ChatGoogleGenerativeAI", return_value=MagicMock()) as mock_cls:
-        router.build_langchain_chat_model()
+@pytest.mark.parametrize(
+    "legacy_provider",
+    ["gemini", "gemini_batch", "gemini-batch", "gemini_eval", "gemini_batch_eval"],
+)
+def test_router_maps_gemini_legacy_aliases_to_deepseek(legacy_provider: str):
+    with patch.object(router.settings, "llm_provider", legacy_provider), \
+         patch.object(router.settings, "deepseek_api_key", "test-key"), \
+         patch.object(router.settings, "deepseek_base_url", "https://api.deepseek.com/v1"), \
+         patch.object(router.settings, "deepseek_model", "deepseek-v4-flash"), \
+         patch.object(router.settings, "deepseek_timeout_seconds", 11.0), \
+         patch.object(router.settings, "deepseek_temperature", 0.1), \
+         patch.object(router.settings, "deepseek_max_tokens", 300), \
+         patch.object(router.settings, "deepseek_send_native_tools", False):
+        assert router.is_deepseek_llm_enabled() is True
+        model = router.build_langchain_chat_model()
+        metadata = router.llm_run_metadata()
 
-    mock_cls.assert_called_once()
+    assert model.model == "deepseek-v4-flash"
+    assert model.base_url == "https://api.deepseek.com/v1"
+    assert model.api_key == "test-key"
+    assert metadata["llm_provider"] == "deepseek"
+    assert metadata["requested_llm_provider"] == legacy_provider
 
 
 def test_router_uses_deepseek_when_explicitly_configured():
@@ -123,12 +139,13 @@ def test_deepseek_run_metadata_uses_configured_model_and_local_embedding():
         metadata = router.llm_run_metadata()
 
     assert metadata["llm_provider"] == "deepseek"
+    assert metadata["requested_llm_provider"] == "deepseek"
     assert metadata["llm_model"] == "deepseek-v4-flash"
     assert metadata["embedding_model"] == "finance_embedding_model"
     assert metadata["llm_base_url"] == "https://api.deepseek.com/v1"
 
 
-def test_router_rejects_unknown_provider_instead_of_falling_back_to_gemini():
+def test_router_rejects_unknown_provider_instead_of_falling_back_to_hosted_api():
     with patch.object(router.settings, "llm_provider", "gemni"), \
          pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
         router.build_langchain_chat_model()

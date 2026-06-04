@@ -105,6 +105,7 @@ class FuturesEngine:
                     "mode": "futures_scalping",
                     "paper_trading": settings.kis_is_paper,
                     "llm_provider": metadata["llm_provider"],
+                    "requested_llm_provider": metadata.get("requested_llm_provider"),
                     "llm_base_url": metadata.get("llm_base_url"),
                 },
                 llm_model=metadata["llm_model"],

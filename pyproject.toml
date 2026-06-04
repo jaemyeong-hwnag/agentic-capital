@@ -13,7 +13,6 @@ dependencies = [
     # Core - Agent Framework
     "langgraph>=0.2",
     "langchain-core>=0.3",
-    "langchain-google-genai",
     "pydantic>=2.0",
 
     # Database
@@ -41,7 +40,6 @@ dependencies = [
     "ta",
 
     # AI / Embedding
-    "google-generativeai",
     "tiktoken",
     "networkx",
 
@@ -130,12 +128,10 @@ module = [
     "mem0ai.*",
     "msgpack.*",
     "duckdb.*",
-    "google.generativeai.*",
     "tiktoken.*",
     "langsmith.*",
     "langgraph.*",
     "langchain_core.*",
-    "langchain_google_genai.*",
     "pgvector.*",
     "qdrant_client.*",
 ]

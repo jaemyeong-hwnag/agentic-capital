@@ -1414,7 +1414,7 @@ class TestFuturesEngine:
                    return_value=(mock_tools, decisions_sink, wakeup_sink)), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=["KRX"]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = AsyncMock()
             mock_react.ainvoke = AsyncMock(return_value={"messages": []})
@@ -1437,7 +1437,7 @@ class TestFuturesEngine:
                    return_value=(mock_tools, decisions_sink, wakeup_sink)), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=["KRX"]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = MagicMock()
             mock_react.ainvoke = AsyncMock(return_value={"messages": []})
@@ -1454,7 +1454,7 @@ class TestFuturesEngine:
 
         with patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=[]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()) as mock_llm:
             next_secs = await engine._run_cycle()
             # Should sleep (60 <= secs <= 3600), never call LLM
             assert 60.0 <= next_secs <= 3600.0
@@ -1469,7 +1469,7 @@ class TestFuturesEngine:
                    return_value=([], [], [])), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=["KRX"]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = MagicMock()
             mock_react.ainvoke = AsyncMock(side_effect=Exception("llm_error"))
@@ -1491,7 +1491,7 @@ class TestFuturesEngine:
                    return_value=([], decisions_sink, wakeup_sink)), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=["KRX"]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent, \
              patch("agentic_capital.graph.nodes.record_cycle", new_callable=AsyncMock), \
              patch("agentic_capital.graph.workflow._extract_tool_sequence", return_value=[]), \
@@ -1549,7 +1549,7 @@ class TestFuturesEngine:
                    return_value=["KRX"]), \
              patch.object(engine, "_minutes_until_session_end", return_value=5.0), \
              patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()) as mock_llm:
             next_secs = await engine._run_cycle()
             mock_close.assert_called_once_with(reason="session_end")
             mock_llm.assert_not_called()
@@ -1568,7 +1568,7 @@ class TestFuturesEngine:
              patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
              patch("agentic_capital.core.tools.futures_tools.build_futures_tools",
                    return_value=([], [], [60])), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = MagicMock()
             mock_react.ainvoke = AsyncMock(return_value={"messages": []})
@@ -1586,7 +1586,7 @@ class TestFuturesEngine:
                    return_value=([], decisions_sink, wakeup_sink)), \
              patch("agentic_capital.simulation.futures_engine.get_open_markets",
                    return_value=["KRX"]), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent, \
              patch("agentic_capital.graph.nodes.record_cycle", new_callable=AsyncMock), \
              patch("agentic_capital.graph.workflow._extract_tool_sequence", return_value=[]), \
@@ -1696,7 +1696,7 @@ class TestFuturesEngine:
                    new=AsyncMock(return_value=volatile_data)), \
              patch.object(engine, "_close_all_now", new_callable=AsyncMock) as mock_close, \
              patch.object(engine, "_minutes_until_session_end", return_value=999.0), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI") as mock_llm:
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()) as mock_llm:
             next_secs = await engine._run_cycle()
             mock_close.assert_called_once_with(reason="volatility_filter")
             mock_llm.assert_not_called()
@@ -1717,7 +1717,7 @@ class TestFuturesEngine:
                    new=AsyncMock(return_value=calm_data)), \
              patch("agentic_capital.core.tools.futures_tools.build_futures_tools",
                    return_value=([], [], [60])), \
-             patch("langchain_google_genai.ChatGoogleGenerativeAI"), \
+             patch("agentic_capital.adapters.llm.router.build_langchain_chat_model", return_value=MagicMock()), \
              patch("langgraph.prebuilt.create_react_agent") as mock_create_agent:
             mock_react = MagicMock()
             mock_react.ainvoke = AsyncMock(return_value={"messages": []})

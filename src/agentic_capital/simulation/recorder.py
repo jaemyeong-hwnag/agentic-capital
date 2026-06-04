@@ -108,8 +108,8 @@ class SimulationRecorder:
         initial_capital: float,
         config: dict,
         *,
-        llm_model: str = "gemini-2.5-flash",
-        embedding_model: str = "text-embedding-004",
+        llm_model: str = "deepseek-v4-flash",
+        embedding_model: str = "finance_embedding_model",
     ) -> uuid.UUID:
         """Create a simulation run record."""
         await self._stop_stale_running_simulations()

@@ -283,7 +283,7 @@ class TestSimulationModels:
         s = SimulationRunModel(
             id=uuid4(),
             seed=42,
-            llm_model="gemini-2.5-pro",
+            llm_model="deepseek-v4-flash",
             initial_capital=1000000,
             config={"agents": 10},
         )

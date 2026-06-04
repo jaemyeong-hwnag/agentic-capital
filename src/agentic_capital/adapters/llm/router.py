@@ -19,7 +19,17 @@ if TYPE_CHECKING:
 
 
 LOCAL_PROVIDER_NAMES = {"local", "rag", "local_openai", "domain_llm_forge"}
-HOSTED_PROVIDER_NAMES = {"deepseek", "gemini"}
+DEEPSEEK_PROVIDER_NAMES = {
+    "deepseek",
+    "gemini",
+    "gemini_batch",
+    "gemini-batch",
+    "gemini_eval",
+    "gemini-eval",
+    "gemini_batch_eval",
+    "gemini-batch-eval",
+}
+HOSTED_PROVIDER_NAMES = DEEPSEEK_PROVIDER_NAMES
 
 
 def active_llm_provider() -> str:
@@ -30,6 +40,24 @@ def is_local_llm_enabled() -> bool:
     return active_llm_provider() in LOCAL_PROVIDER_NAMES
 
 
+def is_deepseek_llm_enabled() -> bool:
+    return active_llm_provider() in DEEPSEEK_PROVIDER_NAMES
+
+
+def _build_deepseek_chat_model() -> Any:
+    from agentic_capital.adapters.llm.deepseek import DeepSeekChatModel, require_deepseek_api_key
+
+    return DeepSeekChatModel(
+        base_url=settings.deepseek_base_url,
+        model=settings.deepseek_model,
+        api_key=require_deepseek_api_key(),
+        timeout_seconds=settings.deepseek_timeout_seconds,
+        temperature=settings.deepseek_temperature,
+        max_tokens=settings.deepseek_max_tokens,
+        send_native_tools=settings.deepseek_send_native_tools,
+    )
+
+
 def build_llm_adapter() -> LLMPort:
     """Build the core LLMPort adapter from settings."""
     if is_local_llm_enabled():
@@ -38,14 +66,9 @@ def build_llm_adapter() -> LLMPort:
         return LocalOpenAICompatibleAdapter()
     if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
-    if active_llm_provider() == "deepseek":
-        from agentic_capital.adapters.llm.deepseek import DeepSeekLLMAdapter
+    from agentic_capital.adapters.llm.deepseek import DeepSeekLLMAdapter
 
-        return DeepSeekLLMAdapter()
-
-    from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
-
-    return GeminiLLMAdapter()
+    return DeepSeekLLMAdapter()
 
 
 def build_langchain_chat_model() -> Any:
@@ -77,26 +100,7 @@ def build_langchain_chat_model() -> Any:
         )
     if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
-    if active_llm_provider() == "deepseek":
-        from agentic_capital.adapters.llm.deepseek import DeepSeekChatModel, require_deepseek_api_key
-
-        return DeepSeekChatModel(
-            base_url=settings.deepseek_base_url,
-            model=settings.deepseek_model,
-            api_key=require_deepseek_api_key(),
-            timeout_seconds=settings.deepseek_timeout_seconds,
-            temperature=settings.deepseek_temperature,
-            max_tokens=settings.deepseek_max_tokens,
-            send_native_tools=settings.deepseek_send_native_tools,
-        )
-
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.gemini_api_key,
-        temperature=0.7,
-    )
+    return _build_deepseek_chat_model()
 
 
 def llm_run_metadata() -> dict[str, Any]:
@@ -112,15 +116,10 @@ def llm_run_metadata() -> dict[str, Any]:
             "llm_base_url": settings.local_llm_base_url,
             "agent_llm_base_url": settings.local_agent_llm_base_url,
         }
-    if active_llm_provider() == "deepseek":
-        return {
-            "llm_provider": active_llm_provider(),
-            "llm_model": settings.deepseek_model,
-            "embedding_model": settings.local_embedding_model,
-            "llm_base_url": settings.deepseek_base_url,
-        }
     return {
-        "llm_provider": active_llm_provider(),
-        "llm_model": "gemini-2.5-flash",
-        "embedding_model": "text-embedding-004",
+        "llm_provider": "deepseek",
+        "requested_llm_provider": active_llm_provider(),
+        "llm_model": settings.deepseek_model,
+        "embedding_model": settings.local_embedding_model,
+        "llm_base_url": settings.deepseek_base_url,
     }

@@ -22,7 +22,7 @@ class TestAgentCRUD:
         sim = SimulationRunModel(
             id=simulation_id,
             seed=42,
-            llm_model="gemini-2.5-pro",
+            llm_model="deepseek-v4-flash",
             initial_capital=1_000_000,
         )
         db_session.add(sim)
@@ -32,7 +32,7 @@ class TestAgentCRUD:
     @pytest.mark.asyncio
     async def test_create_agent(self, db_session, simulation_id: uuid.UUID, agent_id: uuid.UUID) -> None:
         sim = SimulationRunModel(
-            id=simulation_id, seed=42, llm_model="gemini-2.5-pro", initial_capital=1_000_000,
+            id=simulation_id, seed=42, llm_model="deepseek-v4-flash", initial_capital=1_000_000,
         )
         db_session.add(sim)
         await db_session.flush()
@@ -51,7 +51,7 @@ class TestAgentCRUD:
     @pytest.mark.asyncio
     async def test_create_agent_personality(self, db_session, agent_id: uuid.UUID, simulation_id: uuid.UUID) -> None:
         sim = SimulationRunModel(
-            id=simulation_id, seed=42, llm_model="gemini-2.5-pro", initial_capital=1_000_000,
+            id=simulation_id, seed=42, llm_model="deepseek-v4-flash", initial_capital=1_000_000,
         )
         db_session.add(sim)
 
@@ -72,7 +72,7 @@ class TestAgentCRUD:
     @pytest.mark.asyncio
     async def test_create_trade(self, db_session, simulation_id: uuid.UUID, agent_id: uuid.UUID) -> None:
         sim = SimulationRunModel(
-            id=simulation_id, seed=42, llm_model="gemini-2.5-pro", initial_capital=1_000_000,
+            id=simulation_id, seed=42, llm_model="deepseek-v4-flash", initial_capital=1_000_000,
         )
         db_session.add(sim)
 
