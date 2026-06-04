@@ -110,6 +110,32 @@ def test_local_finance_health_accepts_expected_finance_model():
     mock_get.assert_called_once_with("http://127.0.0.1:8080/healthz", timeout=5.0)
 
 
+def test_local_finance_health_accepts_direct_llama_server_model_alias():
+    gateway_missing = MagicMock()
+    gateway_missing.raise_for_status.side_effect = RuntimeError("404")
+    health = MagicMock()
+    health.json.return_value = {"status": "ok"}
+    health.raise_for_status.return_value = None
+    models = MagicMock()
+    models.json.return_value = {"data": [{"id": "finance_decision_model"}]}
+    models.raise_for_status.return_value = None
+
+    with patch.object(local_finance_runtime.settings, "local_llm_base_url", "http://127.0.0.1:18183/v1"), \
+         patch.object(local_finance_runtime.settings, "local_llm_model", "finance_decision_model"), \
+         patch.object(local_finance_runtime.settings, "local_llm_expected_health_model", ""), \
+         patch(
+             "agentic_capital.adapters.llm.local_finance_runtime.httpx.get",
+             side_effect=[gateway_missing, health, models],
+         ) as mock_get:
+        result = local_finance_runtime.check_local_finance_health()
+
+    assert result["actual_model"] == "finance_decision_model"
+    assert result["health_url"] == "http://127.0.0.1:18183/health"
+    assert mock_get.call_args_list[0].args[0] == "http://127.0.0.1:18183/healthz"
+    assert mock_get.call_args_list[1].args[0] == "http://127.0.0.1:18183/health"
+    assert mock_get.call_args_list[2].args[0] == "http://127.0.0.1:18183/v1/models"
+
+
 def test_local_finance_health_rejects_psychology_model_for_finance():
     response = MagicMock()
     response.json.return_value = {"ok": True, "model": "psychology_profile_model", "llama_reachable": True}

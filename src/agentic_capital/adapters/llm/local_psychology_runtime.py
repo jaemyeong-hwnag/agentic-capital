@@ -71,6 +71,11 @@ def _gateway_root(base_url: str) -> str:
     return root[:-3] if root.endswith("/v1") else root
 
 
+def _models_url(base_url: str) -> str:
+    root = base_url.rstrip("/")
+    return f"{root}/models" if root.endswith("/v1") else f"{root}/v1/models"
+
+
 def _expected_model() -> str:
     return settings.local_psychology_expected_health_model.strip() or settings.local_psychology_model.strip()
 
@@ -117,6 +122,19 @@ def _validate_health_payload(payload: dict[str, Any], expected_model: str) -> st
     return actual_model
 
 
+def _extract_models_model(payload: dict[str, Any]) -> str:
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return ""
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id") or item.get("model") or item.get("name")
+        if isinstance(model_id, str) and model_id.strip():
+            return model_id.strip()
+    return ""
+
+
 def check_local_psychology_health() -> dict[str, Any]:
     """Check `/healthz` and verify that it is the expected psychology service."""
     expected_model = _expected_model()
@@ -126,7 +144,26 @@ def check_local_psychology_health() -> dict[str, Any]:
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:
-        raise LocalPsychologyRuntimeError(f"local_psychology_health_unavailable: {health_url}") from exc
+        direct_health_url = _join_url(_gateway_root(settings.local_psychology_base_url), "/health")
+        try:
+            response = httpx.get(direct_health_url, timeout=settings.local_llm_health_timeout_seconds)
+            response.raise_for_status()
+            health_payload = response.json()
+            if not isinstance(health_payload, dict):
+                raise LocalPsychologyRuntimeError("local_psychology_health_invalid_payload")
+            models_url = _models_url(settings.local_psychology_base_url)
+            models_response = httpx.get(models_url, timeout=settings.local_llm_health_timeout_seconds)
+            models_response.raise_for_status()
+            actual_model = _extract_models_model(models_response.json())
+            payload = {
+                **health_payload,
+                "ok": health_payload.get("ok", health_payload.get("status") == "ok"),
+                "model": actual_model,
+                "llama_reachable": True,
+            }
+            health_url = direct_health_url
+        except Exception as direct_exc:
+            raise LocalPsychologyRuntimeError(f"local_psychology_health_unavailable: {health_url}") from direct_exc
     if not isinstance(payload, dict):
         raise LocalPsychologyRuntimeError("local_psychology_health_invalid_payload")
 
