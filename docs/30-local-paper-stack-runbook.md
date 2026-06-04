@@ -178,7 +178,7 @@ http://127.0.0.1:18080/health
 
 모의투자 체결 확인은 DB의 `simulation_runs`, `agent_cycles`, `agent_decisions`, `trades`, `positions`, `company_snapshots`로 한다. 수동 주문으로 성공을 만들지 않는다.
 
-Trader finance cycle은 `LOCAL_FINANCE_DEFAULT_SYMBOLS`의 열린 시장 후보를 read-only quote/OHLCV로 먼저 스캔한다. 15m runtime signal이 BUY인 후보가 있으면 cycle 순번의 primary symbol보다 우선하며, 기본 유니버스에는 상승장 후보와 하락장 대응 KR ETF 후보(`252670`, `251340`, `114800`)가 함께 들어 있다. KR 후보 가격이 500원 미만이면 조정가/저가 왜곡 가능성이 있어 BUY signal ranking에서 제외한다.
+Trader finance cycle은 `LOCAL_FINANCE_DEFAULT_SYMBOLS`의 열린 시장 후보를 read-only quote/OHLCV로 먼저 스캔한다. 15m runtime signal이 BUY인 후보가 있으면 cycle 순번의 primary symbol보다 우선하며, 기본 유니버스에는 상승장 후보와 하락장 대응 KR ETF 후보(`252670`, `251340`, `114800`)가 함께 들어 있다. `NXT_AFTER` 같은 `NXT_*`/`KRX_*` 세션 값은 한국 주식 후보의 열린 경로로 처리한다. KR 후보 가격이 500원 미만이면 조정가/저가 왜곡 가능성이 있어 BUY signal ranking에서 제외한다.
 
 ## 환경 오버라이드
 
