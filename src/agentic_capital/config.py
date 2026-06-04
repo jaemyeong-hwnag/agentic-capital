@@ -9,11 +9,17 @@ class Settings(BaseSettings):
 
     # LLM
     gemini_api_key: str = ""
-    openai_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_timeout_seconds: float = 90.0
+    deepseek_temperature: float = 0.7
+    deepseek_max_tokens: int = 512
+    deepseek_send_native_tools: bool = False
     llm_provider: str = Field(
         default="local",
         validation_alias=AliasChoices("LLM_PROVIDER", "LOCAL_LLM_PROVIDER"),
-    )  # gemini | local
+    )  # local | deepseek | gemini
     local_llm_base_url: str = "http://127.0.0.1:8080/v1"
     local_llm_model: str = "finance_decision_model"
     local_agent_llm_base_url: str = ""

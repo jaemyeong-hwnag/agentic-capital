@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 LOCAL_PROVIDER_NAMES = {"local", "rag", "local_openai", "domain_llm_forge"}
-HOSTED_PROVIDER_NAMES = {"gemini"}
+HOSTED_PROVIDER_NAMES = {"deepseek", "gemini"}
 
 
 def active_llm_provider() -> str:
@@ -38,6 +38,10 @@ def build_llm_adapter() -> LLMPort:
         return LocalOpenAICompatibleAdapter()
     if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
+    if active_llm_provider() == "deepseek":
+        from agentic_capital.adapters.llm.deepseek import DeepSeekLLMAdapter
+
+        return DeepSeekLLMAdapter()
 
     from agentic_capital.adapters.llm.gemini import GeminiLLMAdapter
 
@@ -73,6 +77,18 @@ def build_langchain_chat_model() -> Any:
         )
     if active_llm_provider() not in HOSTED_PROVIDER_NAMES:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
+    if active_llm_provider() == "deepseek":
+        from agentic_capital.adapters.llm.deepseek import DeepSeekChatModel, require_deepseek_api_key
+
+        return DeepSeekChatModel(
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            api_key=require_deepseek_api_key(),
+            timeout_seconds=settings.deepseek_timeout_seconds,
+            temperature=settings.deepseek_temperature,
+            max_tokens=settings.deepseek_max_tokens,
+            send_native_tools=settings.deepseek_send_native_tools,
+        )
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -95,6 +111,13 @@ def llm_run_metadata() -> dict[str, Any]:
             "embedding_model": settings.local_embedding_model,
             "llm_base_url": settings.local_llm_base_url,
             "agent_llm_base_url": settings.local_agent_llm_base_url,
+        }
+    if active_llm_provider() == "deepseek":
+        return {
+            "llm_provider": active_llm_provider(),
+            "llm_model": settings.deepseek_model,
+            "embedding_model": settings.local_embedding_model,
+            "llm_base_url": settings.deepseek_base_url,
         }
     return {
         "llm_provider": active_llm_provider(),

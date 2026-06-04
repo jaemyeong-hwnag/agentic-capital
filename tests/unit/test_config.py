@@ -14,6 +14,8 @@ class TestConfig:
         assert s.log_level == "INFO"
         assert s.kis_is_paper is True
         assert s.llm_provider == "local"
+        assert s.deepseek_model == "deepseek-v4-flash"
+        assert s.deepseek_base_url == "https://api.deepseek.com/v1"
         assert s.local_llm_model == "finance_decision_model"
         assert s.local_agent_llm_base_url == ""
         assert s.local_agent_llm_model == "agentic_capital_react_model"
