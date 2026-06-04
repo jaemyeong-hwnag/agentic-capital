@@ -50,6 +50,16 @@ LOCAL_LLM_RUNTIME_MODE=direct ./scripts/run_local_paper_stack.sh start
 
 `direct` mode downloads GGUF files into `~/.cache/agentic-capital/models`, starts each model with `llama-server`, and points Agentic Capital directly at `/v1/chat/completions`.
 
+By default, `start` and `download` also check Hugging Face for the latest configured GGUF revision before runtime startup:
+
+```bash
+LOCAL_LLM_AUTO_UPDATE=true
+LOCAL_LLM_HF_REVISION=main
+LOCAL_LLM_RESTART_ON_UPDATE=true
+```
+
+If a model file changes while local sessions are already running, allow the runner to recycle the affected `llama-server` session and `agentic-capital-paper-local` so the new GGUF is actually loaded. Use `LOCAL_LLM_AUTO_UPDATE=false` only for intentional offline/cache-only operation.
+
 Optional compatibility mode:
 
 ```bash

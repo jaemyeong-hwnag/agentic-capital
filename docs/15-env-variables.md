@@ -16,6 +16,10 @@ DEEPSEEK_SEND_NATIVE_TOOLS=false
 GEMINI_API_KEY=                    # Gemini batch/eval 등 명시 opt-in일 때만
 HF_TOKEN=                          # Hugging Face token. 현재 프로젝트 우선, 없으면 HUGGINGFACE_TOKEN fallback
 HUGGINGFACE_TOKEN=                 # legacy/forge 호환 Hugging Face token. 값은 커밋 금지
+LOCAL_LLM_AUTO_UPDATE=true         # 프로젝트 실행 시 HF 최신 GGUF 확인/적용
+LOCAL_LLM_HF_REVISION=main         # HF branch/tag/commit. 기본은 main 최신
+LOCAL_LLM_FORCE_DOWNLOAD=false     # true면 HF cache를 통해 강제 재다운로드
+LOCAL_LLM_RESTART_ON_UPDATE=true   # 모델 파일이 바뀌면 관련 로컬 LLM/paper loop 재기동
 LLM_PROVIDER=local                 # local | deepseek | gemini. LOCAL_LLM_PROVIDER alias도 지원
 LOCAL_LLM_PROVIDER=local
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
@@ -146,6 +150,10 @@ LANGCHAIN_PROJECT=agentic-capital
 | `ALPACA_*` | 선택 (Phase 2) | 미국 주식 직접 거래 시 필요 |
 | `HF_TOKEN` | 로컬 LLM 자동 다운로드 시 조건부 필수 | `scripts/run_local_paper_stack.sh`가 private HF repo에서 GGUF를 받을 때 사용. 현재 프로젝트 `.env` 값이 forge env보다 우선한다 |
 | `HUGGINGFACE_TOKEN` | 선택 | 기존 domain-llm-forge 호환 키. `HF_TOKEN`이 비어 있으면 런타임에서 `HF_TOKEN`으로 매핑한다 |
+| `LOCAL_LLM_AUTO_UPDATE` | 선택 | 기본값 `true`. `./scripts/run_local_paper_stack.sh start/download`가 기존 GGUF가 있어도 HF 최신 revision을 확인하고 바뀐 파일만 적용한다 |
+| `LOCAL_LLM_HF_REVISION` | 선택 | 기본값 `main`. HF branch/tag/commit을 지정해 최신 확인 기준을 고정할 수 있다 |
+| `LOCAL_LLM_FORCE_DOWNLOAD` | 선택 | 기본값 `false`. `true`면 HF cache를 통해 강제 재다운로드한다 |
+| `LOCAL_LLM_RESTART_ON_UPDATE` | 선택 | 기본값 `true`. 실행 중 모델 파일이 갱신되면 관련 `llama-server` screen과 paper loop를 재기동해 새 GGUF를 실제 런타임에 반영한다 |
 | `LANGCHAIN_*` | 선택 | 개발/디버깅 시 트레이싱 |
 | `SIMULATION_SEED` | 선택 | 재현성 필요 시 |
 

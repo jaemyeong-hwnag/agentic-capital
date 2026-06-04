@@ -25,11 +25,27 @@ def test_local_paper_stack_maps_project_huggingface_token() -> None:
     assert "raiss123/finance_decision_model-qwen3-4b-instruct-2507" in script
 
 
+def test_local_paper_stack_checks_and_applies_latest_hf_models() -> None:
+    script = (ROOT / "scripts" / "run_local_paper_stack.sh").read_text()
+
+    assert 'LOCAL_LLM_AUTO_UPDATE="${LOCAL_LLM_AUTO_UPDATE:-true}"' in script
+    assert 'LOCAL_LLM_HF_REVISION="${LOCAL_LLM_HF_REVISION:-main}"' in script
+    assert 'LOCAL_LLM_RESTART_ON_UPDATE="${LOCAL_LLM_RESTART_ON_UPDATE:-true}"' in script
+    assert "checking HF latest" in script
+    assert 'HF_HUB_OFFLINE' in script
+    assert '"$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION"' in script
+    assert '--include "$include_pattern" --local-dir "$output_dir" --quiet "${force_download_args[@]}"' in script
+    assert "LOCAL_LLM_MODEL_REFRESHED=true" in script
+    assert "restart_updated_runtime_after_model_refresh" in script
+    assert 'stop_session "agentic-capital-paper-local"' in script
+
+
 def test_local_paper_stack_skill_is_registered() -> None:
     skill = ROOT / ".agents" / "skills" / "source-command-local-paper-stack" / "SKILL.md"
     text = skill.read_text()
 
     assert 'name: "source-command-local-paper-stack"' in text
     assert "LOCAL_LLM_RUNTIME_MODE=direct" in text
+    assert "LOCAL_LLM_AUTO_UPDATE=true" in text
     assert "./scripts/run_local_paper_stack.sh start" in text
     assert "KIS_IS_PAPER=true" in text

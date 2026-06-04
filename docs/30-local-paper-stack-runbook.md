@@ -61,6 +61,12 @@ LOCAL_LLM_RUNTIME_MODE=rag_gateway ./scripts/run_local_paper_stack.sh start
 ./scripts/run_local_paper_stack.sh download
 ```
 
+기본값은 실행할 때마다 Hugging Face의 `main` revision을 확인하고 바뀐 GGUF만 적용한다. 이미 실행 중인 로컬 LLM 세션이 있는데 모델 파일이 갱신되면 관련 `llama-server` 세션과 paper loop를 재기동해 새 파일을 실제 런타임에 반영한다.
+
+```bash
+LOCAL_LLM_AUTO_UPDATE=true ./scripts/run_local_paper_stack.sh start
+```
+
 ## HF 토큰 규칙
 
 스크립트는 다음 env 파일을 읽는다.
@@ -98,7 +104,15 @@ export HF_TOKEN="${HF_TOKEN:-${HUGGINGFACE_TOKEN:-}}"
 | finance risk guard | `raiss123/finance_risk_guard_model-qwen3-1.7b` | `~/.cache/agentic-capital/models/finance_risk_guard_model/finance_risk_guard_model.gguf` |
 | psychology suite | `raiss123/psychology_model_suite-qwen3-4b` | `~/.cache/agentic-capital/models/psychology_model_suite/psychology_model_suite.gguf` |
 
-이미 GGUF 파일이 있으면 다운로드를 건너뛴다. private HF repo 접근이 필요한 모델은 `HF_TOKEN` 또는 `HUGGINGFACE_TOKEN`이 필요하다.
+`LOCAL_LLM_AUTO_UPDATE=true`가 기본값이므로 GGUF 파일이 이미 있어도 `hf download --revision main`으로 최신 여부를 확인한다. HF CLI가 캐시와 원격 metadata를 비교해 동일 파일이면 다운로드 없이 넘어가고, 파일이 달라졌으면 로컬 GGUF를 갱신한다.
+
+오프라인 재사용이 필요하면 다음처럼 자동 확인을 끈다.
+
+```bash
+LOCAL_LLM_AUTO_UPDATE=false ./scripts/run_local_paper_stack.sh start
+```
+
+`HF_HUB_OFFLINE=true` 또는 `TRANSFORMERS_OFFLINE=true`이면 기존 GGUF가 있을 때 최신 확인을 건너뛴다. 해당 파일이 없으면 시작을 실패시킨다. private HF repo 접근이 필요한 모델은 `HF_TOKEN` 또는 `HUGGINGFACE_TOKEN`이 필요하다.
 
 ## 실행 포트
 
@@ -175,6 +189,10 @@ Trader finance cycle은 `LOCAL_FINANCE_DEFAULT_SYMBOLS`의 열린 시장 후보�
 | `PSYCHOLOGY_DOMAIN_LLM_FORGE_ROOT` | `/Users/tpirates/workspace-hjm/domain-llm-forge` | `rag_gateway` 모드에서만 필요한 psychology RAG worktree |
 | `DOMAIN_MODEL_FORGE_ENV` | `/Users/tpirates/workspace-hjm/domain-model-forge/.env` | 공통 모델/HF env |
 | `AGENTIC_CAPITAL_MODEL_CACHE` | `~/.cache/agentic-capital/models` | agent/finance/psychology GGUF 저장 위치 |
+| `LOCAL_LLM_AUTO_UPDATE` | `true` | `start`/`download`에서 HF 최신 GGUF를 확인하고 적용 |
+| `LOCAL_LLM_HF_REVISION` | `main` | 확인할 HF branch/tag/commit. 기본은 `main` 최신 |
+| `LOCAL_LLM_FORCE_DOWNLOAD` | `false` | `true`면 HF cache를 통해 강제 재다운로드 |
+| `LOCAL_LLM_RESTART_ON_UPDATE` | `true` | 모델 파일이 갱신되면 관련 local LLM screen과 paper loop를 재기동 |
 | `LLAMA_SERVER_BIN` | `/opt/homebrew/bin/llama-server` | llama.cpp server binary |
 | `HF_BIN` | `hf` | Hugging Face CLI |
 | `START_DOCKER_INFRA` | `true` | `docker compose up -d` 실행 여부 |

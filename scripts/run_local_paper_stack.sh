@@ -20,6 +20,10 @@ PSYCHOLOGY_DOMAIN_LLM_FORGE_ROOT="${PSYCHOLOGY_DOMAIN_LLM_FORGE_ROOT:-/Users/tpi
 DOMAIN_MODEL_FORGE_ENV="${DOMAIN_MODEL_FORGE_ENV:-/Users/tpirates/workspace-hjm/domain-model-forge/.env}"
 START_PAPER_LOOP="${START_PAPER_LOOP:-true}"
 START_DOCKER_INFRA="${START_DOCKER_INFRA:-true}"
+LOCAL_LLM_AUTO_UPDATE="${LOCAL_LLM_AUTO_UPDATE:-true}"
+LOCAL_LLM_HF_REVISION="${LOCAL_LLM_HF_REVISION:-main}"
+LOCAL_LLM_FORCE_DOWNLOAD="${LOCAL_LLM_FORCE_DOWNLOAD:-false}"
+LOCAL_LLM_RESTART_ON_UPDATE="${LOCAL_LLM_RESTART_ON_UPDATE:-true}"
 ACTION="${1:-start}"
 
 AGENT_MODEL_DIR="$AGENTIC_CAPITAL_MODEL_CACHE/agentic_capital_react_model"
@@ -35,6 +39,8 @@ FINANCE_TOOL_PLANNER_MODEL_PATH="$FINANCE_TOOL_PLANNER_MODEL_DIR/finance_tool_pl
 FINANCE_DECISION_MODEL_PATH="$FINANCE_DECISION_MODEL_DIR/finance_decision_model.gguf"
 FINANCE_RISK_GUARD_MODEL_PATH="$FINANCE_RISK_GUARD_MODEL_DIR/finance_risk_guard_model.gguf"
 PSYCHOLOGY_MODEL_SUITE_PATH="$PSYCHOLOGY_MODEL_SUITE_DIR/psychology_model_suite.gguf"
+LOCAL_LLM_MODEL_REFRESHED=false
+UPDATED_LLM_SESSIONS=""
 
 log() {
   printf '[local-paper-stack] %s\n' "$*"
@@ -47,7 +53,7 @@ usage: scripts/run_local_paper_stack.sh <start|restart|download|health|status|st
 Actions:
   start     download missing models, start DB/Redis, LLMs, optional gateways, paper loop
   restart   stop known screen sessions, then start
-  download  download missing GGUF files only
+  download  check/apply latest GGUF files from Hugging Face
   health    check local HTTP health endpoints
   status    show screen session presence and health endpoints
   stop      stop known screen sessions only
@@ -61,7 +67,48 @@ Safety defaults:
 Runtime modes:
   LOCAL_LLM_RUNTIME_MODE=direct      default; independent agentic-capital-only mode
   LOCAL_LLM_RUNTIME_MODE=rag_gateway optional; requires domain-llm-forge run_rag.sh
+
+Model refresh:
+  LOCAL_LLM_AUTO_UPDATE=true         check HF latest on start/download
+  LOCAL_LLM_HF_REVISION=main         HF branch/tag/commit to resolve
+  LOCAL_LLM_FORCE_DOWNLOAD=false     force re-download through HF cache
+  LOCAL_LLM_RESTART_ON_UPDATE=true   recycle running local LLM sessions if files changed
 EOF
+}
+
+truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+hf_offline() {
+  truthy "${HF_HUB_OFFLINE:-false}" || truthy "${TRANSFORMERS_OFFLINE:-false}"
+}
+
+file_signature() {
+  local path="$1"
+  if [ ! -s "$path" ]; then
+    printf 'missing'
+    return 0
+  fi
+  if stat -f '%z:%m' "$path" >/dev/null 2>&1; then
+    stat -f '%z:%m' "$path"
+  else
+    stat -c '%s:%Y' "$path"
+  fi
+}
+
+mark_model_refreshed() {
+  local session="${1:-}"
+  LOCAL_LLM_MODEL_REFRESHED=true
+  if [ -n "$session" ]; then
+    case " $UPDATED_LLM_SESSIONS " in
+      *" $session "*) ;;
+      *) UPDATED_LLM_SESSIONS="${UPDATED_LLM_SESSIONS:+$UPDATED_LLM_SESSIONS }$session" ;;
+    esac
+  fi
 }
 
 load_env_file() {
@@ -104,21 +151,59 @@ download_gguf() {
   local include_pattern="$2"
   local output_dir="$3"
   local expected_file="$4"
+  local runtime_session="${5:-}"
   local expected_path="$output_dir/$expected_file"
 
-  if [ -s "$expected_path" ]; then
-    log "model exists: $expected_path"
+  if [ -s "$expected_path" ] && ! truthy "$LOCAL_LLM_AUTO_UPDATE"; then
+    log "model exists; HF latest check disabled: $expected_path"
     return 0
+  fi
+
+  if [ -s "$expected_path" ] && hf_offline; then
+    log "model exists; HF offline mode skips latest check: $expected_path"
+    return 0
+  fi
+
+  if [ ! -s "$expected_path" ] && hf_offline; then
+    printf 'error: HF offline mode is enabled and local GGUF is missing: %s\n' "$expected_path" >&2
+    exit 1
   fi
 
   require_command "$HF_BIN"
   mkdir -p "$output_dir"
-  log "downloading from HF: $repo_id ($include_pattern)"
-  "$HF_BIN" download "$repo_id" --include "$include_pattern" --local-dir "$output_dir" --quiet
+  local before_signature
+  before_signature="$(file_signature "$expected_path")"
+  local force_download_args=()
+  if truthy "$LOCAL_LLM_FORCE_DOWNLOAD"; then
+    force_download_args+=(--force-download)
+  fi
+
+  log "checking HF latest: $repo_id ($include_pattern) revision=$LOCAL_LLM_HF_REVISION"
+  if ! "$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION" --include "$include_pattern" --local-dir "$output_dir" --quiet "${force_download_args[@]}"; then
+    if [ -s "$expected_path" ]; then
+      log "warning: HF latest check failed; using existing GGUF: $expected_path"
+      return 0
+    fi
+    printf 'error: HF download failed and no local GGUF exists: %s\n' "$expected_path" >&2
+    exit 1
+  fi
 
   if [ ! -s "$expected_path" ]; then
     printf 'error: HF download finished but expected GGUF is missing: %s\n' "$expected_path" >&2
     exit 1
+  fi
+
+  local after_signature
+  after_signature="$(file_signature "$expected_path")"
+  if [ "$before_signature" != "$after_signature" ]; then
+    if [ "$before_signature" = "missing" ]; then
+      log "model downloaded: $expected_path"
+    else
+      log "model updated from HF: $expected_path"
+    fi
+    mark_model_refreshed "$runtime_session"
+  else
+    log "model current: $expected_path"
   fi
 }
 
@@ -129,32 +214,38 @@ download_models() {
     "unsloth/Qwen3-4B-Instruct-2507-GGUF" \
     "$AGENT_MODEL_FILE" \
     "$AGENT_MODEL_DIR" \
-    "$AGENT_MODEL_FILE"
+    "$AGENT_MODEL_FILE" \
+    "local-agent-llm"
 
   download_gguf "raiss123/finance_rag_query_model-qwen3-1.7b" \
     "finance_rag_query_model.gguf" \
     "$FINANCE_RAG_QUERY_MODEL_DIR" \
-    "finance_rag_query_model.gguf"
+    "finance_rag_query_model.gguf" \
+    "local-finance-rag-query-llama"
 
   download_gguf "raiss123/finance_tool_planner_model-qwen3-1.7b" \
     "finance_tool_planner_model.gguf" \
     "$FINANCE_TOOL_PLANNER_MODEL_DIR" \
-    "finance_tool_planner_model.gguf"
+    "finance_tool_planner_model.gguf" \
+    "local-finance-tool-planner-llama"
 
   download_gguf "raiss123/finance_decision_model-qwen3-4b-instruct-2507" \
     "finance_decision_model.gguf" \
     "$FINANCE_DECISION_MODEL_DIR" \
-    "finance_decision_model.gguf"
+    "finance_decision_model.gguf" \
+    "local-finance-decision-llama"
 
   download_gguf "raiss123/finance_risk_guard_model-qwen3-1.7b" \
     "finance_risk_guard_model.gguf" \
     "$FINANCE_RISK_GUARD_MODEL_DIR" \
-    "finance_risk_guard_model.gguf"
+    "finance_risk_guard_model.gguf" \
+    "local-finance-risk-guard-llama"
 
   download_gguf "raiss123/psychology_model_suite-qwen3-4b" \
     "psychology_model_suite.gguf" \
     "$PSYCHOLOGY_MODEL_SUITE_DIR" \
-    "psychology_model_suite.gguf"
+    "psychology_model_suite.gguf" \
+    "local-psych-suite-llama"
 }
 
 session_exists() {
@@ -168,6 +259,30 @@ stop_session() {
     log "stopping screen: $session"
     "$SCREEN_BIN" -S "$session" -X quit
   fi
+}
+
+restart_updated_runtime_after_model_refresh() {
+  if [ "$LOCAL_LLM_MODEL_REFRESHED" != "true" ]; then
+    return 0
+  fi
+  if ! truthy "$LOCAL_LLM_RESTART_ON_UPDATE"; then
+    log "model refresh detected; runtime restart disabled"
+    return 0
+  fi
+
+  log "model refresh detected; recycling dependent local runtime sessions"
+  stop_session "agentic-capital-paper-local"
+  if [ "$LOCAL_LLM_RUNTIME_MODE" = "rag_gateway" ]; then
+    stop_session "local-finance-rag-query-rag"
+    stop_session "local-finance-tool-planner-rag"
+    stop_session "local-finance-decision-rag"
+    stop_session "local-finance-risk-guard-rag"
+    stop_session "local-psych-suite-rag"
+  fi
+  local session
+  for session in $UPDATED_LLM_SESSIONS; do
+    stop_session "$session"
+  done
 }
 
 endpoint_ready() {
@@ -338,6 +453,7 @@ start_stack() {
   fi
 
   download_models
+  restart_updated_runtime_after_model_refresh
 
   start_llama "local-agent-llm" "$AGENT_MODEL_PATH" "19000" "agentic_capital_react_model"
   start_llama "local-finance-rag-query-llama" "$FINANCE_RAG_QUERY_MODEL_PATH" "18181" "finance_rag_query_model"
