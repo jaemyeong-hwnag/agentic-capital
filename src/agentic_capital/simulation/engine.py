@@ -266,6 +266,7 @@ class SimulationEngine:
                     cycle_number=self._cycle_count,
                     trading=self._trading,
                     market_data=self._market_data,
+                    symbols=self._symbols,
                     open_markets=open_markets,
                     recorder=self._recorder,
                     capital_limit=self._capital_limit,

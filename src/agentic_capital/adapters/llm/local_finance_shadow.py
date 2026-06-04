@@ -101,13 +101,14 @@ def validate_finance_shadow_payload(
                 "trade_missing_tool_results",
                 details={"missing_tool_results": missing_results},
             )
-        if not evidence_ids:
+        runtime_only_evidence = _has_runtime_only_trade_evidence(action, merged_tool_results)
+        if not evidence_ids and not runtime_only_evidence:
             raise FinanceShadowValidationError("trade_missing_evidence_ids")
         rag_evidence_ids = _search_rag_evidence_ids(merged_tool_results)
-        if not rag_evidence_ids:
+        if evidence_ids and not rag_evidence_ids:
             raise FinanceShadowValidationError("trade_missing_rag_evidence")
-        uncovered_evidence_ids = sorted(set(evidence_ids) - set(rag_evidence_ids))
-        if uncovered_evidence_ids:
+        uncovered_evidence_ids = sorted(set(evidence_ids) - set(rag_evidence_ids)) if evidence_ids else []
+        if evidence_ids and uncovered_evidence_ids:
             raise FinanceShadowValidationError(
                 "trade_uncovered_evidence_ids",
                 details={
@@ -350,6 +351,27 @@ def _search_rag_evidence_ids(tool_results: dict[str, Any]) -> list[str]:
         evidence_id = item.get("id") or item.get("evidence_id") or item.get("doc_id") or item.get("chunk_id")
         extracted.append(str(evidence_id or f"rag-{idx}"))
     return extracted
+
+
+def _has_runtime_only_trade_evidence(action: str, tool_results: dict[str, Any]) -> bool:
+    if not REQUIRED_TRADE_RESULTS.issubset(set(tool_results)):
+        return False
+    quote = tool_results.get("get_quote")
+    risk = tool_results.get("get_risk_limit")
+    signal = tool_results.get("market_signal")
+    if not isinstance(quote, dict) or not isinstance(risk, dict) or not isinstance(signal, dict):
+        return False
+    if _first_float(quote, "price", "last", "close") <= 0:
+        return False
+    if _first_float(risk, "max_order_value", "max_trade_value", "per_trade_limit", "max_notional") <= 0:
+        return False
+    signal_action = str(signal.get("candidate_action") or "").upper()
+    signal_confidence = _float(signal.get("confidence"))
+    if action == "BUY":
+        return signal_action == "BUY" and signal_confidence > 0
+    if action == "SELL":
+        return signal_action in {"SELL", "SELL_OR_AVOID"} and signal_confidence > 0
+    return False
 
 
 def _trade_limit_violation(action: str, notional: float, tool_results: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:

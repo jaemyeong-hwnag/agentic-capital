@@ -129,6 +129,31 @@ class TestSimulationEngine:
         engine._reconcile_with_broker.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_run_cycle_passes_configured_symbols_to_agent_workflow(self):
+        engine = SimulationEngine(symbols=["005930", "069500"])
+        agent = MagicMock()
+        agent.name = "Trader-Gamma"
+        engine._agents = [agent]
+        engine._trading = MagicMock()
+        engine._trading.get_balance = AsyncMock(
+            return_value=MagicMock(total=5_000_000, available=5_000_000, currency="KRW")
+        )
+        engine._trading.get_positions = AsyncMock(return_value=[])
+        engine._market_data = MagicMock()
+        engine._recorder = MagicMock()
+        engine._recorder.record_company_snapshot = AsyncMock()
+        engine._recorder.commit = AsyncMock()
+        engine._reconcile_with_broker = AsyncMock()
+
+        with patch(
+            "agentic_capital.simulation.engine.run_agent_cycle",
+            new=AsyncMock(return_value={"decisions": [], "messages": [], "errors": []}),
+        ) as mock_run_agent_cycle:
+            await engine._run_cycle()
+
+        assert mock_run_agent_cycle.await_args.kwargs["symbols"] == ["005930", "069500"]
+
+    @pytest.mark.asyncio
     async def test_run_cycle_records_effective_allocated_capital_from_positions(self):
         """Company snapshots use the operating cap and current paper positions."""
         engine = SimulationEngine()

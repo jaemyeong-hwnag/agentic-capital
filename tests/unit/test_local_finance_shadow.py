@@ -400,6 +400,27 @@ def test_small_trade_with_evidence_tools_and_risk_limit_marks_paper_order_intent
     }
 
 
+def test_runtime_only_paper_trade_is_allowed_when_read_tools_are_complete() -> None:
+    tool_results = {
+        **_complete_tool_results(),
+        "search_rag": {"evidence_ids": [], "evidence_count": 0},
+    }
+
+    validation = validate_finance_shadow_payload(
+        {
+            "action": "BUY",
+            "symbol": "005930",
+            "market": "kr_stock",
+            "quantity": 1,
+        },
+        tool_results=tool_results,
+    )
+
+    assert validation["would_submit_order"] is True
+    assert validation["evidence_ids"] == []
+    assert validation["price"] == 70_000
+
+
 def test_profit_guarantee_expression_is_blocked() -> None:
     with pytest.raises(FinanceShadowValidationError, match="profit_guarantee_expression"):
         validate_finance_shadow_payload(
