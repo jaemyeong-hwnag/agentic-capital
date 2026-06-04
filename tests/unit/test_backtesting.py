@@ -151,7 +151,12 @@ class TestBacktestEngine:
         assert result.cycles == 0
 
     @pytest.mark.asyncio
-    async def test_run_with_data(self):
+    async def test_run_with_data(self, monkeypatch):
+        async def fake_run_agent_cycle(agent, cycle_number, *, trading=None, market_data=None, symbols=None, **kwargs):
+            return {"decisions": [], "messages_to_send": [], "errors": [], "next_cycle_seconds": 0}
+
+        monkeypatch.setattr("agentic_capital.graph.workflow.run_agent_cycle", fake_run_agent_cycle)
+
         provider = HistoricalDataProvider()
         provider.load_from_dicts([
             {"timestamp": "2026-01-01", "close": 70000, "volume": 1000000, "symbol": "005930"},

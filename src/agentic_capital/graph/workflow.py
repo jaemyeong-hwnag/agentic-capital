@@ -1409,10 +1409,48 @@ def _parse_finance_symbol_spec(spec: str, fallback_market: str) -> tuple[str, st
     return value, market
 
 
-def _finance_cycle_symbol_market(cycle_number: int, symbols: list[str] | None) -> tuple[str, str, list[str]]:
+def _finance_market_has_open_route(market: str, open_markets: list[str] | None) -> bool:
+    if not open_markets:
+        return False
+    open_values = {str(item).strip().upper() for item in open_markets if str(item).strip()}
+    if not open_values:
+        return False
+    market_l = market.lower()
+    if market_l == "kr_stock":
+        return any(value == "KRX" or value.startswith("KRX:") or value == "NXT" or value.startswith("NXT:") for value in open_values)
+    if market_l == "us_stock":
+        return any(
+            value in {"NASDAQ", "NYSE", "NASDAQ_PRE", "NYSE_PRE", "NASDAQ_AFTER", "NYSE_AFTER"}
+            or value.startswith("NASDAQ:")
+            or value.startswith("NYSE:")
+            for value in open_values
+        )
+    if market_l == _PAPER_CALL_OPTION_MARKET:
+        return any(value == "NIGHT" or value.startswith("NIGHT:") or value == "KRX" or value.startswith("KRX:") for value in open_values)
+    return False
+
+
+def _finance_cycle_symbol_market(
+    cycle_number: int,
+    symbols: list[str] | None,
+    *,
+    open_markets: list[str] | None = None,
+) -> tuple[str, str, list[str]]:
     configured = [item.strip() for item in settings.local_finance_default_symbols.split(",") if item.strip()]
     candidates = symbols or configured or [settings.local_finance_default_symbol]
-    selected = candidates[(max(cycle_number, 1) - 1) % len(candidates)]
+    parsed_candidates = [
+        (candidate, *_parse_finance_symbol_spec(candidate, settings.local_finance_default_market))
+        for candidate in candidates
+    ]
+    open_candidates = [
+        item
+        for item in parsed_candidates
+        if item[1] and _finance_market_has_open_route(item[2], open_markets)
+    ]
+    selection_pool = open_candidates or parsed_candidates
+    selected, symbol, market = selection_pool[(max(cycle_number, 1) - 1) % len(selection_pool)]
+    if symbol:
+        return symbol, market, candidates
     symbol, market = _parse_finance_symbol_spec(selected, settings.local_finance_default_market)
     if not symbol:
         symbol = settings.local_finance_default_symbol
@@ -1453,7 +1491,11 @@ async def _run_local_finance_agent_cycle(
         recorder=recorder,
         input_text="pre-cycle finance trader state observation before tool collection",
     )
-    primary_symbol, primary_market, finance_symbols = _finance_cycle_symbol_market(cycle_number, symbols)
+    primary_symbol, primary_market, finance_symbols = _finance_cycle_symbol_market(
+        cycle_number,
+        symbols,
+        open_markets=open_markets,
+    )
     agent_state = {
         "deployment_mode": "paper" if settings.kis_is_paper else "shadow",
         "live_order_enabled": False,

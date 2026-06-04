@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     local_agent_llm_max_tokens: int = 512
     local_embedding_model: str = "finance_embedding_model"
     local_llm_api_key: str = ""
-    local_llm_timeout_seconds: float = 30.0
+    local_llm_timeout_seconds: float = 60.0
     local_llm_temperature: float = 0.2
     local_llm_send_native_tools: bool = False
     local_llm_readiness_required: bool = True

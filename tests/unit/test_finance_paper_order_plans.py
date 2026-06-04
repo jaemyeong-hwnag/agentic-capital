@@ -587,3 +587,18 @@ def test_finance_cycle_symbol_market_rotates_configured_multi_market_universe():
 
     assert first == ("005930", "kr_stock", ["005930", "us_stock:AAPL"])
     assert second == ("AAPL", "us_stock", ["005930", "us_stock:AAPL"])
+
+
+def test_finance_cycle_symbol_market_prefers_open_krx_candidates_when_us_closed():
+    with (
+        patch(
+            "agentic_capital.graph.workflow.settings.local_finance_default_symbols",
+            "us_stock:NVDA,us_stock:TQQQ,005930,069500",
+        ),
+        patch("agentic_capital.graph.workflow.settings.local_finance_default_market", "us_stock"),
+    ):
+        first = _finance_cycle_symbol_market(1, None, open_markets=["KRX", "NXT"])
+        second = _finance_cycle_symbol_market(2, None, open_markets=["KRX", "NXT"])
+
+    assert first == ("005930", "kr_stock", ["us_stock:NVDA", "us_stock:TQQQ", "005930", "069500"])
+    assert second == ("069500", "kr_stock", ["us_stock:NVDA", "us_stock:TQQQ", "005930", "069500"])
