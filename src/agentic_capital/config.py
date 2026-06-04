@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     local_finance_paper_order_execution_enabled: bool = True
     local_finance_paper_probe_on_model_loop: bool = True
     local_finance_default_symbol: str = "005930"
-    local_finance_default_symbols: str = "us_stock:NVDA,us_stock:TQQQ,us_stock:SOXL,us_stock:TSLA,005930,069500,233740,us_stock:AAPL"
+    local_finance_default_symbols: str = (
+        "us_stock:NVDA,us_stock:TQQQ,us_stock:SOXL,us_stock:TSLA,"
+        "005930,069500,233740,252670,251340,114800,us_stock:AAPL"
+    )
     local_finance_default_market: str = "kr_stock"
     local_finance_risk_per_trade_pct: float = 0.05
     local_finance_rag_query_base_url: str = ""

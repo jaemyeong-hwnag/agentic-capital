@@ -1,11 +1,16 @@
 """Unit tests for local finance paper order planning."""
 
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from agentic_capital.graph.workflow import (
     _finance_cycle_symbol_market,
     _finance_loop_probe_order_plan,
     _finance_paper_order_plan,
+    _select_finance_runtime_candidate,
     _finance_wait_probe_order_plan,
 )
 
@@ -602,3 +607,45 @@ def test_finance_cycle_symbol_market_prefers_open_krx_candidates_when_us_closed(
 
     assert first == ("005930", "kr_stock", ["us_stock:NVDA", "us_stock:TQQQ", "005930", "069500"])
     assert second == ("069500", "kr_stock", ["us_stock:NVDA", "us_stock:TQQQ", "005930", "069500"])
+
+
+@pytest.mark.asyncio
+async def test_select_finance_runtime_candidate_prefers_open_buy_signal():
+    class MarketData:
+        async def get_quote(self, symbol: str):
+            return SimpleNamespace(symbol=symbol, price={"005930": 10_000.0, "122630": 10_060.0}[symbol])
+
+        async def get_ohlcv(self, symbol: str, timeframe: str = "15m", limit: int = 8):
+            base_time = datetime(2026, 6, 4, 9, 0)
+            closes = {
+                "005930": [10_000.0, 10_000.0, 10_000.0, 10_000.0],
+                "122630": [10_000.0, 10_060.0, 10_060.0, 10_060.0],
+            }[symbol]
+            return [
+                SimpleNamespace(
+                    timestamp=base_time + timedelta(minutes=15 * idx),
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=10_000,
+                )
+                for idx, close in enumerate(closes)
+            ]
+
+    with patch(
+        "agentic_capital.graph.workflow.settings.local_finance_default_symbols",
+        "us_stock:NVDA,005930,122630",
+    ):
+        symbol, market, scan = await _select_finance_runtime_candidate(
+            primary_symbol="005930",
+            primary_market="kr_stock",
+            symbols=None,
+            open_markets=["KRX"],
+            market_data=MarketData(),
+        )
+
+    assert symbol == "122630"
+    assert market == "kr_stock"
+    assert scan["selected_by"] == "runtime_market_signal"
+    assert scan["selected_signal"]["candidate_action"] == "BUY"

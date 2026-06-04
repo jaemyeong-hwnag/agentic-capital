@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentic_capital.core.tools.data_query import DataQueryTools, collect_finance_decision_tool_results
+from agentic_capital.core.tools.data_query import (
+    DataQueryTools,
+    _market_signal_from_ohlcv,
+    collect_finance_decision_tool_results,
+)
 
 
 def _make_trading():
@@ -302,3 +306,35 @@ async def test_collect_finance_decision_tool_results_records_inner_broker_balanc
     assert balance["available"] == 5_000_000
     assert balance["source"] == "effective_capital_limit"
     assert balance["broker_balance"]["available"] == 49_707_530
+
+
+def test_market_signal_marks_recent_positive_reversal_as_buy_candidate() -> None:
+    signal = _market_signal_from_ohlcv(
+        [
+            {"close": 100.25},
+            {"close": 100.0},
+            {"close": 100.0},
+            {"close": 100.0},
+        ],
+        {"price": 100.2},
+    )
+
+    assert signal["candidate_action"] == "BUY"
+    assert signal["reason"] == "recent_positive_reversal"
+    assert signal["confidence"] > 0
+
+
+def test_market_signal_marks_window_positive_momentum_as_buy_candidate() -> None:
+    signal = _market_signal_from_ohlcv(
+        [
+            {"close": 100.0},
+            {"close": 100.6},
+            {"close": 100.6},
+            {"close": 100.6},
+        ],
+        {"price": 100.6},
+    )
+
+    assert signal["candidate_action"] == "BUY"
+    assert signal["reason"] == "window_positive_momentum"
+    assert signal["confidence"] > 0

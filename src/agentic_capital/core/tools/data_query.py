@@ -362,11 +362,35 @@ def _market_signal_from_ohlcv(candles: list[dict[str, Any]], quote: dict[str, An
             "confidence": min(0.5, round(0.2 + abs(window_return_pct) / 10.0, 3)),
             "reason": "short_window_positive_momentum",
         })
+    elif recent_return_pct > 0.15 and window_return_pct >= -0.05:
+        signal.update({
+            "candidate_action": "BUY",
+            "confidence": min(0.45, round(0.18 + abs(recent_return_pct) / 8.0 + max(window_return_pct, 0.0) / 16.0, 3)),
+            "reason": "recent_positive_reversal",
+        })
+    elif window_return_pct > 0.45 and recent_return_pct >= -0.03:
+        signal.update({
+            "candidate_action": "BUY",
+            "confidence": min(0.45, round(0.18 + abs(window_return_pct) / 16.0 + max(recent_return_pct, 0.0) / 8.0, 3)),
+            "reason": "window_positive_momentum",
+        })
     elif recent_return_pct < -0.08 and window_return_pct < -0.15:
         signal.update({
             "candidate_action": "SELL_OR_AVOID",
             "confidence": min(0.5, round(0.2 + abs(window_return_pct) / 10.0, 3)),
             "reason": "short_window_negative_momentum",
+        })
+    elif recent_return_pct < -0.15 and window_return_pct <= 0.05:
+        signal.update({
+            "candidate_action": "SELL_OR_AVOID",
+            "confidence": min(0.45, round(0.18 + abs(recent_return_pct) / 8.0 + abs(min(window_return_pct, 0.0)) / 16.0, 3)),
+            "reason": "recent_negative_breakdown",
+        })
+    elif window_return_pct < -0.45 and recent_return_pct <= 0.03:
+        signal.update({
+            "candidate_action": "SELL_OR_AVOID",
+            "confidence": min(0.45, round(0.18 + abs(window_return_pct) / 16.0 + abs(min(recent_return_pct, 0.0)) / 8.0, 3)),
+            "reason": "window_negative_momentum",
         })
     return signal
 

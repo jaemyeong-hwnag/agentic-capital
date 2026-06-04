@@ -17,7 +17,12 @@ from langgraph.prebuilt import create_react_agent
 
 from agentic_capital.adapters.llm.router import build_langchain_chat_model, llm_run_metadata
 from agentic_capital.config import settings
-from agentic_capital.core.tools.data_query import build_agent_tools, collect_finance_decision_tool_results
+from agentic_capital.core.tools.data_query import (
+    _market_signal_from_ohlcv,
+    _serialise_ohlcv,
+    build_agent_tools,
+    collect_finance_decision_tool_results,
+)
 from agentic_capital.graph.nodes import record_cycle
 from agentic_capital.ports.trading import infer_option_type
 
@@ -695,6 +700,7 @@ def _recent_same_price_churn(
 _PAPER_SPOT_MARKETS = {"kr_stock", "us_stock", "hk_stock", "cn_stock", "jp_stock", "vn_stock"}
 _PAPER_CALL_OPTION_MARKET = "kr_options"
 _PAPER_ORDER_MARKETS = _PAPER_SPOT_MARKETS | {_PAPER_CALL_OPTION_MARKET}
+_MIN_KR_STOCK_SIGNAL_PRICE = 500.0
 
 
 def _is_call_option_market_order(
@@ -1430,25 +1436,33 @@ def _finance_market_has_open_route(market: str, open_markets: list[str] | None) 
     return False
 
 
+def _finance_candidate_symbol_markets(
+    symbols: list[str] | None,
+    *,
+    open_markets: list[str] | None = None,
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    configured = [item.strip() for item in settings.local_finance_default_symbols.split(",") if item.strip()]
+    candidates = symbols or configured or [settings.local_finance_default_symbol]
+    parsed_candidates = [
+        (*_parse_finance_symbol_spec(candidate, settings.local_finance_default_market), candidate)
+        for candidate in candidates
+    ]
+    open_candidates = [
+        item
+        for item in parsed_candidates
+        if item[0] and _finance_market_has_open_route(item[1], open_markets)
+    ]
+    return open_candidates or parsed_candidates, candidates
+
+
 def _finance_cycle_symbol_market(
     cycle_number: int,
     symbols: list[str] | None,
     *,
     open_markets: list[str] | None = None,
 ) -> tuple[str, str, list[str]]:
-    configured = [item.strip() for item in settings.local_finance_default_symbols.split(",") if item.strip()]
-    candidates = symbols or configured or [settings.local_finance_default_symbol]
-    parsed_candidates = [
-        (candidate, *_parse_finance_symbol_spec(candidate, settings.local_finance_default_market))
-        for candidate in candidates
-    ]
-    open_candidates = [
-        item
-        for item in parsed_candidates
-        if item[1] and _finance_market_has_open_route(item[2], open_markets)
-    ]
-    selection_pool = open_candidates or parsed_candidates
-    selected, symbol, market = selection_pool[(max(cycle_number, 1) - 1) % len(selection_pool)]
+    selection_pool, candidates = _finance_candidate_symbol_markets(symbols, open_markets=open_markets)
+    symbol, market, selected = selection_pool[(max(cycle_number, 1) - 1) % len(selection_pool)]
     if symbol:
         return symbol, market, candidates
     symbol, market = _parse_finance_symbol_spec(selected, settings.local_finance_default_market)
@@ -1456,6 +1470,80 @@ def _finance_cycle_symbol_market(
         symbol = settings.local_finance_default_symbol
         market = settings.local_finance_default_market
     return symbol, market, candidates
+
+
+async def _select_finance_runtime_candidate(
+    *,
+    primary_symbol: str,
+    primary_market: str,
+    symbols: list[str] | None,
+    open_markets: list[str] | None,
+    market_data: Any = None,
+) -> tuple[str, str, dict[str, Any]]:
+    """Prefer the open candidate with the strongest read-only BUY signal."""
+    if market_data is None:
+        return primary_symbol, primary_market, {"selected_by": "cycle_rotation", "scan_skipped": "no_market_data"}
+    selection_pool, _ = _finance_candidate_symbol_markets(symbols, open_markets=open_markets)
+    best: tuple[float, str, str, dict[str, Any]] | None = None
+    scanned: list[dict[str, Any]] = []
+    for symbol, market, _ in selection_pool[:8]:
+        if not symbol:
+            continue
+        try:
+            quote = await market_data.get_quote(symbol)
+        except Exception as exc:
+            scanned.append({"symbol": symbol, "market": market, "error": type(exc).__name__})
+            continue
+        price = float(getattr(quote, "price", 0) or 0)
+        if market == "kr_stock" and 0 < price < _MIN_KR_STOCK_SIGNAL_PRICE:
+            scanned.append({
+                "symbol": symbol,
+                "market": market,
+                "price": price,
+                "candidate_action": "HOLD",
+                "confidence": 0.0,
+                "reason": "price_below_runtime_signal_floor",
+            })
+            continue
+        try:
+            candles = await market_data.get_ohlcv(symbol, timeframe="15m", limit=8)
+        except Exception as exc:
+            scanned.append({"symbol": symbol, "market": market, "error": type(exc).__name__})
+            continue
+        compact_candles = [_serialise_ohlcv(candle) for candle in candles][-8:]
+        signal = _market_signal_from_ohlcv(
+            compact_candles,
+            {"price": price, "symbol": symbol, "market": market},
+        )
+        try:
+            confidence = float(signal.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        scanned.append({
+            "symbol": symbol,
+            "market": market,
+            "candidate_action": signal.get("candidate_action"),
+            "confidence": confidence,
+            "reason": signal.get("reason"),
+        })
+        if str(signal.get("candidate_action") or "").upper() != "BUY" or confidence <= 0:
+            continue
+        if best is None or confidence > best[0]:
+            best = (confidence, symbol, market, signal)
+    if best is None:
+        return primary_symbol, primary_market, {
+            "selected_by": "cycle_rotation",
+            "scan_count": len(scanned),
+            "scanned": scanned[:8],
+        }
+    return best[1], best[2], {
+        "selected_by": "runtime_market_signal",
+        "selected_symbol": best[1],
+        "selected_market": best[2],
+        "selected_signal": best[3],
+        "scan_count": len(scanned),
+        "scanned": scanned[:8],
+    }
 
 
 def _finance_cycle_prompt(agent: BaseAgent, cycle_number: int, symbols: list[str] | None) -> str:
@@ -1496,6 +1584,13 @@ async def _run_local_finance_agent_cycle(
         symbols,
         open_markets=open_markets,
     )
+    primary_symbol, primary_market, candidate_scan = await _select_finance_runtime_candidate(
+        primary_symbol=primary_symbol,
+        primary_market=primary_market,
+        symbols=finance_symbols,
+        open_markets=open_markets,
+        market_data=market_data,
+    )
     agent_state = {
         "deployment_mode": "paper" if settings.kis_is_paper else "shadow",
         "live_order_enabled": False,
@@ -1508,6 +1603,7 @@ async def _run_local_finance_agent_cycle(
         "open_markets": open_markets or [],
         "capital_limit": capital_limit,
         "risk_per_trade_pct": settings.local_finance_risk_per_trade_pct,
+        "candidate_scan": candidate_scan,
     }
     required_safety = {
         "no_profit_guarantee": True,
