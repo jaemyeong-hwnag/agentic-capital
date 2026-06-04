@@ -541,6 +541,25 @@ def _paper_market_session_open(
 ) -> bool:
     if _market_session_open(tool_results, open_markets, market):
         return True
+    market_l = str(market or "").lower()
+    open_values = {str(item).strip().upper() for item in (open_markets or []) if str(item).strip()}
+    if market_l == "kr_stock" and settings.kis_is_paper:
+        if any(
+            value == "KRX"
+            or value.startswith("KRX:")
+            or value.startswith("KRX_")
+            or value == "NXT"
+            or value.startswith("NXT:")
+            or value.startswith("NXT_")
+            for value in open_values
+        ):
+            return True
+        session = tool_results.get("get_market_session")
+        if isinstance(session, dict):
+            exchange = str(session.get("exchange") or "").upper()
+            named_session = str(session.get("session") or "").lower()
+            if exchange == "NXT" and named_session in {"nxt_pre", "nxt_after"} and session.get("is_open") is True:
+                return True
     if market == _PAPER_CALL_OPTION_MARKET and settings.kis_is_paper:
         return any(str(item).upper() == "NIGHT" for item in (open_markets or []))
     return False

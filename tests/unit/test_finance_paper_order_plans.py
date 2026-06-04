@@ -359,6 +359,59 @@ def test_finance_wait_probe_recovers_observe_with_buy_market_signal():
     assert plan["quantity"] == 1
 
 
+def test_finance_wait_probe_recovers_kr_stock_nxt_after_buy_signal():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_probe_on_model_loop", True),
+        patch("agentic_capital.graph.workflow.settings.local_finance_risk_per_trade_pct", 0.1),
+    ):
+        plan = _finance_wait_probe_order_plan(
+            record={
+                "record_type": "finance_paper_shadow_decision",
+                "action": "HOLD",
+                "paper_trade_only": True,
+                "would_submit_order": False,
+                "within_risk_limit": True,
+                "symbol": "114800",
+                "market": "kr_stock",
+                "confidence": 0.0,
+                "no_trade_reason": "insufficient_edge",
+            },
+            tool_results={
+                "get_market_session": {
+                    "exchange": "NXT",
+                    "state": "extended",
+                    "session": "nxt_after",
+                    "is_open": True,
+                    "regular_session": False,
+                },
+                "get_quote": {"symbol": "114800", "price": 941.0, "market": "kr_stock"},
+                "get_balance": {"available": 5_000_000.0},
+                "get_risk_limit": {"max_order_value": 5_000_000.0},
+                "get_positions": [],
+                "market_signal": {
+                    "candidate_action": "BUY",
+                    "confidence": 0.253,
+                    "reason": "short_window_positive_momentum",
+                },
+            },
+            primary_symbol="114800",
+            primary_market="kr_stock",
+            open_markets=["NXT_AFTER"],
+            capital_limit=5_000_000.0,
+            evidence_ids=[],
+            risk_flags=[],
+        )
+
+    assert plan is not None
+    assert plan["action"] == "BUY"
+    assert plan["symbol"] == "114800"
+    assert plan["market"] == "kr_stock"
+    assert plan["quantity"] == 1
+
+
 def test_finance_wait_probe_recovers_observe_performance_candidate():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
