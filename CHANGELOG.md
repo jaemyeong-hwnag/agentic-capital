@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.33.0] - 2026-06-04
+
+- Added DeepSeek hosted LLM provider support with `deepseek-v4-flash` as the default model.
+- Removed unused OpenAI API key configuration and documented local embeddings as the non-hosted default.
+- Updated runtime docs so Gemini remains explicit opt-in for batch/eval or baseline use only.
+
 ## [0.30.5] - 2026-06-02
 
 - Persisted `no_trade_reason` for `finance_paper_shadow_decision` records so hourly local paper-trading monitoring can classify evidence gaps directly from DB outcomes.
