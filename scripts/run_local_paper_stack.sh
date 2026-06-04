@@ -173,13 +173,17 @@ download_gguf() {
   mkdir -p "$output_dir"
   local before_signature
   before_signature="$(file_signature "$expected_path")"
-  local force_download_args=()
-  if truthy "$LOCAL_LLM_FORCE_DOWNLOAD"; then
-    force_download_args+=(--force-download)
-  fi
-
   log "checking HF latest: $repo_id ($include_pattern) revision=$LOCAL_LLM_HF_REVISION"
-  if ! "$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION" --include "$include_pattern" --local-dir "$output_dir" --quiet "${force_download_args[@]}"; then
+  if truthy "$LOCAL_LLM_FORCE_DOWNLOAD"; then
+    if ! "$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION" --include "$include_pattern" --local-dir "$output_dir" --quiet --force-download; then
+      if [ -s "$expected_path" ]; then
+        log "warning: HF latest check failed; using existing GGUF: $expected_path"
+        return 0
+      fi
+      printf 'error: HF download failed and no local GGUF exists: %s\n' "$expected_path" >&2
+      exit 1
+    fi
+  elif ! "$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION" --include "$include_pattern" --local-dir "$output_dir" --quiet; then
     if [ -s "$expected_path" ]; then
       log "warning: HF latest check failed; using existing GGUF: $expected_path"
       return 0

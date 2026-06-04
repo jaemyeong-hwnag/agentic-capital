@@ -34,7 +34,8 @@ def test_local_paper_stack_checks_and_applies_latest_hf_models() -> None:
     assert "checking HF latest" in script
     assert 'HF_HUB_OFFLINE' in script
     assert '"$HF_BIN" download "$repo_id" --revision "$LOCAL_LLM_HF_REVISION"' in script
-    assert '--include "$include_pattern" --local-dir "$output_dir" --quiet "${force_download_args[@]}"' in script
+    assert '--include "$include_pattern" --local-dir "$output_dir" --quiet --force-download' in script
+    assert "force_download_args" not in script
     assert "LOCAL_LLM_MODEL_REFRESHED=true" in script
     assert "restart_updated_runtime_after_model_refresh" in script
     assert 'stop_session "agentic-capital-paper-local"' in script
