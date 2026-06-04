@@ -1423,7 +1423,15 @@ def _finance_market_has_open_route(market: str, open_markets: list[str] | None) 
         return False
     market_l = market.lower()
     if market_l == "kr_stock":
-        return any(value == "KRX" or value.startswith("KRX:") or value == "NXT" or value.startswith("NXT:") for value in open_values)
+        return any(
+            value == "KRX"
+            or value.startswith("KRX:")
+            or value.startswith("KRX_")
+            or value == "NXT"
+            or value.startswith("NXT:")
+            or value.startswith("NXT_")
+            for value in open_values
+        )
     if market_l == "us_stock":
         return any(
             value in {"NASDAQ", "NYSE", "NASDAQ_PRE", "NYSE_PRE", "NASDAQ_AFTER", "NYSE_AFTER"}

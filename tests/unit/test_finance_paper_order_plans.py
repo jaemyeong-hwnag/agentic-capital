@@ -609,6 +609,21 @@ def test_finance_cycle_symbol_market_prefers_open_krx_candidates_when_us_closed(
     assert second == ("069500", "kr_stock", ["us_stock:NVDA", "us_stock:TQQQ", "005930", "069500"])
 
 
+def test_finance_cycle_symbol_market_treats_nxt_after_as_krx_route():
+    with (
+        patch(
+            "agentic_capital.graph.workflow.settings.local_finance_default_symbols",
+            "us_stock:NVDA,005930,069500",
+        ),
+        patch("agentic_capital.graph.workflow.settings.local_finance_default_market", "us_stock"),
+    ):
+        first = _finance_cycle_symbol_market(1, None, open_markets=["NXT_AFTER"])
+        second = _finance_cycle_symbol_market(2, None, open_markets=["NXT_AFTER"])
+
+    assert first == ("005930", "kr_stock", ["us_stock:NVDA", "005930", "069500"])
+    assert second == ("069500", "kr_stock", ["us_stock:NVDA", "005930", "069500"])
+
+
 @pytest.mark.asyncio
 async def test_select_finance_runtime_candidate_prefers_open_buy_signal():
     class MarketData:
