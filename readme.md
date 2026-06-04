@@ -100,6 +100,7 @@ Analysis         Arrow IPC (in-memory) → Parquet (persistence) → DuckDB (OLA
 | [26 - Local Finance Model Onboarding](docs/26-local-finance-model-onboarding.md) | Finance local model service contracts |
 | [27 - Finance Sidecar Runbook](docs/27-domain-llm-forge-finance-sidecar.md) | domain-llm-forge finance RAG/model sidecar integration |
 | [28 - Psychology Sidecar Runbook](docs/28-domain-llm-forge-psychology-sidecar.md) | domain-llm-forge psychology RAG/model sidecar integration |
+| [30 - Local Paper Stack Runbook](docs/30-local-paper-stack-runbook.md) | HF model download, local LLM sidecars, and paper trading startup |
 
 ## Key Papers
 
@@ -135,6 +136,12 @@ cp .env.example .env
 
 # Run simulation
 agentic-capital
+```
+
+로컬 LLM과 모의투자 스택을 함께 실행할 때는 다음을 사용한다.
+
+```bash
+./scripts/run_local_paper_stack.sh start
 ```
 
 ## License

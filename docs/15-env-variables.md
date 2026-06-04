@@ -8,14 +8,27 @@
 # ============================================================
 GEMINI_API_KEY=                    # Google AI Studio API Key (LLM_PROVIDER=gemini일 때만)
 OPENAI_API_KEY=                    # OpenAI API Key (text-embedding-3-large) — 임베딩용, 선택
+HF_TOKEN=                          # Hugging Face token. 현재 프로젝트 우선, 없으면 HUGGINGFACE_TOKEN fallback
+HUGGINGFACE_TOKEN=                 # legacy/forge 호환 Hugging Face token. 값은 커밋 금지
 LLM_PROVIDER=local                 # local | gemini. LOCAL_LLM_PROVIDER alias도 지원
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_PROVIDER=local
+LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_LLM_EXPECTED_HEALTH_MODEL=finance_decision_model
+LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
+LOCAL_AGENT_LLM_MODEL=agentic_capital_react_model
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_API_KEY=                 # 로컬 gateway 인증을 켠 경우에만 사용
-LOCAL_LLM_TIMEOUT_SECONDS=30
+LOCAL_LLM_TIMEOUT_SECONDS=60
 LOCAL_LLM_TEMPERATURE=0.2
 LOCAL_LLM_SEND_NATIVE_TOOLS=false  # OpenAI native tools payload 전송 opt-in
+LOCAL_FINANCE_RAG_QUERY_BASE_URL=http://127.0.0.1:18181/v1
+LOCAL_FINANCE_TOOL_PLANNER_BASE_URL=http://127.0.0.1:18182/v1
+LOCAL_FINANCE_DECISION_BASE_URL=http://127.0.0.1:18183/v1
+LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18184/v1
+LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:18080/v1
+LOCAL_PSYCHOLOGY_MODEL=psychology_model_suite
+LOCAL_PSYCHOLOGY_EXPECTED_HEALTH_MODEL=psychology_model_suite
 DOMAIN_LLM_FORGE_ROOT=/Users/tpirates/workspace-hjm/domain-llm-forge
 DOMAIN_LLM_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-llm-forge/.env
 DOMAIN_MODEL_FORGE_ENV=/Users/tpirates/workspace-hjm/domain-model-forge/.env
@@ -79,7 +92,7 @@ LANGCHAIN_PROJECT=agentic-capital
 |------|------|------|
 | `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때 에이전트 reasoning provider |
 | `LLM_PROVIDER` | **필수** | 기본값은 `local`. `gemini` 또는 `local` 계열만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
-| `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL |
+| `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL. 독립 direct 모드 기본값은 `http://127.0.0.1:18183/v1` |
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
 | `LOCAL_AGENT_LLM_BASE_URL` | local+finance 모드 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 서버 `/v1` base URL. `LOCAL_LLM_MODEL=finance_*`이면 반드시 `LOCAL_LLM_BASE_URL`과 분리해야 하며, 없으면 시작 실패한다 |
 | `LOCAL_AGENT_LLM_MODEL` | local+finance 모드 조건부 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 모델. 기본값 `agentic_capital_react_model`. `LOCAL_LLM_MODEL=finance_*`인데 이 값이 비어 있으면 finance decision model을 일반 agent LLM으로 오용하지 않도록 시작 실패한다. Trader finance 전용 flow는 `LOCAL_LLM_MODEL`의 finance sidecar 모델들을 단계별로 호출한다 |
@@ -104,7 +117,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | `LOCAL_MODEL_INVENTORY_HEALTHCHECK_ENABLED` | 선택 | 기본값 `true`. runtime health에 `local_model_inventory`를 추가해 finance/psychology 전체 모델 목록 중 `paper_runtime_sidecar`, `validation_sidecar`, `suite_only`, `unvalidated` 상태를 기록한다. 이 항목은 비차단(non-blocking) 가시성 체크이며 `runtime_health.ok`는 paper loop에 필수인 blocking 체크들만으로 계산된다 |
 | `LOCAL_FINANCE_VALIDATION_BASE_URLS` | 선택 | `model=http://host:port/v1` 형식의 comma-separated 목록. paper runtime에 직접 쓰지 않는 finance 모델의 validation sidecar health를 확인한다 |
 | `LOCAL_PSYCHOLOGY_VALIDATION_BASE_URLS` | 선택 | `model=http://host:port/v1` 형식의 comma-separated 목록. `psychology_model_suite` 밖에서 개별 psychology 모델을 직접 검증할 때 사용한다 |
-| `DOMAIN_LLM_FORGE_ROOT` | sidecar 실행 시 필수 | `scripts/run_local_finance_sidecar.sh`가 실행할 domain-llm-forge root |
+| `DOMAIN_LLM_FORGE_ROOT` | RAG gateway 호환 모드에서만 필수 | `scripts/run_local_finance_sidecar.sh` 또는 `LOCAL_LLM_RUNTIME_MODE=rag_gateway`가 실행할 domain-llm-forge root |
 | `DOMAIN_LLM_FORGE_ENV` | 선택 | domain-llm-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `DOMAIN_MODEL_FORGE_ENV` | 선택 | domain-model-forge `.env` 경로. 값은 source만 하고 출력/커밋하지 않음 |
 | `RAG_SERVICE` | sidecar 실행 시 필수 | 기본값 `finance_decision_model` |
@@ -119,6 +132,8 @@ LANGCHAIN_PROJECT=agentic-capital
 | `UPBIT_*` | 선택 (Phase 2) | 국내 암호화폐 거래 시 필요 |
 | `ALPACA_*` | 선택 (Phase 2) | 미국 주식 직접 거래 시 필요 |
 | `OPENAI_API_KEY` | 선택 | Gemini 임베딩 사용 시 불필요 |
+| `HF_TOKEN` | 로컬 LLM 자동 다운로드 시 조건부 필수 | `scripts/run_local_paper_stack.sh`가 private HF repo에서 GGUF를 받을 때 사용. 현재 프로젝트 `.env` 값이 forge env보다 우선한다 |
+| `HUGGINGFACE_TOKEN` | 선택 | 기존 domain-llm-forge 호환 키. `HF_TOKEN`이 비어 있으면 런타임에서 `HF_TOKEN`으로 매핑한다 |
 | `LANGCHAIN_*` | 선택 | 개발/디버깅 시 트레이싱 |
 | `SIMULATION_SEED` | 선택 | 재현성 필요 시 |
 
@@ -127,8 +142,15 @@ LANGCHAIN_PROJECT=agentic-capital
 ### 주식 모드 (기본)
 ```
 LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Gemini 기준선은 gemini
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
+LOCAL_AGENT_LLM_MODEL=agentic_capital_react_model
+LOCAL_FINANCE_RAG_QUERY_BASE_URL=http://127.0.0.1:18181/v1
+LOCAL_FINANCE_TOOL_PLANNER_BASE_URL=http://127.0.0.1:18182/v1
+LOCAL_FINANCE_DECISION_BASE_URL=http://127.0.0.1:18183/v1
+LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18184/v1
+LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:18080/v1
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
 GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
@@ -146,7 +168,15 @@ FUTURES_LIVE_ORDERS_ENABLED=false  ← 실전 모드에서도 기본값은 주�
 python -m agentic_capital.main
 ```
 
-로컬 finance RAG Gateway를 사용할 때는 별도 터미널에서 다음처럼 sidecar를 먼저 띄운다. 실제 secret 값은
+HF에서 누락된 GGUF를 내려받고 일반 agent LLM, finance 4단계 sidecar, psychology suite, DB/Redis, paper loop를 한 번에 시작하려면 다음 런북과 스크립트를 사용한다.
+
+```bash
+./scripts/run_local_paper_stack.sh start
+```
+
+세부 포트, screen session, 모델 repo, 안전 모드 기준은 [30 - 로컬 LLM 포함 프로젝트 실행 런북](30-local-paper-stack-runbook.md)에 정리한다.
+
+기존 domain-llm-forge RAG Gateway를 사용할 때는 `LOCAL_LLM_RUNTIME_MODE=rag_gateway`를 사용하거나 별도 터미널에서 다음처럼 sidecar를 먼저 띄운다. 실제 secret 값은
 `/Users/tpirates/workspace-hjm/domain-llm-forge/.env` 또는
 `/Users/tpirates/workspace-hjm/domain-model-forge/.env`에서 해당 프로젝트가 직접 읽게 두고, 이 저장소에는 값 자체를 복사하지 않는다.
 
@@ -156,7 +186,7 @@ bash scripts/run_local_finance_sidecar.sh
 
 이 스크립트는 기본적으로 `finance_decision_model` RAG Gateway를 `127.0.0.1:8080`에 띄운다. 포트를 바꾸려면 `PORT=18000 bash scripts/run_local_finance_sidecar.sh`처럼 실행하고, 앱 쪽은 `LOCAL_LLM_BASE_URL=http://127.0.0.1:18000/v1`로 맞춘다.
 
-Trader finance pipeline을 실사용하려면 core stage를 같은 gateway에 몰아넣지 말고 각 sidecar URL을 분리한다. 예:
+RAG Gateway 호환 모드에서 Trader finance pipeline을 실사용하려면 core stage를 같은 gateway에 몰아넣지 말고 각 sidecar URL을 분리한다. 예:
 
 ```bash
 LOCAL_FINANCE_RAG_QUERY_BASE_URL=http://127.0.0.1:18101/v1
@@ -168,8 +198,15 @@ LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18104/v1
 ### 선물 단타 모드
 ```
 LLM_PROVIDER=local      ← 로컬 sidecar 사용 시
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
+LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
+LOCAL_AGENT_LLM_MODEL=agentic_capital_react_model
+LOCAL_FINANCE_RAG_QUERY_BASE_URL=http://127.0.0.1:18181/v1
+LOCAL_FINANCE_TOOL_PLANNER_BASE_URL=http://127.0.0.1:18182/v1
+LOCAL_FINANCE_DECISION_BASE_URL=http://127.0.0.1:18183/v1
+LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18184/v1
+LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:18080/v1
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
 GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
