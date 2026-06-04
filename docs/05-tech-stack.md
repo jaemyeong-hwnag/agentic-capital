@@ -20,8 +20,8 @@
 | **그래프 (Phase 2)** | Apache AGE (PG 확장) | 에이전트 관계/메모리 링크 그래프 탐색 — Cypher 쿼리, PG 내장 |
 | **상태/캐시** | Redis 7+ | Working Memory, 감정 상태, 이벤트 스트림 |
 | **분석** | DuckDB + Parquet + Arrow IPC | OLAP, 백테스팅, 논문 데이터 추출 |
-| **LLM** | Gemini 2.5 Pro / Flash | Pro: 핵심 의사결정, Flash: 반복 판단 |
-| **임베딩** | text-embedding-3-large (1024D) | float8 양자화, Matryoshka 축소 가능 |
+| **LLM** | Local LLM sidecars / DeepSeek `deepseek-v4-flash` | 기본은 로컬, hosted reasoning 필요 시 DeepSeek, Gemini는 batch/eval opt-in |
+| **임베딩** | Local `finance_embedding_model` | hosted embedding API 없이 로컬 벡터화 |
 | **LLM 프롬프트** | TOON + Markdown-KV + YAML | 토큰 40-60% 절감 — TOON (2025) |
 | **에이전트 통신** | MessagePack (기본) / C2C (확장) | 30% 작은 페이로드 / KV-cache 직접 통신 — C2C (2025) |
 | **수치 표현** | NumeroLogic `{digits:value}` | 토크나이저 파편화 방지 — NumeroLogic (EMNLP 2024) |
@@ -109,7 +109,7 @@ memory_note:
 
 | 설정 | 값 | 근거 |
 |------|-----|------|
-| 모델 | text-embedding-3-large | 금융 도메인 포함, Matryoshka 지원 |
+| 모델 | `finance_embedding_model` | 로컬 embedding sidecar, hosted embedding API 미사용 |
 | 차원 | 1024D (기본) → 256D (축소 시) | SMEC (2025): 축소 시 정보 손실 완화 |
 | 저장 정밀도 | float8 | 4x 압축, <0.3% 정확도 손실 |
 | 인덱스 | HNSW, M=16~32, efConstruction=200~400 | 표준 권장값 |

@@ -40,6 +40,7 @@ Finance 모델 하나만으로는 부족하다.
 금지:
 
 - Gemini runtime fallback
+- DeepSeek runtime fallback
 - OpenAI runtime fallback
 - Claude runtime fallback
 - 외부 hosted reranker

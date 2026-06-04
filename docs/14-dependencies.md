@@ -9,7 +9,7 @@
 | `python` | 3.12+ | 런타임 |
 | `langgraph` | ^1.0 | 에이전트 워크플로우 프레임워크 |
 | `langchain-core` | ^0.3 | LangGraph 의존, 체인/프롬프트 |
-| `langchain-google-genai` | latest | Gemini LLM 연동 |
+| `langchain-google-genai` | latest | Gemini batch/eval opt-in 연동 |
 | `mem0ai` | latest | 에이전트 메모리 통합 레이어 |
 | `asyncio` | stdlib | 비동기 에이전트 동시 실행 |
 | `pydantic` | ^2.0 | 데이터 모델, 스키마 검증 |
@@ -52,7 +52,7 @@
 
 | 패키지 | 버전 | 용도 |
 |--------|------|------|
-| `google-generativeai` | latest | Gemini API (LLM + 임베딩) |
+| `google-generativeai` | latest | Gemini batch/eval opt-in |
 | `tiktoken` | latest | 토큰 카운팅 |
 | `networkx` | latest | 에이전트 계층 구조 인메모리 그래프 |
 

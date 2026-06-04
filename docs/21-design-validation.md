@@ -174,7 +174,7 @@ MessagePack = 스키마프리 중 최고 직렬화 속도 + 30% 작은 페이로
 ## 8. 임베딩 저장 최적화
 
 ### 현재 설계
-text-embedding-3-large (1024D), float8, SQ int8 + oversampling, HNSW M=16~32
+`finance_embedding_model` local embedding (1024D 목표), float8, SQ int8 + oversampling, HNSW M=16~32
 
 ### 논문 근거
 

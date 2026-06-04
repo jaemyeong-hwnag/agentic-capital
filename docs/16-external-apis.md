@@ -4,17 +4,17 @@
 
 | API | 용도 | 인증 | 비용 모델 | 비고 |
 |-----|------|------|----------|------|
-| **Google Gemini API** | 에이전트 추론 (Pro/Flash) | API Key | 토큰 기반 (입력+출력) | 핵심 — 모든 에이전트 판단 |
-| **Google Embedding API** | text-embedding (768D/1024D) | API Key (동일) | 토큰 기반 | 에이전트 메모리 벡터화 |
-| OpenAI API (선택) | text-embedding-3-large (1024D) | API Key | 토큰 기반 | Gemini 임베딩 대안 |
+| **DeepSeek API** | hosted 에이전트 추론 | API Key | 토큰 기반 (입력+출력) | `LLM_PROVIDER=deepseek`일 때 사용. 기본 모델 `deepseek-v4-flash` |
+| **Google Gemini API** | Gemini batch/eval 또는 명시 baseline | API Key | 토큰 기반 (입력+출력) | `LLM_PROVIDER=gemini`일 때만 사용 |
+| Local embedding server | 로컬 임베딩 | 로컬 gateway 설정에 따름 | 로컬 운영비 | hosted embedding API를 추가하지 않는다 |
 
-### Gemini API 엔드포인트
+### Hosted LLM 정책
 
-| 모델 | 용도 | 입력 단가 | 출력 단가 |
-|------|------|----------|----------|
-| `gemini-2.5-pro` | CEO, 핵심 의사결정 | $1.25/1M tokens | $10.00/1M tokens |
-| `gemini-2.5-flash` | 일반 에이전트 판단 | $0.15/1M tokens | $0.60/1M tokens |
-| `text-embedding-004` | 메모리 임베딩 | $0.00/1M tokens (무료 티어) | — |
+| Provider | 기본 모델 | 사용 조건 |
+|----------|----------|----------|
+| `local` | `agentic_capital_react_model` + finance sidecars | 기본. 외부 LLM 비용/쿼터 없이 운영 |
+| `deepseek` | `deepseek-v4-flash` | Gemini batch/eval이 아닌 hosted reasoning이 필요할 때 |
+| `gemini` | `gemini-2.5-flash` | 명시적 Gemini baseline, batch/eval, 비교 실험 |
 
 ---
 
@@ -98,9 +98,9 @@
 
 | API | 일일 호출 | 제한 | 비고 |
 |-----|----------|------|------|
-| Gemini Pro | ~10회 | 1,500 RPD (무료) | CEO 의사결정 |
-| Gemini Flash | ~90회 | 15,000 RPD (무료) | 일반 에이전트 |
-| Embedding | ~100회 | 1,500 RPD (무료) | 메모리 벡터화 |
+| DeepSeek | provider 설정에 따른 agent cycle 수 | 계정/모델별 제한 | hosted reasoning opt-in |
+| Local LLM/Embedding | agent cycle + sidecar 호출 | 로컬 하드웨어 제한 | 기본 runtime |
+| Gemini | batch/eval 실행 수 | 계정/모델별 제한 | 명시 opt-in |
 | 거래소 시세 | ~200회 | 1,200/분 (Binance) | 시장 데이터 수집 |
 | 거래소 주문 | ~50회 | 10/초 (Binance) | 매매 실행 |
 | Yahoo Finance | ~50회 | 비공식 (제한 없음) | 재무 데이터 |

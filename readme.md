@@ -54,7 +54,7 @@ An AI multi-agent roleplay simulation where autonomous agents with distinct pers
 | Vector DB | pgvector (Phase 1) → Qdrant (Phase 2) | HNSW index for similarity search |
 | Cache/State | Redis 7+ | Working memory, emotion state, event streams |
 | Analytics | DuckDB + Parquet + Arrow IPC | Offline analysis, backtesting, data export |
-| LLM | Gemini 2.5 Pro / Flash | Pro: key decisions, Flash: routine tasks |
+| LLM | Local LLM sidecars / DeepSeek `deepseek-v4-flash` | Local-first runtime; DeepSeek for explicit hosted reasoning |
 | Prompt Format | TOON + Markdown-KV + YAML | 40-60% token reduction |
 | Agent Comms | LACP protocol + MessagePack | Structured messages (PLAN/ACT/OBSERVE/SIGNAL) |
 

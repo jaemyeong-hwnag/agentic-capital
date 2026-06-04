@@ -6,11 +6,17 @@
 # ============================================================
 # LLM API
 # ============================================================
-GEMINI_API_KEY=                    # Google AI Studio API Key (LLM_PROVIDER=gemini일 때만)
-OPENAI_API_KEY=                    # OpenAI API Key (text-embedding-3-large) — 임베딩용, 선택
+DEEPSEEK_API_KEY=                  # DeepSeek API Key (LLM_PROVIDER=deepseek일 때만, 값은 커밋 금지)
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_TIMEOUT_SECONDS=90
+DEEPSEEK_TEMPERATURE=0.7
+DEEPSEEK_MAX_TOKENS=512
+DEEPSEEK_SEND_NATIVE_TOOLS=false
+GEMINI_API_KEY=                    # Gemini batch/eval 등 명시 opt-in일 때만
 HF_TOKEN=                          # Hugging Face token. 현재 프로젝트 우선, 없으면 HUGGINGFACE_TOKEN fallback
 HUGGINGFACE_TOKEN=                 # legacy/forge 호환 Hugging Face token. 값은 커밋 금지
-LLM_PROVIDER=local                 # local | gemini. LOCAL_LLM_PROVIDER alias도 지원
+LLM_PROVIDER=local                 # local | deepseek | gemini. LOCAL_LLM_PROVIDER alias도 지원
 LOCAL_LLM_PROVIDER=local
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
@@ -90,8 +96,15 @@ LANGCHAIN_PROJECT=agentic-capital
 
 | 변수 | 필수 | 설명 |
 |------|------|------|
-| `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때 에이전트 reasoning provider |
-| `LLM_PROVIDER` | **필수** | 기본값은 `local`. `gemini` 또는 `local` 계열만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
+| `DEEPSEEK_API_KEY` | DeepSeek 모드 필수 | `LLM_PROVIDER=deepseek`일 때 hosted reasoning provider. 값은 `.env`에만 두고 커밋하지 않는다 |
+| `DEEPSEEK_BASE_URL` | DeepSeek 모드 선택 | 기본값 `https://api.deepseek.com/v1` |
+| `DEEPSEEK_MODEL` | DeepSeek 모드 선택 | 기본값 `deepseek-v4-flash` |
+| `DEEPSEEK_TIMEOUT_SECONDS` | DeepSeek 모드 선택 | Hosted reasoning timeout. 기본값 `90` |
+| `DEEPSEEK_TEMPERATURE` | DeepSeek 모드 선택 | Hosted reasoning temperature. 기본값 `0.7` |
+| `DEEPSEEK_MAX_TOKENS` | DeepSeek 모드 선택 | Hosted reasoning 응답 상한. 기본값 `512`; `0`이면 요청 payload에서 생략한다 |
+| `DEEPSEEK_SEND_NATIVE_TOOLS` | DeepSeek 모드 선택 | 기본값 `false`. tool schema는 기본적으로 compact system prompt로 전달한다 |
+| `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때만 사용한다. 일반 운영은 `local` 또는 `deepseek`를 우선한다 |
+| `LLM_PROVIDER` | **필수** | 기본값은 `local`. `local` 계열, `deepseek`, `gemini`만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
 | `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL. 독립 direct 모드 기본값은 `http://127.0.0.1:18183/v1` |
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
 | `LOCAL_AGENT_LLM_BASE_URL` | local+finance 모드 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 서버 `/v1` base URL. `LOCAL_LLM_MODEL=finance_*`이면 반드시 `LOCAL_LLM_BASE_URL`과 분리해야 하며, 없으면 시작 실패한다 |
@@ -131,7 +144,6 @@ LANGCHAIN_PROJECT=agentic-capital
 | `BINANCE_*` | 선택 (Phase 2) | 암호화폐 거래 시 필요 |
 | `UPBIT_*` | 선택 (Phase 2) | 국내 암호화폐 거래 시 필요 |
 | `ALPACA_*` | 선택 (Phase 2) | 미국 주식 직접 거래 시 필요 |
-| `OPENAI_API_KEY` | 선택 | Gemini 임베딩 사용 시 불필요 |
 | `HF_TOKEN` | 로컬 LLM 자동 다운로드 시 조건부 필수 | `scripts/run_local_paper_stack.sh`가 private HF repo에서 GGUF를 받을 때 사용. 현재 프로젝트 `.env` 값이 forge env보다 우선한다 |
 | `HUGGINGFACE_TOKEN` | 선택 | 기존 domain-llm-forge 호환 키. `HF_TOKEN`이 비어 있으면 런타임에서 `HF_TOKEN`으로 매핑한다 |
 | `LANGCHAIN_*` | 선택 | 개발/디버깅 시 트레이싱 |
@@ -141,7 +153,7 @@ LANGCHAIN_PROJECT=agentic-capital
 
 ### 주식 모드 (기본)
 ```
-LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Gemini 기준선은 gemini
+LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Hosted reasoning은 deepseek, Gemini batch/eval은 gemini
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
@@ -153,7 +165,9 @@ LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18184/v1
 LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:18080/v1
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
-GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
+DEEPSEEK_API_KEY        ← LLM_PROVIDER=deepseek일 때 필수
+DEEPSEEK_MODEL=deepseek-v4-flash
+GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때만 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수
@@ -197,7 +211,7 @@ LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18104/v1
 
 ### 선물 단타 모드
 ```
-LLM_PROVIDER=local      ← 로컬 sidecar 사용 시
+LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Hosted reasoning은 deepseek
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
@@ -209,7 +223,9 @@ LOCAL_FINANCE_RISK_GUARD_BASE_URL=http://127.0.0.1:18184/v1
 LOCAL_PSYCHOLOGY_BASE_URL=http://127.0.0.1:18080/v1
 LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
-GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때 필수
+DEEPSEEK_API_KEY        ← LLM_PROVIDER=deepseek일 때 필수
+DEEPSEEK_MODEL=deepseek-v4-flash
+GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때만 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수

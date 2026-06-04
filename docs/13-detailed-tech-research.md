@@ -170,7 +170,7 @@ heapq.heappush(event_queue, SimulationEvent(
 | 임베딩 모델 | 차원 | 용도 | 비용 |
 |-------------|------|------|------|
 | OpenAI `text-embedding-3-small` | 1536D | 고품질 시맨틱 검색 | $0.02/1M tokens |
-| OpenAI `text-embedding-3-large` | 3072D | 최고 품질 (필요 시) | $0.13/1M tokens |
+| Hosted commercial embedding API | provider별 상이 | 비교 연구용 baseline, 운영 기능에서는 미사용 | 토큰 기반 |
 | Sentence-Transformers `all-MiniLM-L6-v2` | 384D | 무료, 로컬 실행 가능 | 무료 |
 | Google `text-embedding-004` | 768D | Gemini 생태계 호환 | $0.00625/1M chars |
 
