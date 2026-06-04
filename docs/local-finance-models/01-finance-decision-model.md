@@ -4,6 +4,12 @@
 
 투자 질문을 곧장 매수/매도 결론으로 바꾸지 않고, 안전한 structured decision으로 변환한다. 이 모델은 live order 실행자가 아니라 decision 제안자다.
 
+## Parent Model
+
+- Runtime parent: `Qwen/Qwen3-4B-Instruct-2507`
+- Local artifact: `finance_decision_model.gguf` (`Q4_K_M`)
+- 선택 이유: 1.7B 계열은 schema/guard routing에는 충분하지만 paper trading decision에서는 `HOLD`/`WAIT` 편향과 근거-도구 결합 오류가 잦았다. 4B Instruct는 현재 M4 Pro 48GB 환경에서 agent/finance/psychology sidecar를 동시에 띄울 수 있는 상한 안에서 decision 품질과 latency 균형이 가장 좋다.
+
 ## Target Users
 
 - CEO / Analyst / Trader / Futures agent
@@ -61,9 +67,14 @@ decision:
 - risk limit snapshot
 - market session snapshot
 
-## RAG Requirement
+## Evidence Requirement
 
 필수. decision은 최신 계좌, 포지션, 시장 세션, 과거 outcome, risk limit 근거가 필요하다.
+다만 paper-only runtime에서는 RAG 문서 `evidence_ids`가 비어 있어도 `balance`,
+`positions`, `quote`, `ohlcv`, `market_signal`, `market_session`, `risk_limit`,
+`search_rag` read-only tool 결과가 모두 있고 risk/capital gate를 통과하면
+runtime tool evidence 자체로 risk-limited `paper_order_intent`를 보존할 수 있다.
+fabricated `evidence_ids` 또는 불완전 tool 결과는 hard fail이다.
 
 ## Evaluation Axes
 
@@ -80,11 +91,10 @@ decision:
 
 - seed regression hard fail 0
 - local eval hard fail 0
-- paper shadow에서 주문 없이 decision record 정상 기록
+- paper shadow에서 안전한 no-trade decision 또는 검증된 paper-only intent record 정상 기록
 - live-readonly에서 주문 intent가 adapter로 전달되지 않음
 
 ## Open Questions
 
-- 첫 base model은 Qwen3 1.7B, 4B, 8B 중 무엇인가?
 - futures 전용 decision head를 분리할 것인가?
 - confidence gate 기준을 action별로 다르게 둘 것인가?

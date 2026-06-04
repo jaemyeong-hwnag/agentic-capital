@@ -31,8 +31,12 @@ paper run 전 smoke query는 balance, position, quote, risk limit, evidence가 �
 
 `BUY` 또는 `SELL`이 허용되는 경우:
 
-- `evidence_ids`가 비어 있지 않다.
 - 필요한 tool 결과가 모두 존재한다.
+- RAG 문서 근거가 있으면 `evidence_ids`가 `search_rag.evidence_ids`로 덮여 있어야 한다.
+- RAG 문서 근거가 비어 있어도 paper-only runtime에서는 `get_balance`, `get_positions`,
+  `get_quote`, `get_ohlcv`, `market_signal`, `get_market_session`, `get_risk_limit`,
+  `search_rag` read-only 결과가 모두 있고 quote/risk/signal 값이 유효하면 runtime tool
+  evidence 자체로 `paper_order_intent`를 검증할 수 있다.
 - `required_tools`만 있고 실제 tool result가 없으면 startup smoke와 paper shadow 모두 실패한다.
 
 ## Runtime Guards
@@ -205,6 +209,9 @@ read-only tool result schema:
   `market_signal`, `get_market_session`, `get_risk_limit`, `search_rag` 결과가 모두 있어야
   shadow gate를 통과한다. OHLCV/market signal 부재 시 scout/order intent가 성과 후보 검증이 아니라
   루프 생존용 주문으로 변질될 수 있으므로 차단한다.
+- `search_rag.evidence_ids`가 비어 있어도 완전한 runtime read-only tool 결과는 paper-only
+  intent 근거가 될 수 있다. 반대로 모델이 임의의 `evidence_ids`를 만들었는데 `search_rag`가
+  이를 반환하지 않았으면 fabricated evidence로 보고 차단한다.
 - explicit local paper call-option symbols such as `K200_CALL_ATM` must return a deterministic `get_quote`
   price derived from the local KOSPI200 premium fallback when public quote vendors do not serve the symbol.
 - `get_market_session`/`market_session`: `state`, `session`, `is_open`,
