@@ -303,6 +303,36 @@ class TestKISTradingAdapter:
         assert any(fill.order_id == result.order_id for fill in fills)
 
     @pytest.mark.asyncio
+    async def test_submit_domestic_paper_nxt_reject_fills_locally(self):
+        adapter = self._make_adapter(is_paper=True)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "APBK9999",
+            "msg1": "NXT 모의투자 주문 시간이 아니거나 broker가 after session을 거절했습니다.",
+        }
+        adapter._session.post = AsyncMock(return_value=mock_response)
+        adapter._get_domestic_positions = AsyncMock(return_value=[])
+
+        order = Order(
+            symbol="114800",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=1,
+            price=941,
+            market=Market.KR_STOCK,
+            exchange="NXT",
+        )
+        result = await adapter.submit_order(order)
+
+        assert result.status == "filled"
+        assert result.order_id.startswith("PAPER-KR-")
+        assert result.metadata["paper_virtual"] is True
+        assert result.metadata["exchange"] == "NXT"
+        positions = await adapter.get_positions()
+        assert any(p.symbol == "114800" and p.exchange == "NXT" and p.quantity == 1 for p in positions)
+
+    @pytest.mark.asyncio
     async def test_get_order_status(self):
         adapter = self._make_adapter()
         mock_response = MagicMock()

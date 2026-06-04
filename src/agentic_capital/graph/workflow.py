@@ -579,6 +579,14 @@ def _tool_quote_price(tool_results: dict[str, Any]) -> float:
     return 0.0
 
 
+def _tool_market_exchange(tool_results: dict[str, Any]) -> str | None:
+    session = tool_results.get("get_market_session")
+    if not isinstance(session, dict):
+        return None
+    exchange = str(session.get("exchange") or "").strip().upper()
+    return exchange or None
+
+
 def _has_complete_read_only_tool_evidence(tool_results: dict[str, Any], *, market: str) -> bool:
     """Treat complete read-only runtime tool output as evidence for no-order recovery."""
     required = ("get_balance", "get_positions", "get_market_session", "get_risk_limit")
@@ -846,7 +854,7 @@ def _finance_paper_order_plan(
         "quantity": quantity,
         "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
         "estimated_price": price,
-        "exchange": decision.get("exchange") or record.get("exchange"),
+        "exchange": decision.get("exchange") or record.get("exchange") or _tool_market_exchange(tool_results),
         "position_effect": "close" if action == "SELL" else "open",
         "reason": str(decision.get("reason") or decision.get("rationale") or record.get("no_trade_reason") or ""),
         "recovery": False,
@@ -918,7 +926,7 @@ def _finance_loop_probe_order_plan(
             "quantity": quantity,
             "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
-            "exchange": record.get("exchange"),
+            "exchange": record.get("exchange") or _tool_market_exchange(tool_results),
             "position_effect": "close",
             "reason": "paper scout net-positive sell after finance_decision_model CALL_TOOL loop",
             "recovery": True,
@@ -959,7 +967,7 @@ def _finance_loop_probe_order_plan(
         "quantity": quantity,
         "price": price,
         "estimated_price": price,
-        "exchange": record.get("exchange"),
+        "exchange": record.get("exchange") or _tool_market_exchange(tool_results),
         "position_effect": "open",
         "reason": "paper scout recovery after finance_decision_model CALL_TOOL loop with complete tool evidence",
         "recovery": True,
@@ -1032,7 +1040,7 @@ def _finance_wait_probe_order_plan(
             "quantity": quantity,
             "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
             "estimated_price": price,
-            "exchange": record.get("exchange"),
+            "exchange": record.get("exchange") or _tool_market_exchange(tool_results),
             "position_effect": "close",
             "reason": f"paper scout net-positive sell after complete {no_order_action} no-order finance decision",
             "recovery": True,
@@ -1073,7 +1081,7 @@ def _finance_wait_probe_order_plan(
         "quantity": quantity,
         "price": price,
         "estimated_price": price,
-        "exchange": record.get("exchange"),
+        "exchange": record.get("exchange") or _tool_market_exchange(tool_results),
         "position_effect": "open",
         "reason": f"paper scout performance candidate after complete {no_order_action} no-order finance decision",
         "recovery": True,

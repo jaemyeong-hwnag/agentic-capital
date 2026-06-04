@@ -409,6 +409,7 @@ def test_finance_wait_probe_recovers_kr_stock_nxt_after_buy_signal():
     assert plan["action"] == "BUY"
     assert plan["symbol"] == "114800"
     assert plan["market"] == "kr_stock"
+    assert plan["exchange"] == "NXT"
     assert plan["quantity"] == 1
 
 

@@ -943,7 +943,10 @@ class KISTradingAdapter(TradingPort):
                     quantity=broker_order.quantity,
                     ord_dvsn=body["ORD_DVSN"],
                 )
-                if self._session.is_paper and self._domestic_paper_cash_reject(data) and broker_order.price:
+                if self._session.is_paper and broker_order.price and (
+                    self._domestic_paper_cash_reject(data)
+                    or str(broker_order.exchange or "").upper() == "NXT"
+                ):
                     return self._submit_paper_domestic_order(broker_order, broker_reject=data)
                 return OrderResult(
                     order_id="", symbol=broker_order.symbol, side=broker_order.side,
@@ -1027,7 +1030,7 @@ class KISTradingAdapter(TradingPort):
                 unrealized_pnl=(fill_price - new_avg) * new_qty,
                 unrealized_pnl_pct=((fill_price - new_avg) / new_avg * 100) if new_avg else 0.0,
                 market=order.market,
-                exchange="KRX",
+                exchange=order.exchange or "KRX",
                 currency="KRW",
             )
         else:
@@ -1057,7 +1060,7 @@ class KISTradingAdapter(TradingPort):
             status="filled",
             market=order.market,
             metadata={
-                "exchange": "KRX",
+                "exchange": order.exchange or "KRX",
                 "paper_virtual": True,
                 "broker": "local_paper_domestic_after_kis_reject",
                 "broker_reject_msg_cd": str((broker_reject or {}).get("msg_cd") or ""),
