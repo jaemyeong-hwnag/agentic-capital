@@ -56,7 +56,7 @@ psychology model suite도 별도로 필요하다.
 
 금지:
 
-- Gemini runtime fallback
+- 무기록 hosted runtime fallback
 - OpenAI runtime fallback
 - Claude runtime fallback
 - external hosted judge

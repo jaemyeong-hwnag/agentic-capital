@@ -20,7 +20,7 @@
 | **그래프 (Phase 2)** | Apache AGE (PG 확장) | 에이전트 관계/메모리 링크 그래프 탐색 — Cypher 쿼리, PG 내장 |
 | **상태/캐시** | Redis 7+ | Working Memory, 감정 상태, 이벤트 스트림 |
 | **분석** | DuckDB + Parquet + Arrow IPC | OLAP, 백테스팅, 논문 데이터 추출 |
-| **LLM** | Local LLM sidecars / DeepSeek `deepseek-v4-flash` | 기본은 로컬, hosted reasoning 필요 시 DeepSeek, Gemini는 batch/eval opt-in |
+| **LLM** | Local LLM sidecars / DeepSeek `deepseek-v4-flash` | 기본은 로컬, hosted reasoning/batch/eval 필요 시 DeepSeek |
 | **임베딩** | Local `finance_embedding_model` | hosted embedding API 없이 로컬 벡터화 |
 | **LLM 프롬프트** | TOON + Markdown-KV + YAML | 토큰 40-60% 절감 — TOON (2025) |
 | **에이전트 통신** | MessagePack (기본) / C2C (확장) | 30% 작은 페이로드 / KV-cache 직접 통신 — C2C (2025) |

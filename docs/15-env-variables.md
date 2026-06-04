@@ -13,14 +13,13 @@ DEEPSEEK_TIMEOUT_SECONDS=90
 DEEPSEEK_TEMPERATURE=0.7
 DEEPSEEK_MAX_TOKENS=512
 DEEPSEEK_SEND_NATIVE_TOOLS=false
-GEMINI_API_KEY=                    # Gemini batch/eval 등 명시 opt-in일 때만
 HF_TOKEN=                          # Hugging Face token. 현재 프로젝트 우선, 없으면 HUGGINGFACE_TOKEN fallback
 HUGGINGFACE_TOKEN=                 # legacy/forge 호환 Hugging Face token. 값은 커밋 금지
 LOCAL_LLM_AUTO_UPDATE=true         # 프로젝트 실행 시 HF 최신 GGUF 확인/적용
 LOCAL_LLM_HF_REVISION=main         # HF branch/tag/commit. 기본은 main 최신
 LOCAL_LLM_FORCE_DOWNLOAD=false     # true면 HF cache를 통해 강제 재다운로드
 LOCAL_LLM_RESTART_ON_UPDATE=true   # 모델 파일이 바뀌면 관련 로컬 LLM/paper loop 재기동
-LLM_PROVIDER=local                 # local | deepseek | gemini. LOCAL_LLM_PROVIDER alias도 지원
+LLM_PROVIDER=local                 # local | deepseek. legacy gemini/gemini_batch/gemini_eval 값도 DeepSeek로 라우팅
 LOCAL_LLM_PROVIDER=local
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
@@ -107,8 +106,7 @@ LANGCHAIN_PROJECT=agentic-capital
 | `DEEPSEEK_TEMPERATURE` | DeepSeek 모드 선택 | Hosted reasoning temperature. 기본값 `0.7` |
 | `DEEPSEEK_MAX_TOKENS` | DeepSeek 모드 선택 | Hosted reasoning 응답 상한. 기본값 `512`; `0`이면 요청 payload에서 생략한다 |
 | `DEEPSEEK_SEND_NATIVE_TOOLS` | DeepSeek 모드 선택 | 기본값 `false`. tool schema는 기본적으로 compact system prompt로 전달한다 |
-| `GEMINI_API_KEY` | Gemini 모드 필수 | `LLM_PROVIDER=gemini`일 때만 사용한다. 일반 운영은 `local` 또는 `deepseek`를 우선한다 |
-| `LLM_PROVIDER` | **필수** | 기본값은 `local`. `local` 계열, `deepseek`, `gemini`만 허용하며, 알 수 없는 값은 Gemini로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
+| `LLM_PROVIDER` | **필수** | 기본값은 `local`. `local` 계열 또는 `deepseek`를 사용한다. legacy `gemini`, `gemini_batch`, `gemini-batch`, `gemini_eval`, `gemini_batch_eval` 값은 Google API가 아니라 DeepSeek `deepseek-v4-flash`로 라우팅한다. 알 수 없는 값은 hosted API로 fallback하지 않고 실패한다. `LOCAL_LLM_PROVIDER`도 호환 alias로 읽음 |
 | `LOCAL_LLM_BASE_URL` | local 모드 필수 | OpenAI-compatible 로컬 서버 또는 domain-llm-forge RAG Gateway `/v1` base URL. 독립 direct 모드 기본값은 `http://127.0.0.1:18183/v1` |
 | `LOCAL_LLM_MODEL` | local 모드 필수 | 기본값 `finance_decision_model` |
 | `LOCAL_AGENT_LLM_BASE_URL` | local+finance 모드 필수 | CEO/Analyst 등 일반 ReAct agent용 로컬 서버 `/v1` base URL. `LOCAL_LLM_MODEL=finance_*`이면 반드시 `LOCAL_LLM_BASE_URL`과 분리해야 하며, 없으면 시작 실패한다 |
@@ -161,7 +159,7 @@ LANGCHAIN_PROJECT=agentic-capital
 
 ### 주식 모드 (기본)
 ```
-LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Hosted reasoning은 deepseek, Gemini batch/eval은 gemini
+LLM_PROVIDER=local      ← 로컬 sidecar 사용 시. Hosted reasoning/batch/eval은 deepseek
 LOCAL_LLM_BASE_URL=http://127.0.0.1:18183/v1
 LOCAL_LLM_MODEL=finance_decision_model
 LOCAL_AGENT_LLM_BASE_URL=http://127.0.0.1:19000/v1
@@ -175,7 +173,6 @@ LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
 DEEPSEEK_API_KEY        ← LLM_PROVIDER=deepseek일 때 필수
 DEEPSEEK_MODEL=deepseek-v4-flash
-GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때만 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수
@@ -233,7 +230,6 @@ LOCAL_EMBEDDING_MODEL=finance_embedding_model
 LOCAL_LLM_SEND_NATIVE_TOOLS=false
 DEEPSEEK_API_KEY        ← LLM_PROVIDER=deepseek일 때 필수
 DEEPSEEK_MODEL=deepseek-v4-flash
-GEMINI_API_KEY          ← LLM_PROVIDER=gemini일 때만 필수
 DATABASE_URL            ← 필수
 REDIS_URL               ← 필수
 KIS_APP_KEY             ← 필수

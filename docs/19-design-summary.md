@@ -116,7 +116,7 @@ pnl_today:15000,fee_today:500,op_cost:10000,net_today:4500
 | 언어 | Python 3.12+ | AI 생태계 표준 |
 | 에이전트 프레임워크 | LangGraph v1.0 | FinCon (NeurIPS 2024), TradingAgents |
 | 에이전트 메모리 | A-MEM (Zettelkasten) | A-MEM (NeurIPS 2025) |
-| LLM | Gemini 2.5 Flash | 주식/선물 모든 에이전트 공통 사용 |
+| LLM | Local sidecars / DeepSeek `deepseek-v4-flash` | 기본 로컬, hosted reasoning/batch/eval은 DeepSeek |
 
 ### Data
 
@@ -277,5 +277,5 @@ Reflection (성격 변동, 전략 학습, q_value 업데이트)
 | 이벤트 루프 | 미정의 | 일/시간 단위 시뮬레이션 트리거 방식 |
 | 감정→판단 영향 | VAD 모델 정의됨 | 감정 파라미터가 투자 판단에 미치는 구체적 가중치 |
 | LangGraph 상태 그래프 | 미정의 | 에이전트 워크플로우 노드/엣지 설계 |
-| Adapter 인터페이스 | ✅ Port ABC 구현 완료 | 구체 Adapter 구현 (KIS, Gemini 등) |
+| Adapter 인터페이스 | ✅ Port ABC 구현 완료 | 구체 Adapter 구현 (KIS, DeepSeek, local 등) |
 | 프롬프트 템플릿 | 포맷만 정의 | 실제 시스템/유저 프롬프트 작성 |

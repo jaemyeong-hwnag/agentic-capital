@@ -1,10 +1,16 @@
 # Changelog
 
+## [0.34.1] - 2026-06-04
+
+- Routed all hosted LLM paths, including legacy `gemini`/`gemini_batch`/`gemini_eval` aliases, to DeepSeek `deepseek-v4-flash`.
+- Removed the Gemini adapter, Google GenAI dependencies, and `GEMINI_API_KEY` configuration.
+- Recorded requested provider metadata separately from the canonical DeepSeek runtime provider.
+
 ## [0.33.0] - 2026-06-04
 
 - Added DeepSeek hosted LLM provider support with `deepseek-v4-flash` as the default model.
 - Removed unused OpenAI API key configuration and documented local embeddings as the non-hosted default.
-- Updated runtime docs so Gemini remains explicit opt-in for batch/eval or baseline use only.
+- Updated runtime docs for explicit hosted-provider opt-in.
 
 ## [0.30.5] - 2026-06-02
 

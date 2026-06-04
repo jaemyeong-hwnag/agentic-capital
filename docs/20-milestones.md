@@ -6,7 +6,7 @@
 
 ```
 실행 흐름 — 주식 모드 (기본):
-1. .env 설정 (GEMINI_API_KEY, DATABASE_URL, REDIS_URL, KIS_*)
+1. .env 설정 (`LLM_PROVIDER=local` 또는 `deepseek`, DATABASE_URL, REDIS_URL, KIS_*)
 2. INITIAL_CAPITAL 설정 (KRW)
 3. `python -m agentic_capital.main` 실행
 4. AI가 자율적으로 조직 구성 → 전략 수립 → KRX + NASDAQ/NYSE 투자 시작
@@ -172,7 +172,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 | 4.5 | MarketDataPort ABC (시세/OHLCV/뉴스) | `ports/market_data.py` | ✅ |
 | 4.6 | LLMPort ABC (추론/임베딩) | `ports/llm.py` | ✅ |
 | 4.7 | Paper Trading Adapter (시뮬레이션) | `adapters/trading/paper.py` | ✅ |
-| 4.8 | Gemini LLM Adapter | `adapters/llm/gemini.py` | ✅ |
+| 4.8 | Hosted/Local LLM Adapter | `adapters/llm/router.py`, `adapters/llm/deepseek.py`, `adapters/llm/local_openai.py` | ✅ |
 | 4.9 | KIS 시세 Adapter | `adapters/market_data/kis.py` | ✅ |
 | 4.10 | KIS Adapter (한국투자증권) | `adapters/trading/kis.py` | ✅ |
 | 4.11 | KISSession (공유 토큰 + rate limiting) | `adapters/kis_session.py` | ✅ |
@@ -185,7 +185,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 - KISSession: 토큰 공유, 350ms 요청 스로틀링, rate limit 자동 재시도
 - KIS Trading: 잔고 조회, 포지션 조회, 주문 전송 (모의투자/실전)
 - KIS MarketData: 현재가 조회, OHLCV 일봉, 주요 종목 목록
-- Gemini LLM: gemini-2.5-flash 텍스트 생성 + text-embedding-004 임베딩
+- LLM provider: 로컬 sidecar 기본, hosted 필요 시 DeepSeek `deepseek-v4-flash`; 임베딩은 로컬 모델 사용
 - Paper Trading: 로컬 시뮬레이션용 가상 트레이딩
 - LACP 통신 프로토콜 + MessagePack 직렬화
 
@@ -197,7 +197,7 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 - [x] LACP 메시지 모델 정의
 - [x] Paper Trading으로 가상 매매 가능
-- [x] Gemini API 연동 (프롬프트 → 응답)
+- [x] DeepSeek hosted API 연동 (프롬프트 → 응답)
 - [x] KIS 시세 + 모의투자 주문 동작 확인
 - [x] Port 인터페이스로 Adapter 교체 가능 확인
 - [x] 테스트 커버리지 80%+
@@ -317,13 +317,13 @@ M1 프로젝트 기반 ✅  → M2 Core 엔진 ✅    → M3 에이전트 시스
 
 ## M8: 로컬 LLM 전환
 
-> Gemini quota와 외부 LLM 장애에 의존하지 않고 1시간 단위 판단을 지속하기 위한 로컬 reasoning kernel.
+> Hosted LLM quota와 외부 API 장애에 의존하지 않고 1시간 단위 판단을 지속하기 위한 로컬 reasoning kernel.
 
 ### 태스크
 
 | # | 태스크 | 산출물 | 상태 |
 |---|--------|--------|------|
-| 8.1 | LLM provider abstraction 정리 | Gemini/local/hybrid provider switch | ⬚ |
+| 8.1 | LLM provider abstraction 정리 | local/DeepSeek provider switch | ✅ |
 | 8.2 | Local OpenAI-compatible adapter | Ollama/llama.cpp/vLLM/LM Studio 호환 | ⬚ |
 | 8.3 | tool calling/structured output 호환 | ReAct tool schema, JSON repair | ⬚ |
 | 8.4 | local eval harness | golden scenarios + QA metrics | ⬚ |

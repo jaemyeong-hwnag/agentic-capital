@@ -4,8 +4,7 @@
 
 | API | 용도 | 인증 | 비용 모델 | 비고 |
 |-----|------|------|----------|------|
-| **DeepSeek API** | hosted 에이전트 추론 | API Key | 토큰 기반 (입력+출력) | `LLM_PROVIDER=deepseek`일 때 사용. 기본 모델 `deepseek-v4-flash` |
-| **Google Gemini API** | Gemini batch/eval 또는 명시 baseline | API Key | 토큰 기반 (입력+출력) | `LLM_PROVIDER=gemini`일 때만 사용 |
+| **DeepSeek API** | hosted 에이전트 추론, batch/eval, legacy hosted alias 처리 | API Key | 토큰 기반 (입력+출력) | `LLM_PROVIDER=deepseek`일 때 사용. 기본 모델 `deepseek-v4-flash` |
 | Local embedding server | 로컬 임베딩 | 로컬 gateway 설정에 따름 | 로컬 운영비 | hosted embedding API를 추가하지 않는다 |
 
 ### Hosted LLM 정책
@@ -13,8 +12,8 @@
 | Provider | 기본 모델 | 사용 조건 |
 |----------|----------|----------|
 | `local` | `agentic_capital_react_model` + finance sidecars | 기본. 외부 LLM 비용/쿼터 없이 운영 |
-| `deepseek` | `deepseek-v4-flash` | Gemini batch/eval이 아닌 hosted reasoning이 필요할 때 |
-| `gemini` | `gemini-2.5-flash` | 명시적 Gemini baseline, batch/eval, 비교 실험 |
+| `deepseek` | `deepseek-v4-flash` | hosted reasoning, batch/eval, 외부 baseline이 필요할 때 |
+| `gemini`, `gemini_batch`, `gemini-batch`, `gemini_eval`, `gemini_batch_eval` | `deepseek-v4-flash` | legacy 설정 호환 alias. Google API가 아니라 DeepSeek로 라우팅 |
 
 ---
 
@@ -100,7 +99,6 @@
 |-----|----------|------|------|
 | DeepSeek | provider 설정에 따른 agent cycle 수 | 계정/모델별 제한 | hosted reasoning opt-in |
 | Local LLM/Embedding | agent cycle + sidecar 호출 | 로컬 하드웨어 제한 | 기본 runtime |
-| Gemini | batch/eval 실행 수 | 계정/모델별 제한 | 명시 opt-in |
 | 거래소 시세 | ~200회 | 1,200/분 (Binance) | 시장 데이터 수집 |
 | 거래소 주문 | ~50회 | 10/초 (Binance) | 매매 실행 |
 | Yahoo Finance | ~50회 | 비공식 (제한 없음) | 재무 데이터 |

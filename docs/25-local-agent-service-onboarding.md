@@ -4,7 +4,7 @@
 
 이 문서는 `Agentic Capital`을 외부 AI API 중심 구조에서 로컬 에이전트(Local Agent) 중심 구조로 전환하기 위한 단일 온보딩 명세다.
 
-현재 프로젝트에는 `docs/23-local-llm-roadmap.md`와 `docs/24-local-agent-data-strategy.md`가 있지만, 재분석 결과 그것만으로는 충분하지 않다. 기존 문서는 QA/RAG/학습 데이터 방향을 잡는 데는 유효하지만, 실제 운영에서 Gemini 호출을 끊고 로컬 모델로 전환하기 위한 provider, runtime, eval, records, deployment gate 명세가 부족하다.
+현재 프로젝트에는 `docs/23-local-llm-roadmap.md`와 `docs/24-local-agent-data-strategy.md`가 있지만, 재분석 결과 그것만으로는 충분하지 않다. 기존 문서는 QA/RAG/학습 데이터 방향을 잡는 데는 유효하지만, 실제 운영에서 hosted LLM 호출을 DeepSeek로 통제하고 로컬 모델로 전환하기 위한 provider, runtime, eval, records, deployment gate 명세가 부족하다.
 
 이 문서는 서비스 온보딩 가이드의 원칙에 맞춰 먼저 서비스 계약, 실패 기준, 기록 체계, 평가 기준을 정의한다. QA 생성, SFT, RAG 구축, 배포는 이 명세가 기준이 된다.
 
@@ -17,7 +17,7 @@
 | target_users | Agentic Capital 운영자, 로컬 모델 평가자, trading agent runtime |
 | deployment_target | local_eval → local_paper → local_live_readonly → local_live_guarded |
 | default_model_family | OpenAI-compatible local server behind Ollama, llama.cpp, vLLM, SGLang, LM Studio, or MLX |
-| current_external_baseline | Gemini 2.5 Flash / Gemini embedding |
+| current_external_baseline | DeepSeek `deepseek-v4-flash` / local embedding |
 
 ## Current Project Findings
 
@@ -25,17 +25,17 @@
 
 | 영역 | 현재 상태 | 판단 |
 |---|---|---|
-| Config | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_EMBEDDING_MODEL` 지원 | `.env`에서 Gemini/local 전환 가능 |
+| Config | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_EMBEDDING_MODEL` 지원 | `.env`에서 local/DeepSeek 전환 가능 |
 | LLMPort | `LLMPort.generate/embed`와 `LocalOpenAICompatibleAdapter` 존재 | domain-llm-forge RAG Gateway 또는 llama-server 연결 가능 |
-| Main ReAct loop | `graph/workflow.py`가 router를 통해 LangChain chat model 생성 | Gemini 직접 고정 제거 |
+| Main ReAct loop | `graph/workflow.py`가 router를 통해 LangChain chat model 생성 | hosted provider를 DeepSeek로 통제 |
 | Futures ReAct loop | `simulation/futures_engine.py`가 router를 통해 LangChain chat model 생성 | 모의 선물 루프도 local provider 사용 가능 |
-| SimulationEngine | `_init_adapters()`가 `build_llm_adapter()` 사용 | local/gemini 선택 가능 |
+| SimulationEngine | `_init_adapters()`가 `build_llm_adapter()` 사용 | local/DeepSeek 선택 가능 |
 | Recorder | `llm_model`, `embedding_model`, provider metadata를 runtime 설정에서 기록 | 재현성/비용 분석 가능 |
 | Agent cycles | tool sequence, reasoning, economics 저장 | 학습/eval 원천으로 적합 |
 | Memory/RAG | JSONB embedding + cosine search 중심 | 운영 RAG에는 metadata/hybrid/rerank/small-to-big 부족 |
 | Dataset exporter | 없음 | DB 로그를 JSONL/Parquet로 내보내는 명세/구현 필요 |
 | Eval runner | 없음 | seed QA registry를 실제 local model에 실행하는 harness 필요 |
-| Docs | env/external API 문서는 Gemini 필수 구조 | local mode 기준으로 동기화 필요 |
+| Docs | env/external API 문서는 local/DeepSeek 구조 | runtime 변경 시 동기화 필요 |
 
 결론: `docs/24-local-agent-data-strategy.md`는 필요하지만 충분하지 않다. 실제 local agent 서비스 완료에는 runtime/provider/eval/records/deploy gate까지 필요하다.
 
@@ -46,7 +46,7 @@
 1. 외부 LLM API quota와 비용 폭발을 제거하거나 통제한다.
 2. 에이전트 수가 증가해도 1시간 단위 판단 루프를 지속한다.
 3. 자본/보유수량/브로커 권한 제약을 위반하지 않는다.
-4. tool calling, structured output, RAG evidence grounding 품질을 Gemini baseline과 비교한다.
+4. tool calling, structured output, RAG evidence grounding 품질을 DeepSeek hosted baseline과 비교한다.
 5. 최종 성과는 총수익이 아니라 수수료, 슬리피지, AI/장비 비용 차감 후 `decision_roi`로 평가한다.
 
 ## Target Users
@@ -60,7 +60,7 @@
 
 | Task | 설명 |
 |---|---|
-| provider selection | local, gemini, hybrid, disabled fallback 정책 선택 |
+| provider selection | local, DeepSeek, hybrid, disabled fallback 정책 선택 |
 | local health check | 모델 서버 readiness, sample completion, embedding endpoint 확인 |
 | tool calling | 기존 LangChain StructuredTool을 local-friendly schema로 제공 |
 | structured output | JSON Schema, enum, numeric bounds, required fields 검증 |
@@ -74,7 +74,7 @@
 ## Out-of-Scope Tasks
 
 - local model이 자본/보유수량/브로커 권한을 우회하는 것
-- Gemini fallback을 조용히 실행하는 것
+- hosted fallback을 조용히 실행하는 것
 - eval 없이 SFT부터 시작하는 것
 - 사람이 검토하지 않은 redteam 실패를 무시하고 배포하는 것
 - tool hallucination을 postprocess로 숨기는 것
@@ -115,7 +115,7 @@ decision:
 | hallucinated_tool | 존재하지 않는 tool 호출 | allowlist + schema validator |
 | hallucinated_symbol | quote/evidence 없는 symbol 주문 | symbol validation + reject |
 | invalid_json | required field 누락/enum 오류 | repair once, then fail |
-| unsafe_fallback | 실전에서 무기록 Gemini fallback | provider event mandatory |
+| unsafe_fallback | 실전에서 무기록 hosted fallback | provider event mandatory |
 | stale_market_state | stale quote/session으로 주문 | timestamp freshness gate |
 | unsupported_rag_claim | evidence 없는 최신/기관별 사실 단정 | evidence id required |
 | bad_numeric_reasoning | 수수료/슬리피지/수량 계산 오류 | Program-of-Thought/tool calculation |
@@ -310,13 +310,13 @@ service:
   output_model: "local/agentic-capital-qwen3-1.7b"
 
 provider:
-  mode: "local"          # local | gemini | hybrid | disabled
+  mode: "local"          # local | deepseek | hybrid | disabled
   local_base_url: "http://127.0.0.1:11434/v1"
   local_model: "qwen3:1.7b"
   embedding_model: "local/bge-m3"
   fallback:
     enabled: false
-    target: "gemini"
+    target: "deepseek"
     allowed_modes: ["local_eval", "hybrid_review"]
 
 qa:
@@ -404,7 +404,7 @@ Implemented:
   SimulationEngine/FuturesEngine
     -> LLMRouter
       -> LocalOpenAICompatibleAdapter / LocalOpenAICompatibleChatModel
-      -> GeminiLLMAdapter / ChatGoogleGenerativeAI only when LLM_PROVIDER=gemini
+      -> DeepSeekLLMAdapter / DeepSeekChatModel when LLM_PROVIDER is deepseek or legacy gemini/gemini_batch/gemini_eval alias
 ```
 
 핵심 원칙:
@@ -481,7 +481,7 @@ local_eval
 |---|---|
 | 첫 local model은 무엇인가? | OpenAI-compatible Qwen 1.7B/3B 계열 |
 | embedding은 local로 갈 것인가? | yes, bge/e5 계열 후보 |
-| Gemini fallback을 허용할 것인가? | 실전 기본 false, eval/hybrid review에서만 true |
+| DeepSeek hosted fallback을 허용할 것인가? | 실전 기본 false, eval/hybrid review에서만 true |
 | RAG vector store는 PG JSONB 유지인가 pgvectorscale인가? | eval 단계는 JSONB 가능, 운영은 pgvectorscale/hybrid 권장 |
 | agent별 모델 라우팅을 할 것인가? | CEO는 큰 모델, Analyst/Trader는 작은 모델 후보 |
 | live 주문 전 human review가 필요한가? | local_live_guarded 초기에는 yes 권장 |
@@ -526,7 +526,7 @@ config/local_agent.yaml
 1. provider config와 `.env.example` placeholder 추가
 2. `LocalOpenAICompatibleAdapter`와 local embedding adapter 추가
 3. `LLMRouter` 추가
-4. `workflow.py`와 `futures_engine.py`의 direct Gemini 생성 제거
+4. `workflow.py`와 `futures_engine.py`의 direct hosted model 생성 제거
 5. recorder에 provider/model/backend/latency/fallback metadata 기록
 6. local eval runner 작성
 7. dataset exporter 작성
@@ -563,7 +563,7 @@ config/local_agent.yaml
 - eval guard와 quality policy의 역할이 명확함
 - RAG 필요 여부와 retrieval data contract가 정의됨
 - records plan과 incident/deploy/eval 기록 기준이 있음
-- 현재 프로젝트에서 direct Gemini 호출 경로가 식별됨
+- 현재 프로젝트에서 direct hosted 호출 경로가 router로 통제됨
 - 구현 순서가 provider/runtime/eval/export/RAG/deploy 순서로 정리됨
 
 현재 상태는 **문서 온보딩 초안 완료**이며, 실제 외부 API 비용 절감을 위해서는 Runtime Architecture Requirement부터 구현해야 한다.

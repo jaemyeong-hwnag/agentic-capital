@@ -21,7 +21,7 @@
 │  └──────────┘ └──────────┘ └──────────┘             │
 ├──────────────────────────────────────────────────────┤
 │                   External APIs                       │
-│  Gemini │ Binance │ Upbit │ Alpaca │ KIS │ Yahoo    │
+│ DeepSeek│ Binance │ Upbit │ Alpaca │ KIS │ Yahoo    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -96,7 +96,7 @@ volumes:
 | 서버 (EC2 t3.large) | ~$60 |
 | DB (RDS t3.medium) | ~$30 |
 | Redis (ElastiCache) | ~$15 |
-| Gemini API | ~$20 |
+| DeepSeek API | ~$20 |
 | 거래소 API | $0 (거래 수수료 별도) |
 | **합계** | **~$125/월** |
 

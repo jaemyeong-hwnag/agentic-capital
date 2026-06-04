@@ -2,14 +2,14 @@
 
 ## 핵심 목표
 
-Gemini quota나 외부 API 장애 때문에 실전/모의 운영이 멈추지 않도록, `Agentic Capital`의 reasoning kernel을 로컬 LLM으로도 실행 가능하게 만든다.
+Hosted LLM quota나 외부 API 장애 때문에 실전/모의 운영이 멈추지 않도록, `Agentic Capital`의 reasoning kernel을 로컬 LLM으로도 실행 가능하게 만든다.
 
 단, 로컬 LLM 전환의 목적은 "AI 비용 0원"이 아니다. 목표는 다음 순서다.
 
 ```
 1. 외부 quota 의존성 제거
 2. 1시간 단위 판단 지속성 확보
-3. 매매 판단 품질을 기존 Gemini 기준과 비교 검증
+3. 매매 판단 품질을 DeepSeek hosted baseline과 비교 검증
 4. 기능 호출(tool calling), JSON 출력, 자본 제약 준수율을 실전 수준까지 올림
 5. 실제 비용: 전기/장비/운영/지연시간까지 포함해 decision ROI로 평가
 ```
@@ -33,7 +33,7 @@ Gemini quota나 외부 API 장애 때문에 실전/모의 운영이 멈추지 �
 ```
 Agent / LangGraph
   -> LLMRouter
-     -> GeminiAdapter
+     -> DeepSeekAdapter
      -> LocalOpenAICompatibleAdapter
      -> LocalLlamaCppAdapter
      -> LocalMLXAdapter
@@ -49,7 +49,7 @@ Trading / MarketData
 | OpenAI-compatible local server | 1차 표준 인터페이스 | Ollama, llama.cpp server, vLLM, LM Studio 계열과 호환 쉬움 | tool calling 호환 차이 |
 | llama.cpp direct/server | CPU/GPU 저사양 fallback | GGUF 생태계, 단순 운영 | 긴 context/JSON 안정성 한계 |
 | MLX local | Apple Silicon 최적화 | Mac 로컬 실험 속도 좋음 | 서버/배포 표준화 추가 필요 |
-| Gemini | benchmark/fallback | 기준선 비교, 고난도 판단 | quota/비용/외부 의존 |
+| DeepSeek | benchmark/hosted review | 기준선 비교, 고난도 판단 | quota/비용/외부 의존 |
 
 권장 순서는 `OpenAI-compatible local server`를 1차로 구현하고, 모델 서빙은 환경에 맞게 뒤에서 교체한다.
 
@@ -59,17 +59,17 @@ Trading / MarketData
 
 | 작업 | 산출물 | 완료 기준 |
 |------|--------|----------|
-| `LLMProvider` 설정 추가 | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL` | `.env`에서 Gemini/local 전환 가능 |
+| `LLMProvider` 설정 추가 | `LLM_PROVIDER`, `LOCAL_LLM_PROVIDER` alias, `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL` | `.env`에서 local/DeepSeek 전환 가능 |
 | LangGraph용 local chat model adapter | `LocalOpenAICompatibleChatModel` | `create_react_agent`에서 동일 tool 목록 사용 |
 | provider health check | `/health` 또는 sample completion | 시작 전 모델 서버 미기동 감지 |
-| provider fallback 정책 | local 우선, Gemini fallback 또는 반대 | fallback 여부가 DB에 기록됨 |
+| provider fallback 정책 | local 우선, DeepSeek hosted review 또는 반대 | fallback 여부가 DB에 기록됨 |
 
 주의: fallback은 실전에서 조용히 provider를 바꾸면 판단 재현성이 깨진다. `simulation_runs.config`와 `agent_cycles.economics_snapshot`에 provider/model을 반드시 남긴다.
 
 현재 런타임 상태:
 
-- `SimulationEngine`의 `LLMPort` 생성은 `adapters/llm/router.py`를 통해 `GeminiLLMAdapter` 또는 `LocalOpenAICompatibleAdapter`를 선택한다.
-- 메인 LangGraph ReAct loop와 futures ReAct loop는 `build_langchain_chat_model()`을 통해 `ChatGoogleGenerativeAI` 또는 `LocalOpenAICompatibleChatModel`을 선택한다.
+- `SimulationEngine`의 `LLMPort` 생성은 `adapters/llm/router.py`를 통해 `DeepSeekLLMAdapter` 또는 `LocalOpenAICompatibleAdapter`를 선택한다.
+- 메인 LangGraph ReAct loop와 futures ReAct loop는 `build_langchain_chat_model()`을 통해 `DeepSeekChatModel` 또는 `LocalOpenAICompatibleChatModel`을 선택한다.
 - `simulation_runs.llm_model`, `simulation_runs.embedding_model`, `simulation_runs.config.llm_provider`, `agent_cycles.economics_snapshot`에 provider/model metadata를 기록한다.
 - 로컬 provider는 OpenAI-compatible `/v1/chat/completions`와 `/v1/embeddings`를 사용하므로 `domain-llm-forge` RAG Gateway 또는 `llama-server` 뒤에 붙일 수 있다.
 - 기본 local ReAct tool calling은 OpenAI native `tools` payload를 보내지 않고, compact tool schema를 system prompt에 주입한다. `LOCAL_LLM_SEND_NATIVE_TOOLS=true`는 해당 서버가 native tool calling을 실제로 지원하는 경우에만 사용한다.
@@ -196,7 +196,7 @@ redteam: 일부러 위험한 주문/잘못된 tool/환각 심볼을 유도
 | `local_paper` | KIS paper 또는 paper adapter | 가능 |
 | `local_live_readonly` | 실계좌 조회 + 판단 기록 | 주문 불가 |
 | `local_live_guarded` | 실계좌 주문 허용, 기존 가드 유지 | 가능 |
-| `hybrid_review` | local 판단 + Gemini/다른 모델 교차검증 | 정책에 따라 가능 |
+| `hybrid_review` | local 판단 + DeepSeek/다른 모델 교차검증 | 정책에 따라 가능 |
 
 실전 전환 순서:
 
@@ -305,7 +305,7 @@ decision_latency_p95
 real account state -> local LLM decision -> record only
 actual order: disabled
 compare against:
-  1. Gemini 판단
+  1. DeepSeek hosted 판단
   2. rule baseline
   3. buy-and-hold / no-trade baseline
 ```
@@ -327,7 +327,7 @@ compare against:
 
 | 기능 | 설명 |
 |------|------|
-| provider switch | Gemini/local/hybrid 선택 |
+| provider switch | local/DeepSeek/hybrid 선택 |
 | local health check | 시작 전 서버/모델 확인 |
 | structured tool call | 기존 도구를 로컬 모델이 호출 가능 |
 | output repair | JSON/tool call 복구 단계 |
@@ -344,7 +344,7 @@ compare against:
 | confidence gate | 확신/품질 낮으면 주문 금지 또는 human review |
 | model ensemble | local 여러 모델 투표 |
 | adaptive context | 시장 상황별 prompt 압축 수준 조정 |
-| distillation pipeline | 좋은 Gemini/local 판단을 작은 모델에 학습 |
+| distillation pipeline | 좋은 DeepSeek/local 판단을 작은 모델에 학습 |
 
 ## 리스크와 대응
 
