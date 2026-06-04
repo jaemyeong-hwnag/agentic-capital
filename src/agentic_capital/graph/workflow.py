@@ -1614,8 +1614,16 @@ async def _run_local_finance_agent_cycle(
     }
 
     async def _collect_tool_results(payload: dict[str, Any]) -> dict[str, Any]:
+        tool_plan_payload = payload.get("tool_plan") if isinstance(payload.get("tool_plan"), dict) else payload
+        if isinstance(tool_plan_payload, dict) and candidate_scan.get("selected_by") == "runtime_market_signal":
+            tool_plan_payload = {
+                **tool_plan_payload,
+                "symbol": primary_symbol,
+                "market": primary_market,
+                "runtime_candidate_override": candidate_scan,
+            }
         return await collect_finance_decision_tool_results(
-            tool_plan_payload=payload.get("tool_plan") if isinstance(payload.get("tool_plan"), dict) else payload,
+            tool_plan_payload=tool_plan_payload,
             trading=trading,
             market_data=market_data,
             symbol=primary_symbol,

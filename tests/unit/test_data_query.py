@@ -308,6 +308,30 @@ async def test_collect_finance_decision_tool_results_records_inner_broker_balanc
     assert balance["broker_balance"]["available"] == 49_707_530
 
 
+@pytest.mark.asyncio
+async def test_collect_finance_decision_tool_results_prefers_top_level_runtime_symbol() -> None:
+    market_data = _make_market_data()
+
+    await collect_finance_decision_tool_results(
+        tool_plan_payload={
+            "symbol": "251340",
+            "tool_plan": [
+                {"tool": "get_quote", "args": {"symbol": "005930"}},
+                {"tool": "get_ohlcv", "args": {"symbol": "005930"}},
+            ],
+        },
+        trading=_make_trading(),
+        market_data=market_data,
+        symbol="251340",
+        market="kr_stock",
+        open_markets=["KRX"],
+        capital_limit=1_000_000,
+    )
+
+    market_data.get_quote.assert_awaited_with("251340")
+    market_data.get_ohlcv.assert_awaited_with("251340", timeframe="15m", limit=8)
+
+
 def test_market_signal_marks_recent_positive_reversal_as_buy_candidate() -> None:
     signal = _market_signal_from_ohlcv(
         [
