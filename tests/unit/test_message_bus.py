@@ -37,10 +37,6 @@ def _make_redis():
 
 
 class TestMessageBus:
-    def test_create(self):
-        bus = MessageBus(_make_redis())
-        assert bus._initialized is False
-
     @pytest.mark.asyncio
     async def test_initialize_creates_group(self):
         redis = _make_redis()

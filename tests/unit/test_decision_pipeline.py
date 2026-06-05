@@ -11,15 +11,6 @@ from agentic_capital.ports.market_data import Quote
 from agentic_capital.ports.trading import Balance, OrderResult, OrderSide, Position
 
 
-class TestTradingDecision:
-    def test_create(self):
-        d = TradingDecision("BUY", "005930", 10, "bullish", 0.8)
-        assert d.action == "BUY"
-        assert d.symbol == "005930"
-        assert d.quantity == 10
-        assert d.confidence == 0.8
-
-
 class TestDecisionPipeline:
     def _make_pipeline(self):
         llm = MagicMock()

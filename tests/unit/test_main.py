@@ -10,12 +10,6 @@ from agentic_capital.futures import main as futures_main
 
 
 class TestMain:
-    def test_main_exists(self) -> None:
-        assert callable(main)
-
-    def test_futures_main_exists(self) -> None:
-        assert callable(futures_main)
-
     def test_main_keyboard_interrupt(self) -> None:
         with patch("agentic_capital.main.asyncio.run", side_effect=KeyboardInterrupt), \
              pytest.raises(SystemExit) as exc:

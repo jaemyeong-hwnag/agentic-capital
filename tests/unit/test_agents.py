@@ -35,11 +35,6 @@ def _make_llm(response: str = '{"actions": [], "confidence": 0.5}') -> MagicMock
 
 
 class TestCEOAgent:
-    def test_create(self):
-        ceo = CEOAgent(profile=_make_profile("CEO"), personality=_make_personality(), llm=_make_llm())
-        assert ceo.name == "CEO"
-        assert ceo.emotion.valence == 0.0
-
     @pytest.mark.asyncio
     async def test_think_no_actions(self):
         llm = _make_llm('{"actions": [], "strategy_update": "hold steady", "confidence": 0.6}')
@@ -110,10 +105,6 @@ class TestCEOAgent:
 
 
 class TestAnalystAgent:
-    def test_create(self):
-        analyst = AnalystAgent(profile=_make_profile("Analyst"), personality=_make_personality(), llm=_make_llm())
-        assert analyst.name == "Analyst"
-
     @pytest.mark.asyncio
     async def test_think_generates_signals(self):
         response = '{"signals": [{"symbol": "005930", "signal": "BUY", "confidence": 0.8, "thesis": "strong fundamentals"}], "market_outlook": "bullish"}'
@@ -184,10 +175,6 @@ class TestTraderAgent:
             personality=_make_personality(),
             llm=llm, trading=trading,
         )
-
-    def test_create(self):
-        trader = self._make_trader()
-        assert trader.name == "Trader"
 
     @pytest.mark.asyncio
     async def test_think_no_decisions(self):

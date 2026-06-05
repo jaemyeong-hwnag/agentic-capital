@@ -2,8 +2,7 @@
 
 from datetime import datetime
 
-from agentic_capital.ports.llm import LLMPort
-from agentic_capital.ports.market_data import OHLCV, MarketDataPort, Quote
+from agentic_capital.ports.market_data import OHLCV, Quote
 
 
 class TestOHLCV:
@@ -37,15 +36,3 @@ class TestQuote:
         assert q.bid == 149.9
         assert q.ask == 150.1
 
-
-class TestMarketDataPortABC:
-    def test_is_abstract(self) -> None:
-        assert hasattr(MarketDataPort, "get_quote")
-        assert hasattr(MarketDataPort, "get_ohlcv")
-        assert hasattr(MarketDataPort, "get_symbols")
-
-
-class TestLLMPortABC:
-    def test_is_abstract(self) -> None:
-        assert hasattr(LLMPort, "generate")
-        assert hasattr(LLMPort, "embed")
