@@ -1168,10 +1168,14 @@ async def run_local_finance_decision_pipeline(
                 "are sparse; return HOLD or WAIT with no_trade_reason=insufficient_edge unless "
                 "a paper BUY/SELL is justified. Use finance_context.market_signal and 15m OHLCV "
                 "as runtime evidence for short-window momentum, but never treat a single quote as "
-                "an edge. paper_trade_candidate is a deterministic paper-only runtime candidate; "
-                "if paper_trade_candidate.is_valid is true, prefer returning the same BUY/SELL, "
-                "symbol, market, quantity, and price with would_submit_order=true unless the "
-                "candidate conflicts with finance_context or safety inputs. If balance, positions, "
+                "an edge. paper_trade_candidate is a deterministic paper-only runtime candidate "
+                "created from market session, balance, positions, quote, 15m OHLCV market_signal, "
+                "and risk limits. If paper_trade_candidate.is_valid is true and required_safety "
+                "is paper-only, return the same BUY/SELL, symbol, market, quantity, and price with "
+                "would_submit_order=true. Sparse service-document evidence_ids are not a reason "
+                "to downgrade a valid paper_trade_candidate; it is sufficient runtime evidence for "
+                "a paper-only one-unit order. Return HOLD/WAIT/OBSERVE only when the candidate is "
+                "invalid or conflicts with finance_context or safety inputs. If balance, positions, "
                 "quote, risk limit, or runtime evidence is insufficient, do not return BUY or SELL."
             ),
         )
@@ -1293,6 +1297,8 @@ async def run_local_finance_decision_pipeline(
         if no_trade_reason:
             decision["no_trade_reason"] = no_trade_reason
             record["no_trade_reason"] = no_trade_reason
+        record["paper_trade_candidate"] = paper_trade_candidate
+        decision["paper_trade_candidate"] = paper_trade_candidate
 
         return {
             "ok": record.get("record_type") != "raw_model_failure",
@@ -1310,6 +1316,7 @@ async def run_local_finance_decision_pipeline(
             "sidecar_calls": sidecar_calls,
             "sidecar_latency_ms": int((time.perf_counter() - started) * 1000),
             "first_failing_stage": first_failing_stage,
+            "paper_trade_candidate": paper_trade_candidate,
         }
     except Exception as exc:
         first_failing_stage = first_failing_stage or getattr(exc, "stage", None) or "finance_sidecar_pipeline"
