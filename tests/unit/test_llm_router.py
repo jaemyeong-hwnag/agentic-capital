@@ -2038,3 +2038,140 @@ async def test_local_finance_pipeline_sends_explicit_paper_mode_to_decision_stag
     assert result["decision"]["paper_order_intent"] is None
     assert result["decision"]["no_trade_reason"] == "insufficient_edge"
     assert result["record"]["no_trade_reason"] == "insufficient_edge"
+
+
+@pytest.mark.asyncio
+async def test_local_finance_pipeline_sends_valid_paper_trade_candidate_to_decision_stage():
+    captured_decision_payload = {}
+    captured_decision_system = {}
+
+    async def collect_tool_results(_payload):
+        return {
+            "get_balance": {"total": 5_000_000.0, "available": 5_000_000.0, "currency": "KRW"},
+            "get_positions": [],
+            "get_quote": {"symbol": "122630", "market": "kr_stock", "price": 196_400.0, "currency": "KRW"},
+            "get_ohlcv": {
+                "symbol": "122630",
+                "timeframe": "15m",
+                "candles": [
+                    {"close": 195_000.0},
+                    {"close": 195_500.0},
+                    {"close": 196_000.0},
+                    {"close": 196_400.0},
+                ],
+            },
+            "market_signal": {
+                "candidate_action": "BUY",
+                "confidence": 0.42,
+                "reason": "short_window_positive_momentum",
+            },
+            "get_market_session": {
+                "market": "kr_stock",
+                "exchange": "KRX",
+                "state": "regular",
+                "session": "regular",
+                "is_open": True,
+                "regular_session": True,
+            },
+            "get_risk_limit": {
+                "max_order_value": 1_000_000.0,
+                "max_trade_value": 1_000_000.0,
+                "paper_trade_only": True,
+            },
+            "search_rag": {"evidence_ids": [], "evidence_count": 0, "evidence": []},
+            "finance_decision_payload": {
+                "balance": {"total": 5_000_000.0, "available": 5_000_000.0, "currency": "KRW"},
+                "positions": [],
+                "quote": {"symbol": "122630", "market": "kr_stock", "price": 196_400.0, "currency": "KRW"},
+                "ohlcv": {"symbol": "122630", "timeframe": "15m", "count": 4},
+                "market_signal": {
+                    "candidate_action": "BUY",
+                    "confidence": 0.42,
+                    "reason": "short_window_positive_momentum",
+                },
+                "market_session": {
+                    "market": "kr_stock",
+                    "exchange": "KRX",
+                    "state": "regular",
+                    "is_open": True,
+                    "regular_session": True,
+                },
+                "risk_limit": {"max_order_value": 1_000_000.0, "max_trade_value": 1_000_000.0},
+                "rag": {"evidence_ids": [], "evidence_count": 0, "evidence": []},
+            },
+        }
+
+    async def fake_stage(*, model, payload, system):
+        if model == local_finance_runtime.FINANCE_RAG_QUERY_MODEL:
+            return {
+                "query": "122630 paper candidate",
+                "queries": ["122630 paper candidate"],
+                "symbol": "122630",
+                "market": "kr_stock",
+                "requires_fresh_data": True,
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_TOOL_PLANNER_MODEL:
+            return {
+                "tool_plan": [
+                    {"tool": "search_rag"},
+                    {"tool": "get_market_session"},
+                    {"tool": "get_balance"},
+                    {"tool": "get_positions"},
+                    {"tool": "get_quote"},
+                    {"tool": "get_ohlcv"},
+                    {"tool": "get_risk_limit"},
+                ],
+                "forbidden_tools": ["submit_order"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        if model == local_finance_runtime.FINANCE_DECISION_MODEL:
+            captured_decision_payload.update(payload)
+            captured_decision_system["system"] = system
+            candidate = payload["paper_trade_candidate"]
+            assert candidate["is_valid"] is True
+            assert candidate["action"] == "BUY"
+            assert candidate["symbol"] == "122630"
+            assert payload["finance_context"]["paper_trade_candidate"] == candidate
+            return {
+                "action": candidate["action"],
+                "symbol": candidate["symbol"],
+                "market": candidate["market"],
+                "quantity": candidate["quantity"],
+                "price": candidate["price"],
+                "confidence": candidate["confidence"],
+                "tool_result_ids": candidate["tool_result_ids"],
+                "evidence_ids": [],
+                "would_submit_order": True,
+                "paper_order_intent": {
+                    "side": candidate["action"],
+                    "quantity": candidate["quantity"],
+                    "estimated_price": candidate["price"],
+                },
+                "reason": candidate["reason"],
+            }, {"model": model, "latency_ms": 1, "ok": True}
+        return {"risk_flags": [], "hard_fail": False}, {"model": model, "latency_ms": 1, "ok": True}
+
+    with patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._call_finance_stage",
+        AsyncMock(side_effect=fake_stage),
+    ), patch(
+        "agentic_capital.adapters.llm.local_finance_runtime._search_rag",
+        AsyncMock(return_value=([], {"model": "rag_search", "latency_ms": 1, "ok": True})),
+    ):
+        result = await local_finance_runtime.run_local_finance_decision_pipeline(
+            request_id="req-paper-candidate",
+            user_question="122630 지금 paper 매수 후보?",
+            agent_state={"deployment_mode": "paper", "live_order_enabled": False, "symbol": "122630"},
+            required_safety={
+                "paper_trade_only": True,
+                "kis_is_paper": True,
+                "futures_live_orders_enabled": False,
+            },
+            collect_tool_results=collect_tool_results,
+        )
+
+    assert "paper_trade_candidate.is_valid" in captured_decision_system["system"]
+    assert captured_decision_payload["paper_trade_candidate"]["is_valid"] is True
+    assert result["record_type"] == "finance_paper_shadow_decision"
+    assert result["record"]["action"] == "BUY"
+    assert result["record"]["would_submit_order"] is True
+    assert result["record"]["symbol"] == "122630"

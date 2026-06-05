@@ -527,6 +527,166 @@ def _paper_runtime_context(
     }
 
 
+def _runtime_float(source: Any, *keys: str) -> float:
+    if not isinstance(source, dict):
+        return 0.0
+    for key in keys:
+        try:
+            value = float(source.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _runtime_position_quantity_and_avg(
+    positions: Any,
+    *,
+    symbol: str,
+    market: str,
+) -> tuple[float, float]:
+    if not isinstance(positions, list):
+        return 0.0, 0.0
+    target_symbol = symbol.upper()
+    target_market = market.lower()
+    for item in positions:
+        if not isinstance(item, dict):
+            continue
+        item_symbol = str(item.get("symbol") or item.get("ticker") or "").upper()
+        item_market = str(item.get("market") or "").lower()
+        if item_symbol != target_symbol:
+            continue
+        if target_market and item_market and item_market != target_market:
+            continue
+        quantity = _runtime_float(item, "quantity", "qty", "shares", "hldg_qty")
+        avg_price = _runtime_float(item, "avg_price", "average_price", "pchs_avg_pric", "cost_basis")
+        return quantity, avg_price
+    return 0.0, 0.0
+
+
+def _runtime_market_open(session: Any) -> bool:
+    if not isinstance(session, dict):
+        return False
+    if session.get("is_open") is False:
+        return False
+    state = str(session.get("state") or session.get("session") or "").lower()
+    if state in {"closed", "halted", "suspended"}:
+        return False
+    if state in {"open", "regular", "regular_open", "pre", "preopen", "post", "after_hours", "night"}:
+        return True
+    return session.get("is_open") is True or session.get("regular_session") is True
+
+
+def _paper_trade_candidate_from_runtime(
+    *,
+    tool_results: dict[str, Any],
+    finance_context: dict[str, Any],
+    paper_runtime_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarize the strongest paper-only runtime trade candidate for the decision model."""
+    if not paper_runtime_context.get("paper_trading_mode"):
+        return {"is_valid": False, "reason": "not_paper_trading_mode"}
+
+    required = set(REQUIRED_FINANCE_TOOL_RESULT_IDS) | {"get_ohlcv", "market_signal"}
+    available = set(_available_tool_result_ids(tool_results))
+    missing = sorted(required - available)
+    if missing:
+        return {"is_valid": False, "reason": "missing_runtime_tool_results", "missing_tool_results": missing}
+
+    quote = tool_results.get("get_quote") if isinstance(tool_results.get("get_quote"), dict) else {}
+    signal = tool_results.get("market_signal") if isinstance(tool_results.get("market_signal"), dict) else {}
+    session = tool_results.get("get_market_session") if isinstance(tool_results.get("get_market_session"), dict) else {}
+    balance = tool_results.get("get_balance") if isinstance(tool_results.get("get_balance"), dict) else {}
+    risk_limit = tool_results.get("get_risk_limit") if isinstance(tool_results.get("get_risk_limit"), dict) else {}
+    positions = tool_results.get("get_positions", [])
+
+    if not quote and isinstance(finance_context.get("quote"), dict):
+        quote = finance_context["quote"]
+    if not signal and isinstance(finance_context.get("market_signal"), dict):
+        signal = finance_context["market_signal"]
+    if not session and isinstance(finance_context.get("market_session"), dict):
+        session = finance_context["market_session"]
+    if not balance and isinstance(finance_context.get("balance"), dict):
+        balance = finance_context["balance"]
+    if not risk_limit and isinstance(finance_context.get("risk_limit"), dict):
+        risk_limit = finance_context["risk_limit"]
+    if not positions and isinstance(finance_context.get("positions"), list):
+        positions = finance_context["positions"]
+
+    symbol = str(quote.get("symbol") or quote.get("ticker") or finance_context.get("symbol") or "").strip()
+    market = str(quote.get("market") or finance_context.get("market") or "").strip() or "kr_stock"
+    price = _runtime_float(quote, "price", "last", "close")
+    if not symbol or price <= 0:
+        return {"is_valid": False, "reason": "missing_quote_symbol_or_price"}
+    if not _runtime_market_open(session):
+        return {"is_valid": False, "reason": "market_not_open", "symbol": symbol, "market": market}
+
+    signal_action = str(signal.get("candidate_action") or "").upper()
+    signal_confidence = _runtime_float(signal, "confidence")
+    owned_qty, avg_price = _runtime_position_quantity_and_avg(positions, symbol=symbol, market=market)
+    max_notional = _runtime_float(risk_limit, "max_order_value", "max_trade_value", "per_trade_limit", "max_notional")
+    available_cash = _runtime_float(balance, "available", "available_cash", "cash")
+
+    if owned_qty >= 1 and avg_price > 0 and price > avg_price * 1.001:
+        return {
+            "is_valid": True,
+            "action": "SELL",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": price,
+            "notional": price,
+            "confidence": min(0.6, max(0.25, round((price - avg_price) / avg_price, 4) * 20)),
+            "reason": "paper_profitable_position_close_candidate",
+            "owned_quantity": owned_qty,
+            "avg_price": avg_price,
+            "tool_result_ids": sorted(available),
+        }
+
+    if signal_action == "BUY" and signal_confidence > 0:
+        if max_notional > 0 and price > max_notional:
+            return {
+                "is_valid": False,
+                "reason": "candidate_exceeds_risk_limit",
+                "symbol": symbol,
+                "market": market,
+                "price": price,
+                "max_notional": max_notional,
+            }
+        if available_cash > 0 and price > available_cash:
+            return {
+                "is_valid": False,
+                "reason": "candidate_exceeds_available_cash",
+                "symbol": symbol,
+                "market": market,
+                "price": price,
+                "available_cash": available_cash,
+            }
+        return {
+            "is_valid": True,
+            "action": "BUY",
+            "symbol": symbol,
+            "market": market,
+            "quantity": 1,
+            "price": price,
+            "notional": price,
+            "confidence": signal_confidence,
+            "reason": str(signal.get("reason") or "runtime_market_signal_buy"),
+            "signal": signal,
+            "tool_result_ids": sorted(available),
+        }
+
+    return {
+        "is_valid": False,
+        "reason": "no_runtime_trade_candidate",
+        "symbol": symbol,
+        "market": market,
+        "signal_action": signal_action,
+        "signal_confidence": signal_confidence,
+    }
+
+
 def _compact_tool_plan_payload(tool_plan: dict[str, Any]) -> dict[str, Any]:
     plan = tool_plan.get("tool_plan") or tool_plan.get("tools") or tool_plan.get("tool_calls") or []
     compact_plan: list[dict[str, Any]] = []
@@ -969,6 +1129,13 @@ async def run_local_finance_decision_pipeline(
                 **paper_runtime_context,
                 "tool_result_ids": compact_finance_context.get("tool_result_ids") or tool_result_ids,
             }
+        paper_trade_candidate = _paper_trade_candidate_from_runtime(
+            tool_results=tool_results,
+            finance_context=compact_finance_context if isinstance(compact_finance_context, dict) else {},
+            paper_runtime_context=paper_runtime_context,
+        )
+        if isinstance(compact_finance_context, dict):
+            compact_finance_context["paper_trade_candidate"] = paper_trade_candidate
         compact_base_payload = {
             "request_id": request_id,
             "user_question": _summary_text(user_question, limit=300),
@@ -983,6 +1150,7 @@ async def run_local_finance_decision_pipeline(
             "tool_plan": _compact_tool_plan_payload(tool_plan if isinstance(tool_plan, dict) else {}),
             "tool_results": _tool_result_stage_summary(tool_results),
             "finance_context": compact_finance_context,
+            "paper_trade_candidate": paper_trade_candidate,
             "evidence": compact_evidence[:3],
             "evidence_count": len(evidence),
             "evidence_ids": evidence_ids,
@@ -1000,8 +1168,11 @@ async def run_local_finance_decision_pipeline(
                 "are sparse; return HOLD or WAIT with no_trade_reason=insufficient_edge unless "
                 "a paper BUY/SELL is justified. Use finance_context.market_signal and 15m OHLCV "
                 "as runtime evidence for short-window momentum, but never treat a single quote as "
-                "an edge. If balance, positions, quote, risk limit, or runtime evidence is "
-                "insufficient, do not return BUY or SELL."
+                "an edge. paper_trade_candidate is a deterministic paper-only runtime candidate; "
+                "if paper_trade_candidate.is_valid is true, prefer returning the same BUY/SELL, "
+                "symbol, market, quantity, and price with would_submit_order=true unless the "
+                "candidate conflicts with finance_context or safety inputs. If balance, positions, "
+                "quote, risk limit, or runtime evidence is insufficient, do not return BUY or SELL."
             ),
         )
         sidecar_calls.append(meta)
