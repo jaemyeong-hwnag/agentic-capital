@@ -86,6 +86,39 @@ def test_finance_paper_order_plan_allows_overseas_buy_during_premarket():
     assert plan["price"] == 185.0
 
 
+def test_finance_paper_order_plan_uses_limit_price_for_kr_stock_buy():
+    with (
+        patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),
+        patch("agentic_capital.graph.workflow.settings.futures_live_orders_enabled", False),
+        patch("agentic_capital.graph.workflow.settings.local_finance_paper_order_execution_enabled", True),
+    ):
+        plan = _finance_paper_order_plan(
+            record={
+                "paper_trade_only": True,
+                "within_risk_limit": True,
+                "would_submit_order": True,
+                "market": "kr_stock",
+                "symbol": "122630",
+            },
+            decision={"action": "BUY", "symbol": "122630", "market": "kr_stock", "quantity": 1},
+            tool_results={
+                **_tool_results(),
+                "get_quote": {"symbol": "122630", "price": 196610.0, "market": "kr_stock"},
+                "get_balance": {"available": 5_000_000.0},
+                "get_risk_limit": {"max_order_value": 5_000_000.0},
+            },
+            primary_symbol="122630",
+            primary_market="kr_stock",
+            open_markets=["KRX"],
+            capital_limit=5_000_000.0,
+        )
+
+    assert plan is not None
+    assert plan["market"] == "kr_stock"
+    assert plan["price"] == 196610.0
+    assert plan["estimated_price"] == 196610.0
+
+
 def test_finance_paper_order_plan_allows_overseas_sell_when_position_owned():
     with (
         patch("agentic_capital.graph.workflow.settings.kis_is_paper", True),

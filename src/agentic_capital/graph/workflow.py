@@ -847,12 +847,14 @@ def _finance_paper_order_plan(
         quantity = min(quantity, owned)
     if quantity <= 0:
         return None
+    if market != _PAPER_CALL_OPTION_MARKET and price <= 0:
+        return None
     plan = {
         "action": action,
         "symbol": symbol,
         "market": market,
         "quantity": quantity,
-        "price": price if market not in {"kr_stock", _PAPER_CALL_OPTION_MARKET} else None,
+        "price": price if market != _PAPER_CALL_OPTION_MARKET else None,
         "estimated_price": price,
         "exchange": decision.get("exchange") or record.get("exchange") or _tool_market_exchange(tool_results),
         "position_effect": "close" if action == "SELL" else "open",

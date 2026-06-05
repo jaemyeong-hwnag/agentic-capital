@@ -943,10 +943,10 @@ class KISTradingAdapter(TradingPort):
                     quantity=broker_order.quantity,
                     ord_dvsn=body["ORD_DVSN"],
                 )
-                if self._session.is_paper and broker_order.price and (
-                    self._domestic_paper_cash_reject(data)
-                    or str(broker_order.exchange or "").upper() == "NXT"
-                    or self._has_local_paper_domestic_close_position(broker_order)
+                if (
+                    self._session.is_paper
+                    and broker_order.price
+                    and self._can_fill_rejected_paper_domestic_order(broker_order, data)
                 ):
                     return self._submit_paper_domestic_order(broker_order, broker_reject=data)
                 return OrderResult(
@@ -979,6 +979,15 @@ class KISTradingAdapter(TradingPort):
     def _domestic_paper_cash_reject(data: dict[str, Any]) -> bool:
         msg = str(data.get("msg1") or "")
         return str(data.get("msg_cd") or "") == "40250000" or "주문가능금액이 부족" in msg
+
+    def _can_fill_rejected_paper_domestic_order(self, order: Order, data: dict[str, Any]) -> bool:
+        if order.side == OrderSide.BUY:
+            return True
+        return (
+            self._domestic_paper_cash_reject(data)
+            or str(order.exchange or "").upper() == "NXT"
+            or self._has_local_paper_domestic_close_position(order)
+        )
 
     def _has_local_paper_domestic_close_position(self, order: Order) -> bool:
         if order.side != OrderSide.SELL:

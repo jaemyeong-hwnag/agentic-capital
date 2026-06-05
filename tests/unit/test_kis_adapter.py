@@ -333,6 +333,35 @@ class TestKISTradingAdapter:
         assert any(p.symbol == "114800" and p.exchange == "NXT" and p.quantity == 1 for p in positions)
 
     @pytest.mark.asyncio
+    async def test_submit_domestic_paper_buy_reject_with_price_fills_locally(self):
+        adapter = self._make_adapter(is_paper=True)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "APBK9997",
+            "msg1": "KIS paper rejected a priced domestic paper buy.",
+        }
+        adapter._session.post = AsyncMock(return_value=mock_response)
+        adapter._get_domestic_positions = AsyncMock(return_value=[])
+
+        result = await adapter.submit_order(Order(
+            symbol="122630",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=1,
+            price=196610,
+            market=Market.KR_STOCK,
+            exchange="KRX",
+        ))
+
+        assert result.status == "filled"
+        assert result.order_id.startswith("PAPER-KR-")
+        assert result.metadata["paper_virtual"] is True
+        assert result.metadata["broker_reject_msg_cd"] == "APBK9997"
+        positions = await adapter.get_positions()
+        assert any(p.symbol == "122630" and p.quantity == 1 for p in positions)
+
+    @pytest.mark.asyncio
     async def test_submit_domestic_paper_sell_reject_closes_local_position(self):
         adapter = self._make_adapter(is_paper=True)
         adapter._submit_paper_domestic_order(Order(
