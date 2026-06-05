@@ -178,7 +178,7 @@ http://127.0.0.1:18080/health
 
 모의투자 체결 확인은 DB의 `simulation_runs`, `agent_cycles`, `agent_decisions`, `trades`, `positions`, `company_snapshots`로 한다. 수동 주문으로 성공을 만들지 않는다.
 
-Trader finance cycle은 `LOCAL_FINANCE_DEFAULT_SYMBOLS`의 열린 시장 후보를 read-only quote/OHLCV로 먼저 스캔한다. 15m runtime signal이 BUY인 후보가 있으면 cycle 순번의 primary symbol보다 우선하며, 기본 유니버스에는 상승장 후보와 하락장 대응 KR ETF 후보(`252670`, `251340`, `114800`)가 함께 들어 있다. decision stage에는 runtime 신호/가격/현금/리스크/보유수량을 합친 `paper_trade_candidate`가 전달되며, 이 후보가 유효하면 finance model이 직접 `BUY`/`SELL` + `would_submit_order=true`를 낼 수 있다. `NXT_AFTER` 같은 `NXT_*`/`KRX_*` 세션 값은 한국 주식 후보의 열린 경로와 paper-only scout 주문 게이트로 처리한다. KIS paper API가 `NXT` after-session scout 주문 또는 로컬 paper 포지션 SELL close를 거절하면 실전 주문으로 전환하지 않고 paper safety 안에서 `PAPER-KR-*` 로컬 체결과 포지션으로 기록한다. KR 후보 가격이 500원 미만이면 조정가/저가 왜곡 가능성이 있어 BUY signal ranking에서 제외한다.
+Trader finance cycle은 `LOCAL_FINANCE_DEFAULT_SYMBOLS`의 열린 시장 후보를 read-only quote/OHLCV로 먼저 스캔한다. 15m runtime signal이 BUY인 후보가 있으면 cycle 순번의 primary symbol보다 우선하며, 기본 유니버스에는 상승장 후보와 하락장 대응 KR ETF 후보(`252670`, `251340`, `114800`)가 함께 들어 있다. decision stage에는 runtime 신호/가격/현금/리스크/보유수량을 합친 `paper_trade_candidate`가 전달되며, 이 후보가 유효하면 sparse RAG evidence와 무관하게 paper-only 1단위 주문에 충분한 runtime evidence로 취급하고 finance model이 직접 `BUY`/`SELL` + `would_submit_order=true`를 낼 수 있다. `NXT_AFTER` 같은 `NXT_*`/`KRX_*` 세션 값은 한국 주식 후보의 열린 경로와 paper-only scout 주문 게이트로 처리한다. KIS paper API가 `NXT` after-session scout 주문 또는 로컬 paper 포지션 SELL close를 거절하면 실전 주문으로 전환하지 않고 paper safety 안에서 `PAPER-KR-*` 로컬 체결과 포지션으로 기록한다. KR 후보 가격이 500원 미만이면 조정가/저가 왜곡 가능성이 있어 BUY signal ranking에서 제외한다.
 
 ## 환경 오버라이드
 
